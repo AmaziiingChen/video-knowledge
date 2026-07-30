@@ -8,7 +8,7 @@
     />
 
     <div ref="workspaceFrame" class="workspace-frame">
-      <div v-if="activeView === 'wechat' || activeView === 'campus' || activeView === 'creator' || activeView === 'reports'" class="workspace-single-pane">
+      <div v-if="isSinglePaneWorkspaceView(activeView)" class="workspace-single-pane">
         <slot name="editor" />
       </div>
       <template v-else>
@@ -103,6 +103,7 @@ import {
   resolvePaneDragTransition,
   revealProgressForDistance,
 } from './splitterDragState.js'
+import { isSinglePaneWorkspaceView } from './workspaceViewLoading.js'
 
 const props = defineProps({
   activeView: {

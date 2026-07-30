@@ -65,7 +65,7 @@
               <SvgMaskIcon :src="telegramIcon" :size="18" />
             </button>
           </el-tooltip>
-          <el-tooltip v-if="!['wechat', 'campus', 'creator', 'rss', 'reports'].includes(activeView)" :content="primarySidebarOpen ? '隐藏左侧栏' : '显示左侧栏'" placement="bottom">
+          <el-tooltip v-if="!isSinglePaneWorkspaceView(activeView)" :content="primarySidebarOpen ? '隐藏左侧栏' : '显示左侧栏'" placement="bottom">
             <button
               class="topbar-icon-button layout-toggle-button"
               type="button"
@@ -938,7 +938,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
@@ -959,6 +959,10 @@ import EditorHost from './workbench/EditorHost.vue'
 import ProcessLogDock from './workbench/ProcessLogDock.vue'
 import PrimarySidebar from './workbench/PrimarySidebar.vue'
 import { normalizeWorkspacePaneVisibility } from './workbench/paneVisibilityState.js'
+import {
+  isSinglePaneWorkspaceView,
+  preloadWorkspaceViewModules,
+} from './workbench/workspaceViewLoading.js'
 import ReportGenerationDialog from './features/reports/ReportGenerationDialog.vue'
 import { formatReportTaskWindow } from './features/reports/reportGenerationPresentation.js'
 import SourceGroupEditorDialog from './features/reports/SourceGroupEditorDialog.vue'
@@ -973,12 +977,26 @@ import { enqueueSourceSyncTask, observeSourceSyncTask } from './utils/sourceSync
 import { promptTaskContracts, promptTemplateDisplayName } from './config/promptInterface'
 import { WECHAT_COVER_STYLE_OPTIONS } from './config/wechatCoverStyles'
 
-const WeChatManager = defineAsyncComponent(() => import('./features/wechat/WeChatManager.vue'))
-const CampusManager = defineAsyncComponent(() => import('./features/campus/CampusManager.vue'))
-const CreatorWorkspace = defineAsyncComponent(() => import('./features/creator/CreatorWorkspace.vue'))
-const RssWorkspace = defineAsyncComponent(() => import('./features/rss/RssWorkspace.vue'))
-const ReportsWorkspace = defineAsyncComponent(() => import('./features/reports/ReportsWorkspace.vue'))
-const KnowledgeWorkspace = defineAsyncComponent(() => import('./features/knowledge/KnowledgeWorkspace.vue'))
+const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
+const loadCampusManager = () => import('./features/campus/CampusManager.vue')
+const loadCreatorWorkspace = () => import('./features/creator/CreatorWorkspace.vue')
+const loadRssWorkspace = () => import('./features/rss/RssWorkspace.vue')
+const loadReportsWorkspace = () => import('./features/reports/ReportsWorkspace.vue')
+const loadKnowledgeWorkspace = () => import('./features/knowledge/KnowledgeWorkspace.vue')
+const workspaceViewModuleLoaders = [
+  loadWeChatManager,
+  loadCampusManager,
+  loadCreatorWorkspace,
+  loadRssWorkspace,
+  loadReportsWorkspace,
+  loadKnowledgeWorkspace,
+]
+const WeChatManager = defineAsyncComponent(loadWeChatManager)
+const CampusManager = defineAsyncComponent(loadCampusManager)
+const CreatorWorkspace = defineAsyncComponent(loadCreatorWorkspace)
+const RssWorkspace = defineAsyncComponent(loadRssWorkspace)
+const ReportsWorkspace = defineAsyncComponent(loadReportsWorkspace)
+const KnowledgeWorkspace = defineAsyncComponent(loadKnowledgeWorkspace)
 const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
 
 const {
@@ -4563,7 +4581,7 @@ function imageUsageTooltipLines(items) {
 }
 
 const showPrimaryPane = computed(() => {
-  return !['wechat', 'campus', 'rss', 'reports'].includes(activeView.value) && primarySidebarOpen.value
+  return !isSinglePaneWorkspaceView(activeView.value) && primarySidebarOpen.value
 })
 
 const showContextPane = computed(() => {
@@ -4692,6 +4710,14 @@ watch(processLogHeight, (value) => {
 
 watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
   localStorage.setItem(WORKSPACE_PANE_VISIBILITY_KEY, JSON.stringify({ primary, context }))
+})
+
+onMounted(() => {
+  // The desktop development build is served directly from ``dist``. A later
+  // build replaces hashed lazy chunks on disk while the current window still
+  // references the old names. Load the lightweight workspace modules after
+  // the first paint so view switching remains an in-memory operation.
+  void preloadWorkspaceViewModules(workspaceViewModuleLoaders)
 })
 
 onBeforeUnmount(() => {
