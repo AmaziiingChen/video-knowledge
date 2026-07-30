@@ -1,0 +1,14 @@
+{
+  "expectations": [
+    {"text": "OCR is placed before canonical source-text persistence, not only in a UI preview.", "passed": true, "evidence": "Response saves enriched body_text before sending it to the summary and reports."},
+    {"text": "The solution uses bounded concurrency and preserves original DOM order.", "passed": true, "evidence": "Response uses a semaphore and asyncio.gather / executor.map while retaining node positions."},
+    {"text": "The token is not returned by GET endpoints or exposed in source/logs.", "passed": true, "evidence": "Response limits GET settings output and describes private token storage and log exclusion."},
+    {"text": "Daily and weekly reports use the complete enriched article body rather than a short summary excerpt.", "passed": true, "evidence": "Response requires reports to use complete source text and not a summary fragment."}
+  ],
+  "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0},
+  "execution_metrics": {"tool_calls": {"estimate": 6}, "total_tool_calls": 6, "errors_encountered": 0, "output_chars": 0, "transcript_chars": 0},
+  "timing": {"total_duration_seconds": 0.0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []},
+  "eval_feedback": {"suggestions": [{"reason": "All assertions passed in both configurations. Add a cache-specific test that verifies a partial OCR failure marks the article attempted and prevents infinite refetching."}], "overall": "Core assertions are valid but not sufficiently discriminating on their own."}
+}

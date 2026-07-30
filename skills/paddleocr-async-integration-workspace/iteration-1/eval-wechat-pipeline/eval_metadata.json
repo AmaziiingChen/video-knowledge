@@ -1,0 +1,11 @@
+{
+  "eval_id": 1,
+  "eval_name": "wechat-pipeline",
+  "prompt": "我们的 FastAPI 服务抓取微信公众号 HTML 后只拿到纯文本，文章里经常有表格截图。请接入 PaddleOCR：图片并发但按正文顺序回填，识别文本必须进入 DeepSeek 总结和后续日报。token 只能本机保存。",
+  "assertions": [
+    "OCR is placed before canonical source-text persistence, not only in a UI preview.",
+    "The solution uses bounded concurrency and preserves original DOM order.",
+    "The token is not returned by GET endpoints or exposed in source/logs.",
+    "Daily and weekly reports use the complete enriched article body rather than a short summary excerpt."
+  ]
+}

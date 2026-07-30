@@ -1,0 +1,6 @@
+{
+  "total_tokens": null,
+  "duration_ms": null,
+  "total_duration_seconds": 0.0,
+  "note": "The orchestration runtime did not expose per-agent token or duration data."
+}

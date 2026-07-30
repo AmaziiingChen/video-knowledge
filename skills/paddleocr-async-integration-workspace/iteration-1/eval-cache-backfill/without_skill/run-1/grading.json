@@ -1,0 +1,14 @@
+{
+  "expectations": [
+    {"text": "Defines non-sensitive metadata that distinguishes not-configured/not-attempted from a completed OCR attempt.", "passed": true, "evidence": "Response has configuration revision, cache row status, and secret-excluding fields."},
+    {"text": "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.", "passed": false, "evidence": "Response permits retryable_failed rows to be queued again after next_retry_at. It is a valid queue design, but does not meet this skill's intended one-attempt cache invariant for partial image failure."},
+    {"text": "Keeps the enriched canonical source text as the report/summarization input.", "passed": true, "evidence": "Response uses a derived source_text to feed downstream consumers and rebuilds it in image ordinal order."},
+    {"text": "Includes deterministic tests for one-time refresh, partial failure, order, and secret non-disclosure.", "passed": true, "evidence": "Response provides fixed-clock tests for queue deduplication, retries, order, secret persistence boundaries, and downstream stability."}
+  ],
+  "summary": {"passed": 3, "failed": 1, "total": 4, "pass_rate": 0.75},
+  "execution_metrics": {"tool_calls": {"estimate": 0}, "total_tool_calls": 0, "errors_encountered": 0, "output_chars": 0, "transcript_chars": 0},
+  "timing": {"total_duration_seconds": 0.0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []},
+  "eval_feedback": {"suggestions": [{"assertion": "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.", "reason": "The baseline selected a richer queue/retry architecture than the product constraint requires, demonstrating why the skill states the simpler one-attempt invariant explicitly."}], "overall": "The cache-specific assertion discriminates between a correct general OCR architecture and this product's desired low-maintenance behavior."}
+}

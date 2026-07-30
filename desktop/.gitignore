@@ -1,0 +1,4 @@
+backend/
+build/
+douk/
+*.spec

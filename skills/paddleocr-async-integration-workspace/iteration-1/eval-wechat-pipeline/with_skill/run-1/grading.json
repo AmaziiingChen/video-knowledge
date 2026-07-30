@@ -1,0 +1,14 @@
+{
+  "expectations": [
+    {"text": "OCR is placed before canonical source-text persistence, not only in a UI preview.", "passed": true, "evidence": "Response places OCR after HTML cleanup and before article_info.body_text cache persistence, then traces it into summary, search, Q&A, and reports."},
+    {"text": "The solution uses bounded concurrency and preserves original DOM order.", "passed": true, "evidence": "Response uses a maximum of five workers, executor.map/recognize_many_ordered, and explicitly mutates the DOM in source order."},
+    {"text": "The token is not returned by GET endpoints or exposed in source/logs.", "passed": true, "evidence": "Response specifies a password PUT flow, owner-only local storage, GET status-only output, and excludes the token from logs, metadata, exports, and tests."},
+    {"text": "Daily and weekly reports use the complete enriched article body rather than a short summary excerpt.", "passed": true, "evidence": "Response requires wechat_reports._source_material to load the complete enriched source text and rejects use of a summary or fixed-length excerpt."}
+  ],
+  "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0},
+  "execution_metrics": {"tool_calls": {"estimate": 11}, "total_tool_calls": 11, "errors_encountered": 0, "output_chars": 0, "transcript_chars": 0},
+  "timing": {"total_duration_seconds": 0.0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []},
+  "eval_feedback": {"suggestions": [{"reason": "All assertions passed in both configurations. The next eval should target cache idempotency and partial OCR failure, where a generic plan is less likely to specify an actionable invariant."}], "overall": "Core assertions are valid but not sufficiently discriminating on their own."}
+}

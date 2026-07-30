@@ -1,0 +1,159 @@
+/*
+ * KnowledgeHub design token snapshot
+ *
+ * Curated from frontend/src/styles/app.css and representative workbench,
+ * settings, cache, WeChat, and assistant surfaces on 2026-07-16.
+ * This file is documentation/starter material and is not imported by the app.
+ */
+
+:root {
+  /* Existing semantic color contract: Everforest (default). */
+  --vk-bg-quiet: #fdf6e3;
+  --vk-bg-center: #fcf8ed;
+  --vk-bg-panel: #fffdf7;
+  --vk-bg-hover: #f6eedb;
+  --vk-border: #eaddca;
+  --vk-divider-subtle: color-mix(in srgb, var(--vk-accent) 18%, var(--vk-border));
+  --vk-accent: #93b259;
+  --vk-accent-strong: #6f8d3e;
+  --vk-text: #2f2a1f;
+  --vk-muted: #786d5a;
+  --vk-action-bg: color-mix(in srgb, var(--vk-accent-strong) 72%, var(--vk-text));
+  --vk-action-fg: var(--vk-bg-panel);
+  --vk-theme-accent: #93b259;
+  --vk-theme-bg: #fdf6e3;
+  --vk-theme-fg: #2f2a1f;
+
+  /* Shared feedback colors; feature-local literals still remain to migrate. */
+  --vk-success: var(--vk-accent-strong);
+  --vk-warning: #a9782b;
+  --vk-danger: #b85c50;
+  --vk-error-text: #b42318;
+
+  /* Existing font families. */
+  --vk-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --vk-font-brand: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --vk-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Shared interface typography contract now present in app.css. */
+  --vk-type-display-size: 1.3125rem;
+  --vk-type-heading-size: 0.9375rem;
+  --vk-type-reading-size: 0.875rem;
+  --vk-type-body-size: 0.8125rem;
+  --vk-type-label-size: 0.75rem;
+  --vk-type-meta-size: 0.6875rem;
+  --vk-type-micro-size: 0.625rem;
+  --vk-leading-display: 1.2;
+  --vk-leading-heading: 1.3;
+  --vk-leading-reading: 1.65;
+  --vk-leading-body: 1.55;
+  --vk-leading-label: 1.4;
+  --vk-tracking-display: -0.02em;
+  --vk-tracking-heading: -0.01em;
+  --vk-tracking-body: 0;
+  --vk-tracking-meta: 0.01em;
+
+  --vk-space-1: 2px;
+  --vk-space-2: 4px;
+  --vk-space-3: 6px;
+  --vk-space-4: 8px;
+  --vk-space-5: 10px;
+  --vk-space-6: 12px;
+  --vk-space-7: 14px;
+  --vk-space-8: 16px;
+  --vk-space-9: 18px;
+  --vk-space-10: 22px;
+  --vk-space-11: 24px;
+  --vk-space-12: 32px;
+  --vk-space-13: 38px;
+
+  --vk-radius-structural: 0;
+  --vk-radius-compact: 4px;
+  --vk-radius-control: 8px;
+  --vk-radius-input: 10px;
+  --vk-radius-surface: 12px;
+  --vk-radius-feature: 14px;
+  --vk-radius-pill: 999px;
+
+  --vk-control-height-compact: 28px;
+  --vk-control-height-default: 34px;
+  --vk-control-height-comfortable: 40px;
+  --vk-opacity-disabled: 0.48;
+  --vk-opacity-loading: 0.56;
+
+  --vk-border-width: 1px;
+  --vk-shadow-surface: 0 1px 0 color-mix(in srgb, white 58%, transparent) inset;
+  --vk-shadow-floating: 0 10px 26px color-mix(in srgb, var(--vk-text) 12%, transparent);
+  --vk-shadow-overlay: 0 16px 38px color-mix(in srgb, var(--vk-text) 14%, transparent);
+  --vk-focus-ring: 0 0 0 1px var(--vk-accent) inset,
+    0 0 0 3px color-mix(in srgb, var(--vk-accent) 18%, transparent);
+
+  /* Existing motion contract. */
+  --vk-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --vk-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --vk-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --vk-motion-fast: 120ms;
+  --vk-motion-standard: 160ms;
+  --vk-motion-panel: 220ms;
+}
+
+/* Existing theme seeds. Full surface derivations remain in app.css. */
+html[data-theme="rose-pine"] {
+  --vk-theme-accent: #d7827e;
+  --vk-theme-bg: #faf4ed;
+  --vk-theme-fg: #575279;
+  --vk-muted: color-mix(in srgb, var(--vk-text) 84%, var(--vk-bg-quiet));
+  --vk-action-bg: color-mix(in srgb, var(--vk-accent-strong) 56%, var(--vk-text));
+}
+
+html[data-theme="raycast"] {
+  --vk-theme-accent: #ff6363;
+  --vk-theme-bg: #ffffff;
+  --vk-theme-fg: #030303;
+}
+
+html[data-theme="proof"] {
+  --vk-theme-accent: #3d755d;
+  --vk-theme-bg: #f5f3ed;
+  --vk-theme-fg: #2f312d;
+  --vk-muted: color-mix(in srgb, var(--vk-text) 72%, var(--vk-bg-quiet));
+}
+
+html[data-theme="one"] {
+  --vk-theme-accent: #526fff;
+  --vk-theme-bg: #fafafa;
+  --vk-theme-fg: #383a42;
+  --vk-muted: color-mix(in srgb, var(--vk-text) 72%, var(--vk-bg-quiet));
+}
+
+html[data-theme="notion"] {
+  --vk-theme-accent: #3183d8;
+  --vk-theme-bg: #ffffff;
+  --vk-theme-fg: #37352f;
+  --vk-muted: color-mix(in srgb, var(--vk-text) 72%, var(--vk-bg-quiet));
+}
+
+html[data-theme="github"] {
+  --vk-theme-accent: #0969da;
+  --vk-theme-bg: #ffffff;
+  --vk-theme-fg: #1f2328;
+}
+
+html[data-theme="codex"] {
+  --vk-theme-accent: #0169cc;
+  --vk-theme-bg: #ffffff;
+  --vk-theme-fg: #0d0d0d;
+}
+
+html[data-theme="catppuccin"] {
+  --vk-theme-accent: #8839ef;
+  --vk-theme-bg: #eff1f5;
+  --vk-theme-fg: #4c4f69;
+  --vk-muted: color-mix(in srgb, var(--vk-text) 84%, var(--vk-bg-quiet));
+}
+
+html[data-theme="absolutely"] {
+  --vk-theme-accent: #cc7d5e;
+  --vk-theme-bg: #f9f9f7;
+  --vk-theme-fg: #2d2d2b;
+}

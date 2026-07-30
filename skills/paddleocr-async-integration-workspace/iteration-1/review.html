@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "paddleocr-async-integration", "runs": [{"id": "eval-cache-backfill-with_skill-run-1", "prompt": "(No prompt found)", "eval_id": null, "outputs": [{"name": "response.md", "type": "text", "content": "# OCR \u65e7\u7f13\u5b58\u56de\u586b\uff1a\u4e00\u6b21\u6027\u3001\u53ef\u6062\u590d\u3001\u4e0b\u6e38\u4e00\u81f4\n\n\u5c06 OCR \u89c6\u4e3a\u89c4\u8303\u6e90\u6587\u672c\u7684\u56de\u586b\uff0c\u800c\u4e0d\u662f\u6bcf\u6b21\u8bfb\u53d6\u65f6\u7684\u4e34\u65f6\u88c5\u9970\u3002\u65e7\u7f13\u5b58\u53ef\u4ee5\u60f0\u6027\u56de\u586b\uff08\u4e0b\u6b21\u88ab\u8bfb\u53d6\u65f6\uff09\u6216\u7531\u672c\u5730\u540e\u53f0\u961f\u5217\u6279\u91cf\u56de\u586b\uff1b\u4e24\u79cd\u5165\u53e3\u5fc5\u987b\u5171\u7528\u540c\u4e00\u4e2a\u539f\u5b50 `claim_ocr_backfill`\uff0c\u4e0d\u80fd\u5404\u81ea\u76f4\u63a5\u8c03\u7528 OCR\u3002\n\n## \u7f13\u5b58\u6a21\u578b\n\n\u6bcf\u4e2a\u6587\u7ae0\u5feb\u7167\u4fdd\u5b58\u539f\u59cb\u6b63\u6587\u548c\u4e00\u4e2a\u4f9b\u6240\u6709\u6d88\u8d39\u8005\u4f7f\u7528\u7684\u89c4\u8303\u6b63\u6587\uff1a\n\n```json\n{\n  \"article_id\": \"...\",\n  \"image_count\": 3,\n  \"image_set_hash\": \"sha256(...)\",\n  \"raw_source_text\": \"\u6293\u53d6\u5230\u7684\u539f\u59cb\u6b63\u6587\",\n  \"canonical_source_text\": \"\u6b63\u6587 ... [\u56fe\u7247\u6587\u5b57 1]...[/\u56fe\u7247\u6587\u5b57 1]\",\n  \"source_text_revision\": \"sha256(canonical_source_text)\",\n  \"image_ocr\": {\n    \"schema_version\": 1,\n    \"state\": \"deferred_no_token\",\n    \"attempted\": false,\n    \"attempted_at\": null,\n    \"model\": null,\n    \"attempt_image_set_hash\": null,\n    \"recognized_count\": 0,\n    \"failed_count\": 0,\n    \"safe_failure_categories\": [],\n    \"lease_id\": null,\n    \"lease_expires_at\": null\n  }\n}\n```\n\n`state` \u53ea\u80fd\u4e3a `not_applicable`\uff08\u65e0\u56fe\u7247\uff09\u3001`deferred_no_token`\u3001`not_attempted`\u3001`in_progress` \u6216 `completed`\u3002\u8fd9\u660e\u786e\u533a\u5206\u201c\u56e0\u672a\u914d\u7f6e token \u800c\u9012\u5ef6\u201d\u3001\u201c\u5c1a\u672a\u5c1d\u8bd5\u201d\u548c\u201c\u4e00\u6b21\u5c1d\u8bd5\u5df2\u5b8c\u6210\u201d\u3002`completed` \u4e0d\u8868\u793a\u6bcf\u5f20\u56fe\u90fd\u6210\u529f\uff1b\u56e0\u6b64\u90e8\u5206\u5931\u8d25\u4e5f\u8981\u5199\u5165 `completed` \u548c `attempted: true`\u3002`safe_failure_categories` \u4ec5\u53ef\u542b `download_failed`\u3001`invalid_image`\u3001`timeout`\u3001`job_failed` \u7b49\u53d7\u9650\u7c7b\u522b\uff0c\u4e0d\u80fd\u5b58 token\u3001\u8bf7\u6c42\u5934\u3001\u539f\u59cb\u5f02\u5e38\u3001job/result URL \u6216\u4e0a\u4f20\u5185\u5bb9\u3002\n\n\u8001\u8bb0\u5f55\u6ca1\u6709 `image_ocr` \u65f6\u6309 `not_attempted` \u89e3\u91ca\uff1b\u65e0 token \u8bfb\u53d6\u65f6\u6301\u4e45\u5316\u4e3a `deferred_no_token`\u3002\u66f4\u65b0\u6587\u7ae0\u4e14 `image_set_hash` \u6539\u53d8\u65f6\uff0c\u521b\u5efa\u65b0\u7684\u7f13\u5b58\u5feb\u7167\u6216\u5c06\u4e0a\u8ff0 OCR \u5b57\u6bb5\u91cd\u7f6e\u4e3a `not_attempted`\uff1b\u8fd9\u4e0d\u662f\u5bf9\u540c\u4e00\u5feb\u7167\u7684\u9690\u5f0f\u91cd\u8bd5\u3002\u4eba\u5de5\u201c\u91cd\u65b0 OCR\u201d\u4e5f\u5fc5\u987b\u662f\u663e\u5f0f\u64cd\u4f5c\uff0c\u5efa\u7acb\u65b0\u5c1d\u8bd5/\u5feb\u7167\u3002\n\n## \u5237\u65b0\u5224\u5b9a\u4e0e\u539f\u5b50\u8ba4\u9886\n\ntoken \u914d\u7f6e\u53d8\u5316\u672c\u8eab\u4e0d\u5fc5\u626b\u63cf\u6216\u91cd\u6293\u6240\u6709\u6587\u7ae0\u3002\u5b83\u53ea\u4f7f\u65e7\u7684 `deferred_no_token` / \u7f3a\u5931\u5143\u6570\u636e\u8bb0\u5f55\u53d8\u5f97\u53ef\u8ba4\u9886\uff1b\u5b83\u4eec\u5728\u4e0b\u4e00\u6b21\u8bfb\u53d6\uff08\u6216\u540e\u53f0\u626b\u63cf\uff09\u65f6\u5404\u56de\u586b\u4e00\u6b21\u3002\n\n```python\ndef eligible_for_ocr(entry, ocr_configured, now):\n    meta = entry.image_ocr_or_legacy_default()  # legacy -> not_attempted, attempted=False\n    return (\n        ocr_configured\n        and entry.image_count > 0\n        and meta.state in {\"not_attempted\", \"deferred_no_token\"}\n        and meta.attempted is False\n    )\n\ndef claim_ocr_backfill(article_id, now):\n    # \u5355\u4e2a\u6570\u636e\u5e93 UPDATE/\u4e8b\u52a1\uff1a\u53ea\u6709\u4e00\u4e2a\u8bfb\u8005\u80fd\u4ece eligible \u72b6\u6001\u8f6c\u4e3a in_progress\u3002\n    # in_progress \u4e14\u79df\u7ea6\u672a\u8fc7\u671f\u65f6\u8fd4\u56de None\uff1b\u8fc7\u671f\u79df\u7ea6\u53ef\u91cd\u65b0\u8ba4\u9886\uff08\u8fdb\u7a0b\u5d29\u6e83\u6062\u590d\uff09\u3002\n    return atomic_compare_and_set(\n        article_id,\n        allowed_states={\"not_attempted\", \"deferred_no_token\"},\n        required_attempted=False,\n        set={\"state\": \"in_progress\", \"lease_id\": new_uuid(),\n             \"lease_expires_at\": now + LEASE_TTL},\n    )\n\ndef read_or_backfill(entry, now):\n    if not eligible_for_ocr(entry, settings.ocr_configured, now):\n        return entry.canonical_source_text\n    claim = claim_ocr_backfill(entry.article_id, now)\n    if claim is None:\n        return load_cached(entry.article_id).canonical_source_text  # \u4e0d\u91cd\u590d OCR\n    result = run_ocr_once_in_dom_order(entry, token=settings.token)\n    # finally \u4e2d\u7531 lease_id \u6761\u4ef6\u5199\u56de\uff1b\u6210\u529f\u3001\u96f6\u8bc6\u522b\u3001\u90e8\u5206\u5931\u8d25\u5747\u5b8c\u6210\u4e00\u6b21\u5c1d\u8bd5\u3002\n    finalize_if_lease_matches(\n        claim.lease_id,\n        state=\"completed\", attempted=True, attempted_at=now,\n        model=\"PaddleOCR-VL-1.5\", attempt_image_set_hash=entry.image_set_hash,\n        recognized_count=result.recognized_count, failed_count=result.failed_count,\n        safe_failure_categories=result.safe_categories,\n        canonical_source_text=result.enriched_text,\n        source_text_revision=sha256(result.enriched_text),\n        lease_id=None, lease_expires_at=None,\n    )\n    return result.enriched_text\n```\n\n\u65e0 token \u65f6\u4e0d\u5f97\u53d1\u8d77 OCR\uff1b\u4ec5\u8bb0\u5f55 `deferred_no_token`\u3002\u6b63\u5e38\u8fd4\u56de\uff08\u5305\u62ec\u5355\u56fe\u5931\u8d25\uff09\u540e `completed` \u6c38\u8fdc\u4e0d\u518d\u6ee1\u8db3\u8c13\u8bcd\uff0c\u6240\u4ee5\u968f\u540e\u7684\u8bfb\u53d6\u4e0d\u4f1a\u91cd\u65b0 OCR\u3002\u4ec5\u5728\u5de5\u4f5c\u8fdb\u7a0b\u5728 `finalize` \u524d\u6b7b\u4ea1\u65f6\uff0c\u79df\u7ea6\u8fc7\u671f\u540e\u5141\u8bb8\u4e00\u6b21\u6062\u590d\u6027\u5c1d\u8bd5\u3002\u591a\u56fe\u4efb\u52a1\u53ef\u5e76\u53d1\uff08\u4e0a\u9650 5\uff09\uff0c\u4f46\u4f9d\u56fe\u7247 DOM \u4f4d\u7f6e\u63d2\u5165 `[\u56fe\u7247\u6587\u5b57 N]` \u6807\u8bb0\uff0c\u4e0d\u80fd\u4f9d\u5b8c\u6210\u5148\u540e\u63d2\u5165\u3002\n\n## \u4e0b\u6e38\u6587\u672c\u7ea6\u675f\n\n`canonical_source_text` \u662f\u552f\u4e00\u4f20\u7ed9\u9996\u6b21\u6458\u8981\u3001\u540e\u7eed\u95ee\u7b54/RAG \u7d22\u5f15\u3001Markdown \u5bfc\u51fa\u3001\u65e5\u62a5\u548c\u5468\u62a5\u7684\u6587\u7ae0\u6587\u672c\u3002OCR Markdown\uff08\u5c24\u5176\u8868\u683c\uff09\u5fc5\u987b\u7d27\u8ddf\u539f\u56fe\u4f4d\u7f6e\u4fdd\u7559\u5728\u5176\u4e2d\uff1b`raw_source_text` \u4ec5\u7528\u4e8e\u6eaf\u6e90/\u91cd\u5efa\uff0c\u6458\u8981\u7edd\u4e0d\u80fd\u53cd\u5411\u8986\u76d6 `canonical_source_text`\u3002\u6709\u4e0a\u4e0b\u6587\u9884\u7b97\u65f6\uff0c\u53ea\u80fd\u5bf9\u8fd9\u4efd\u89c4\u8303\u6587\u672c\u4f5c\u6709\u8bb0\u5f55\u7684\u622a\u65ad\uff0c\u4e0d\u80fd\u5728 OCR \u56de\u586b\u524d\u6539\u7528\u6458\u8981\u6216\u77ed\u6458\u5f55\u3002\n\n## \u786e\u5b9a\u6027\u6d4b\u8bd5\uff08\u672c\u5730 fake OCR\uff0c\u65e0\u7f51\u7edc/\u771f\u5b9e token\uff09\n\n1. **\u65e7\u7f13\u5b58\u4e00\u6b21\u56de\u586b**\uff1a\u6784\u9020 `image_count=2`\u3001\u65e0 `image_ocr` \u7684\u8bb0\u5f55\u548c\u5df2\u914d\u7f6e\u7684\u865a\u62df token\u3002\u7b2c\u4e00\u6b21\u8bfb\u53d6\u65ad\u8a00 fake OCR \u8c03\u7528\u4e00\u6b21\u3001\u6587\u672c\u542b\u4e24\u6bb5\u6807\u8bb0\u3001\u72b6\u6001\u4e3a `completed/attempted=true`\uff1b\u7b2c\u4e8c\u6b21\u8bfb\u53d6\u65ad\u8a00\u8c03\u7528\u6570\u4ecd\u4e3a\u4e00\u6b21\u3002\n2. **\u672a\u914d\u7f6e\u4e0e\u6709\u56fe\u7684\u533a\u5206**\uff1a\u65e0 token \u8bfb\u53d6\u6709\u56fe\u8bb0\u5f55\uff0c\u65ad\u8a00\u96f6 OCR \u8c03\u7528\u548c `deferred_no_token/attempted=false`\uff1b\u65e0\u56fe\u8bb0\u5f55\u4e3a `not_applicable`\uff0c\u914d\u7f6e token \u540e\u4e5f\u4e0d\u53ef\u8ba4\u9886\u3002\n3. **\u90e8\u5206\u5931\u8d25\u4e0d\u91cd\u8bd5**\uff1afake OCR \u4f9d\u6b21\u7ed9\u51fa\u6210\u529f\u3001`timeout`\u3001\u6210\u529f\u3002\u65ad\u8a00\u6587\u7ae0\u4ecd\u6301\u4e45\u5316\u3001\u4e24\u6bb5 OCR \u5728\u89c4\u8303\u6587\u672c\u4e2d\u3001`recognized_count=2`\u3001`failed_count=1`\u3001\u72b6\u6001 `completed`\uff1b\u4efb\u610f\u540e\u7eed\u8bfb\u53d6\u4e0d\u518d\u8c03\u7528 fake OCR\u3002\n4. **\u987a\u5e8f\u72ec\u7acb\u4e8e\u5b8c\u6210\u987a\u5e8f**\uff1a\u7528\u53ef\u63a7 future \u4ee4\u4e09\u5f20\u56fe\u7247\u6309 3\u30011\u30012 \u5b8c\u6210\uff0c\u65ad\u8a00 `canonical_source_text` \u7684\u6807\u8bb0\u4ecd\u4e3a 1\u30012\u30013\uff0c\u4e14\u8868\u683c Markdown \u539f\u6837\u4fdd\u7559\u3002\n5. **\u5e76\u53d1\u8bfb\u9632\u91cd**\uff1a\u4e24\u4e2a\u7ebf\u7a0b\u5728\u540c\u4e00 `not_attempted` \u8bb0\u5f55\u4e0a\u540c\u6b65\u5f00\u59cb\uff1b\u65ad\u8a00\u4ec5\u4e00\u4e2a\u62ff\u5230\u79df\u7ea6\u3001fake OCR \u4ec5\u8c03\u7528\u4e00\u6b21\uff0c\u53e6\u4e00\u7ebf\u7a0b\u8fd4\u56de\u65e7/\u6700\u7ec8\u7f13\u5b58\u800c\u4e0d\u53d1\u8bf7\u6c42\u3002\u518d\u6a21\u62df\u6301\u6709\u8005\u5728\u5b8c\u6210\u524d\u5d29\u6e83\u548c\u65f6\u949f\u8d8a\u8fc7 TTL\uff0c\u65ad\u8a00\u53ea\u5141\u8bb8\u6062\u590d\u6027\u8ba4\u9886\u4e00\u6b21\u3002\n6. **\u4e0b\u6e38\u4e00\u81f4\u6027**\uff1a\u4ee5\u542b OCR \u8868\u683c\u7684 `canonical_source_text` \u8c03\u7528\u6458\u8981\u3001Q&A\u3001\u7d22\u5f15\u548c\u65e5\u62a5/\u5468\u62a5\u6784\u9020\u5668\uff1b\u65ad\u8a00\u6bcf\u4e2a\u8f93\u5165\u90fd\u5305\u542b\u76f8\u540c\u8868\u683c\u548c `[\u56fe\u7247\u6587\u5b57 1]`\uff0c\u4e14\u6ca1\u6709\u7528 `raw_source_text` \u6216\u6458\u8981\u66ff\u4ee3\u3002\n7. **\u79d8\u5bc6\u4e0d\u6cc4\u9732**\uff1a\u4f7f\u7528\u56fa\u5b9a\u865a\u62df token sentinel\uff1b\u65ad\u8a00\u8bbe\u7f6e GET\u3001\u7f13\u5b58\u5e8f\u5217\u5316\u3001\u65e5\u5fd7\u6355\u83b7\u3001\u5f02\u5e38\u3001\u5bfc\u51fa\u6587\u672c\u548c fake \u56fe\u7247/\u7ed3\u679c\u8bf7\u6c42\u5747\u4e0d\u542b\u8be5 sentinel\uff0c\u4e14 token \u53ea\u4f20\u7ed9 fake OCR \u5ba2\u6237\u7aef\u7684\u8ba4\u8bc1\u63a5\u53e3\u3002\n"}], "grading": {"expectations": [{"text": "Defines non-sensitive metadata that distinguishes not-configured/not-attempted from a completed OCR attempt.", "passed": true, "evidence": "Response defines state values including deferred_no_token, not_attempted, in_progress, and completed with attempted, model, counts, safe failures, and no secret fields."}, {"text": "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.", "passed": true, "evidence": "eligible_for_ocr requires a configured token, image_count > 0, allowed unattempted state, and attempted=false. Finalization marks completed/attempted=true even for partial failures."}, {"text": "Keeps the enriched canonical source text as the report/summarization input.", "passed": true, "evidence": "Response names canonical_source_text as the only input to summaries, Q&A/RAG, export, daily, and weekly reports."}, {"text": "Includes deterministic tests for one-time refresh, partial failure, order, and secret non-disclosure.", "passed": true, "evidence": "Tests explicitly cover legacy backfill once, partial failure without reattempt, completion-order independence, concurrent readers, downstream consistency, and token sentinel non-disclosure."}], "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}, "execution_metrics": {"tool_calls": {"estimate": 4}, "total_tool_calls": 4, "errors_encountered": 0, "output_chars": 0, "transcript_chars": 0}, "timing": {"total_duration_seconds": 0.0}, "claims": [], "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}, "eval_feedback": {"suggestions": [], "overall": "This is a discriminating cache-idempotency response: the completed state explicitly includes partial failures."}}}, {"id": "eval-cache-backfill-without_skill-run-1", "prompt": "(No prompt found)", "eval_id": null, "outputs": [{"name": "response.md", "type": "text", "content": "# \u65e7\u7f13\u5b58\u7684 OCR \u56de\u586b\u8bbe\u8ba1\n\nToken \u4fdd\u5b58\u6210\u529f\u540e\u53d1\u5e03\u4e00\u4e2a `ocr_backfill_requested` \u4e8b\u4ef6\uff08\u643a\u5e26\u975e\u654f\u611f\u7684 `ocr_config_revision`\uff0c\u4e0d\u643a\u5e26 token\uff09\u3002\u540e\u53f0\u626b\u63cf\u65e7\u6587\u7ae0\u7684\u56fe\u7247\u5e76\u5165\u961f\uff1b\u6587\u7ae0\u8bfb\u53d6\u8def\u5f84\u53ea\u505a\u4e00\u6b21\u8f7b\u91cf\u7684\u201c\u662f\u5426\u9700\u8981\u5165\u961f\u201d\u5224\u65ad\uff0c\u7edd\u4e0d\u5728\u8bf7\u6c42\u7ebf\u7a0b\u4e2d\u8c03\u7528 OCR\u3002\u961f\u5217\u548c\u6570\u636e\u5e93\u552f\u4e00\u952e\u5171\u540c\u4fdd\u8bc1\u591a\u6b21\u8bfb\u53d6\u3001\u591a\u4e2a worker \u6216\u91cd\u590d\u4e8b\u4ef6\u4e0d\u4f1a\u4ea7\u751f\u91cd\u590d OCR\u3002\n\n## \u6570\u636e\u6a21\u578b\n\n`article`\n\n| \u5b57\u6bb5 | \u7528\u9014 |\n| --- | --- |\n| `id` | \u6587\u7ae0 ID |\n| `body_text` | \u539f\u59cb\u6587\u7ae0\u6b63\u6587\uff1b\u6c38\u4e0d\u88ab OCR \u56de\u586b\u76f4\u63a5\u6539\u5199 |\n| `source_text` | \u9762\u5411\u68c0\u7d22/\u4e0b\u6e38\u7684\u6d3e\u751f\u6587\u672c |\n| `source_text_hash` | `source_text` \u7684 SHA-256\uff0c\u7528\u4e8e\u907f\u514d\u91cd\u590d\u7d22\u5f15 |\n| `source_text_revision` | \u6d3e\u751f\u6587\u672c\u7248\u672c |\n\n`article_image`\n\n| \u5b57\u6bb5 | \u7528\u9014 |\n| --- | --- |\n| `id`, `article_id`, `ordinal` | \u56fe\u7247\u8eab\u4efd\u53ca\u5728\u6587\u7ae0\u4e2d\u7684\u7a33\u5b9a\u987a\u5e8f |\n| `canonical_url` | \u89c4\u8303\u5316\u540e\u7684\u6765\u6e90 URL\uff08\u4ec5\u4f5c\u5b9a\u4f4d\uff0c\u4e0d\u4f5c\u7f13\u5b58\u952e\uff09 |\n| `content_sha256` | \u5df2\u4e0b\u8f7d\u56fe\u7247\u5b57\u8282\u7684\u54c8\u5e0c\uff1b\u5185\u5bb9\u6539\u53d8\u65f6\u81ea\u7136\u5931\u6548 |\n| `fetch_status` | `available` / `unavailable`\uff0c\u907f\u514d\u4e3a\u4e0d\u53ef\u5f97\u56fe\u7247\u53cd\u590d\u6392\u961f |\n\n`image_ocr_cache`\n\n| \u5b57\u6bb5 | \u7528\u9014 |\n| --- | --- |\n| `image_id`, `provider`, `request_fingerprint` | \u7f13\u5b58\u8eab\u4efd\uff1b\u552f\u4e00\u7ea6\u675f `UNIQUE(image_id, provider, request_fingerprint)` |\n| `model_version`, `options_json` | OCR \u6a21\u578b\u53ca\u8bed\u8a00\u3001\u65b9\u5411\u7b49\u4f1a\u5f71\u54cd\u7ed3\u679c\u7684\u9009\u9879 |\n| `status` | `queued`\u3001`running`\u3001`succeeded`\u3001`no_text`\u3001`retryable_failed`\u3001`terminal_failed` |\n| `text`, `blocks_json`, `result_hash` | \u89c4\u8303\u5316\u6587\u5b57\u3001\u5750\u6807/\u7f6e\u4fe1\u5ea6\uff0c\u4ee5\u53ca\u7ed3\u679c\u53bb\u91cd\u54c8\u5e0c |\n| `attempt_count`, `last_attempt_at`, `completed_at` | \u5ba1\u8ba1\u4e0e\u91cd\u8bd5\u63a7\u5236 |\n| `next_retry_at`, `failure_code` | \u4ec5\u6682\u65f6\u6027\u5931\u8d25\u53ef\u5728\u5230\u671f\u540e\u91cd\u8bd5 |\n| `ocr_config_revision` | \u975e\u673a\u5bc6\u914d\u7f6e\u4fee\u8ba2\u53f7\uff0c\u4fbf\u4e8e\u5ba1\u8ba1\uff1b\u4e0d\u8981\u5b58 token \u6216 token \u54c8\u5e0c |\n\n`request_fingerprint = sha256(content_sha256 + provider + model_version + canonical_json(options_json))`\u3002\u6a21\u578b\u6216\u9009\u9879\u5347\u7ea7\u4f1a\u4ea7\u751f\u65b0\u884c\uff1b\u540c\u4e00\u56fe\u7247\u5185\u5bb9\u3001\u6a21\u578b\u548c\u9009\u9879\u6c38\u8fdc\u547d\u4e2d\u540c\u4e00\u884c\u3002\u961f\u5217\u518d\u4ee5 `image_id + provider + request_fingerprint` \u4f5c\u4e3a\u5e42\u7b49\u952e\uff08\u6216\u4f7f\u7528\u652f\u6301\u53bb\u91cd\u7684 job ID\uff09\u3002\n\n## \u56de\u586b\u4e0e\u8bfb\u53d6\u5224\u5b9a\n\nToken \u914d\u7f6e\u5b8c\u6210\u540e\uff0c\u7531\u540e\u53f0\u5206\u9875\u67e5\u8be2 `article_image.fetch_status = 'available'` \u7684\u5386\u53f2\u56fe\u7247\uff0c\u6309\u4e0b\u5217\u8c13\u8bcd\u539f\u5b50\u5730\u521b\u5efa/\u9886\u53d6\u7f13\u5b58\u884c\u5e76\u63d0\u4ea4\u5e42\u7b49 job\u3002\u53ef\u9650\u5236\u5e76\u53d1\u3001\u5206\u6279\u548c\u9650\u901f\uff1btoken \u7f3a\u5931\u65f6\u4e0d\u626b\u63cf\u3001\u4e0d\u5165\u961f\u3002\n\n```text\nneeds_ocr(image, cfg, now):\n  if not cfg.token_configured or image.fetch_status != \"available\":\n      return false\n  key = fingerprint(image.content_sha256, cfg.provider, cfg.model_version, cfg.options)\n  row = cache.get(image.id, cfg.provider, key)\n  return row is absent\n      or (row.status == \"retryable_failed\" and row.next_retry_at <= now)\n\nensure_ocr_job(image, cfg, now):                 # transaction / compare-and-set\n  if not needs_ocr(image, cfg, now): return\n  upsert cache(key, status=\"queued\") only if absent\n      or (status=\"retryable_failed\" and next_retry_at <= now)\n  enqueue_once(job_id = \"ocr:\" + image.id + \":\" + key)\n\non_article_read(article):\n  return article plus current source_text\n  asynchronously call ensure_ocr_job for its images # optional lazy safety net\n  # never wait for, or perform, OCR here\n\nworker(job):\n  atomically claim only a matching queued row\n  OCR once; persist succeeded/no_text or retryable_failed(next_retry_at=backoff)\n  if normalized OCR result changed source_text: rebuild source_text and reindex\n```\n\n`terminal_failed` is intentionally not retried by reads. \u5176\u91cd\u65b0\u5904\u7406\u5e94\u662f\u4eba\u5de5\u201c\u5f3a\u5236\u5237\u65b0\u201d\u64cd\u4f5c\uff08\u521b\u5efa\u65b0\u7684 fingerprint/\u663e\u5f0f override\uff09\uff0c\u907f\u514d\u6c38\u4e45\u9519\u8bef\u6216\u574f\u56fe\u5bfc\u81f4\u70ed\u5faa\u73af\u3002\u5bf9\u4e8e\u505c\u7559\u8fc7\u4e45\u7684 `running` job\uff0c\u53ef\u7531\u8d85\u65f6\u56de\u6536\u4efb\u52a1\u6539\u4e3a `retryable_failed`\uff1b\u8bfb\u53d6\u672c\u8eab\u4e0d\u62a2\u6551\u5b83\u3002\n\n## \u4e0b\u6e38 source text\n\n\u4e0d\u8981\u628a\u8bc6\u522b\u7ed3\u679c\u8986\u76d6 `body_text`\u3002\u6309 `article_image.ordinal` \u5c06\u6210\u529f\u7684\u975e\u7a7a\u7ed3\u679c\u7a33\u5b9a\u62fc\u5165\u6d3e\u751f\u6587\u672c\uff0c\u4f8b\u5982\uff1a\n\n```text\n<\u6b63\u6587>\n\n[\u56fe\u7247 2 OCR | image_id=im_42]\n\u56fe\u4e2d\u7684\u53ef\u68c0\u7d22\u6587\u5b57\n```\n\n\u53ea\u7eb3\u5165 `succeeded` \u4e14\u89c4\u8303\u5316\u540e\u975e\u7a7a\u7684 `text`\uff1b`no_text`\u3001\u5931\u8d25\u548c\u6392\u961f\u72b6\u6001\u4e0d\u4ea7\u751f\u5360\u4f4d\u6587\u5b57\u3002\u4fdd\u7559 `image_id`\u3001\u5757\u5750\u6807\u548c\u7f6e\u4fe1\u5ea6\u53ef\u8ba9\u641c\u7d22\u547d\u4e2d\u56de\u8df3\u5230\u56fe\u7247\u5e76\u6807\u6ce8\u6765\u6e90\u3002\u6bcf\u6b21\u91cd\u5efa\u4f7f\u7528\u76f8\u540c\u6392\u5e8f\u548c\u89c4\u8303\u5316\u89c4\u5219\uff0c\u6bd4\u8f83 `source_text_hash`\uff1a\u672a\u53d8\u5219\u4e0d\u66f4\u65b0 revision\u3001\u4e0d\u91cd\u65b0\u5efa\u7d22\u5f15/embedding\uff1b\u53d8\u4e86\u624d\u53d1\u5e03 `article_source_text_changed`\u3002\u8fd9\u4f7f OCR \u7684\u8fdf\u5230\u7ed3\u679c\u53ef\u89c1\uff0c\u540c\u65f6\u4e0d\u4f1a\u628a OCR \u5185\u5bb9\u4f2a\u88c5\u6210\u4f5c\u8005\u6b63\u6587\u3002\n\n## \u786e\u5b9a\u6027\u6d4b\u8bd5\n\n\u6d4b\u8bd5\u4f7f\u7528\u56fa\u5b9a\u65f6\u949f `2026-07-15T00:00:00Z`\u3001\u56fa\u5b9a SHA \u548c fake queue/OCR client\uff1b\u65ad\u8a00 cache \u884c\u3001job ID\u3001\u8c03\u7528\u6b21\u6570\u548c `source_text_hash`\uff0c\u4e0d\u4f9d\u8d56\u771f\u5b9e token \u6216\u7f51\u7edc\u3002\n\n| \u7528\u4f8b | \u521d\u59cb\u6761\u4ef6 / \u64cd\u4f5c | \u65ad\u8a00 |\n| --- | --- | --- |\n| 1. \u56de\u586b\u5019\u9009 | \u65e7\u6587\u7ae0\u56fe\u7247\u53ef\u7528\u3001\u65e0 cache\uff1btoken \u4ece\u7f3a\u5931\u53d8\u4e3a\u5df2\u914d\u7f6e | \u53d1\u5e03\u4e8b\u4ef6\u540e\u6070\u5165\u961f 1 \u4e2a\u786e\u5b9a job\uff1b\u8bfb\u53d6\u4e0d\u76f4\u63a5\u8c03 OCR |\n| 2. \u91cd\u590d\u8bfb\u53d6 | \u7528\u4f8b 1 \u7684 row \u5df2 `queued`\uff0c\u8fde\u7eed\u8bfb\u53d6 3 \u6b21 | \u4ecd\u53ea\u6709 1 \u6761 cache/job\uff0cOCR \u8c03\u7528\u6570\u4e3a 0 |\n| 3. \u5df2\u6210\u529f\u547d\u4e2d | \u76f8\u540c fingerprint \u4e3a `succeeded` | \u56de\u586b\u626b\u63cf\u548c\u8bfb\u53d6\u5747\u4e0d\u5165\u961f\u3001\u4e0d\u8c03\u7528 OCR |\n| 4. \u65e0\u6587\u5b57\u547d\u4e2d | \u76f8\u540c fingerprint \u4e3a `no_text` | \u4e0d\u518d\u5165\u961f\uff1b`source_text` \u4e0d\u542b\u8be5\u56fe\u7247\u6bb5 |\n| 5. \u6682\u65f6\u9519\u8bef\u9000\u907f | `retryable_failed`, `next_retry_at` \u5728\u56fa\u5b9a\u65f6\u949f\u4e4b\u540e | \u4e0d\u5165\u961f\uff1b\u65f6\u949f\u63a8\u8fdb\u5230\u8be5\u65f6\u523b\u540e\u53ea\u5165\u961f 1 \u6b21 |\n| 6. \u6c38\u4e45\u9519\u8bef | `terminal_failed` | \u8bfb\u53d6\u3001\u626b\u63cf\u5747\u4e0d\u5165\u961f\uff1b\u4ec5\u663e\u5f0f force refresh \u53ef\u521b\u5efa\u65b0\u8bf7\u6c42 |\n| 7. \u56fe\u7247\u5185\u5bb9\u53d8\u66f4 | \u540c\u4e00 `image_id` \u7684 `content_sha256` \u6539\u53d8 | fingerprint \u6539\u53d8\uff0c\u5165\u961f\u4e00\u6b21\u65b0 job\uff1b\u65e7\u6210\u529f\u8bb0\u5f55\u4e0d\u88ab\u8bef\u7528 |\n| 8. \u5e76\u53d1\u7ade\u4e89 | \u4e24\u4e2a `ensure_ocr_job` \u540c\u65f6\u5904\u7406\u7f3a\u5931 row | \u552f\u4e00\u952e/\u6761\u4ef6\u66f4\u65b0\u540e\u53ea\u6709\u4e00\u4e2a `queued` row \u548c\u4e00\u4e2a job |\n| 9. \u6a21\u578b\u5347\u7ea7 | \u5185\u5bb9\u76f8\u540c\u4f46 `model_version` \u6539\u53d8 | \u4ea7\u751f\u65b0 fingerprint\u3001\u6070 OCR \u4e00\u6b21\uff1b\u65e7\u7ed3\u679c\u4ecd\u53ef\u5ba1\u8ba1 |\n| 10. \u4e0b\u6e38\u7a33\u5b9a\u6027 | OCR \u7ed3\u679c\u6309\u4e0d\u540c\u5b8c\u6210\u987a\u5e8f\u8fd4\u56de\uff0c\u56fe\u7247 ordinal \u4e3a 2\u30015 | `source_text` \u603b\u6309 ordinal \u6392\u5217\uff1b\u76f8\u540c\u89c4\u8303\u5316\u7ed3\u679c\u4e0d\u6539\u53d8 hash\u3001\u4e0d\u89e6\u53d1\u518d\u7d22\u5f15 |\n| 11. \u4e0b\u6e38\u66f4\u65b0 | \u9996\u6b21\u6210\u529f\u8fd4\u56de\u6587\u5b57\u540e\uff0cworker \u91cd\u590d\u6295\u9012\u76f8\u540c\u7ed3\u679c | \u9996\u6b21\u89e6\u53d1\u4e00\u6b21 `article_source_text_changed`\uff1b\u7b2c\u4e8c\u6b21\u4e0d\u9012\u589e revision\u3001\u4e0d\u91cd\u65b0\u5efa\u7d22\u5f15 |\n\n\u6b64\u5916\u5e94\u505a\u4e00\u6b21\u8fc1\u79fb\u6d4b\u8bd5\uff1a\u5df2\u6709\u6587\u7ae0\u6ca1\u6709 `article_image` \u7684 `content_sha256` \u65f6\u5148\u8865\u6293\u53d6/\u54c8\u5e0c\uff1b\u62ff\u4e0d\u5230\u5b57\u8282\u5219\u6807\u8bb0 `unavailable`\uff0c\u800c\u4e0d\u662f\u4ee5 URL \u53cd\u590d OCR\u3002\u8fd9\u6837\u65e7\u7f13\u5b58\u80fd\u9010\u6b65\u56de\u586b\uff0c\u4e5f\u4fdd\u6301\u6bcf\u4e2a\u786e\u5b9a\u8f93\u5165\u6700\u591a\u4e00\u6b21\u6b63\u5e38 OCR \u5c1d\u8bd5\uff08\u91cd\u8bd5/\u663e\u5f0f\u5237\u65b0\u9664\u5916\uff09\u3002\n"}], "grading": {"expectations": [{"text": "Defines non-sensitive metadata that distinguishes not-configured/not-attempted from a completed OCR attempt.", "passed": true, "evidence": "Response has configuration revision, cache row status, and secret-excluding fields."}, {"text": "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.", "passed": false, "evidence": "Response permits retryable_failed rows to be queued again after next_retry_at. It is a valid queue design, but does not meet this skill's intended one-attempt cache invariant for partial image failure."}, {"text": "Keeps the enriched canonical source text as the report/summarization input.", "passed": true, "evidence": "Response uses a derived source_text to feed downstream consumers and rebuilds it in image ordinal order."}, {"text": "Includes deterministic tests for one-time refresh, partial failure, order, and secret non-disclosure.", "passed": true, "evidence": "Response provides fixed-clock tests for queue deduplication, retries, order, secret persistence boundaries, and downstream stability."}], "summary": {"passed": 3, "failed": 1, "total": 4, "pass_rate": 0.75}, "execution_metrics": {"tool_calls": {"estimate": 0}, "total_tool_calls": 0, "errors_encountered": 0, "output_chars": 0, "transcript_chars": 0}, "timing": {"total_duration_seconds": 0.0}, "claims": [], "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}, "eval_feedback": {"suggestions": [{"assertion": "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.", "reason": "The baseline selected a richer queue/retry architecture than the product constraint requires, demonstrating why the skill states the simpler one-attempt invariant explicitly."}], "overall": "The cache-specific assertion discriminates between a correct general OCR architecture and this product's desired low-maintenance behavior."}}}, {"id": "eval-wechat-pipeline-with_skill-run-1", "prompt": "(No prompt found)", "eval_id": null, "outputs": [{"name": "response.md", "type": "text", "content": "# \u5fae\u4fe1\u516c\u4f17\u53f7\u56fe\u7247 OCR \u5b9e\u65bd\u8ba1\u5212\n\n## \u76ee\u6807\u4e0e\u843d\u70b9\n\n\u5c06 OCR \u8bbe\u4e3a\u5fae\u4fe1\u516c\u4f17\u53f7\u6587\u7ae0\u7684**\u89c4\u8303\u6e90\u6587\u672c\uff08canonical source text\uff09**\u751f\u6210\u6b65\u9aa4\uff0c\u800c\u4e0d\u662f\u9884\u89c8\u529f\u80fd\uff1aHTML \u6e05\u7406\u540e\u3001`article_info.body_text` \u5199\u5165\u7f13\u5b58\u524d\uff0c\u6309 DOM \u987a\u5e8f\u628a\u56fe\u7247 Markdown \u63d2\u56de\u6b63\u6587\u3002\u8fd9\u6837\u540c\u4e00\u4efd\u5b8c\u6574\u6b63\u6587\u4f1a\u6d41\u5411\uff1a\n\n`ArticleFetchResult.body_text` \u2192 \u7f13\u5b58 `article_info.body_text` \u2192 `pipeline_runner` \u7684 `transcript` \u2192 DeepSeek `summarize()` \u2192 Markdown/\u641c\u7d22\u7d22\u5f15\uff1b\u4ee5\u53ca `load_content_source_text()` \u2192 \u95ee\u7b54\u3001\u7ed3\u6784\u5316\u5206\u6790\u3001\u65e5\u62a5\u548c\u5468\u62a5\u3002\n\n\u5f53\u524d\u9879\u76ee\u7684\u5bf9\u5e94\u8fb9\u754c\u662f\uff1a\u6293\u53d6\u5728 `backend/services/article_fetcher.py`\uff0c\u6b63\u6587\u7f13\u5b58\u548c\u60f0\u6027\u56de\u586b\u5728 `backend/services/content_source_text.py`\uff0c\u9996\u6b21\u603b\u7ed3\u5728 `backend/services/pipeline_runner.py`\uff0c\u62a5\u544a\u6750\u6599\u5728 `backend/services/wechat_reports.py`\u3002\u4e0d\u4fee\u6539\u6458\u8981\u6765\u201c\u8865 OCR\u201d\uff0c\u53ea\u4e30\u5bcc\u539f\u6587\u6b63\u6587\u3002\n\n\u9009\u62e9 `PaddleOCR-VL-1.5`\u3001\u6bcf\u7bc7\u6587\u7ae0\u6700\u591a 5 \u5f20\u56fe\u7247\u5e76\u53d1\u3002\u4e0a\u7ebf\u524d\u6309 [\u767e\u5ea6\u5f02\u6b65 API \u5b98\u65b9\u6587\u6863](https://ai.baidu.com/ai-doc/AISTUDIO/fml7mozw5) \u518d\u6838\u5bf9\u7aef\u70b9\u3001\u6a21\u578b\u540d\u3001\u5b57\u6bb5\u548c\u8fd4\u56de\u7ed3\u6784\uff1b\u5f53\u524d\u7ea6\u5b9a\u4e3a\u672c\u5730 multipart \u4e0a\u4f20\u3001\u5f02\u6b65 job \u8f6e\u8be2\u53ca\u4e0b\u8f7d `markdownUrl`\uff0c\u4e0b\u8f7d\u7b7e\u540d\u7ed3\u679c URL \u65f6\u4e0d\u643a\u5e26\u6388\u6743\u5934\u3002\n\n## \u5b9e\u65bd\u6b65\u9aa4\n\n1. \u5c06\u6280\u80fd\u63d0\u4f9b\u7684 `paddle_ocr_async.py` \u968f\u540e\u7aef\u4e00\u8d77\u7eb3\u5165 `backend/services/`\uff08\u6216\u4f5c\u4e3a\u8be5\u76ee\u5f55\u79c1\u6709\u6a21\u5757\uff09\uff0c\u5e76\u7531\u5fae\u4fe1\u516c\u4f17\u53f7\u9002\u914d\u5c42\u8c03\u7528 `PaddleOcrAsyncClient` / `recognize_many_ordered`\u3002\u907f\u514d\u5728\u4e1a\u52a1\u5c42\u590d\u5236\u63d0\u4ea4\u3001\u8f6e\u8be2\u548c Markdown \u6e05\u7406\u903b\u8f91\u3002\n\n2. \u5728 `article_fetcher` \u5b8c\u6210\u6b63\u6587\u8282\u70b9\u7684\u811a\u672c\u3001\u6837\u5f0f\u3001iframe\u3001video \u6e05\u7406\u548c\u5185\u5bb9\u8fc7\u6ee4\u540e\uff0c\u679a\u4e3e `#js_content img`\uff1a\n\n   - \u53ea\u63a5\u53d7 `data-src`/`src` \u4e2d\u7684\u516c\u5171 `http(s)` URL\uff1b\u62d2\u7edd localhost\u3001\u79c1\u7f51/\u56de\u73af/\u94fe\u8def\u672c\u5730 IP \u5b57\u9762\u91cf\uff0c\u4ee5\u53ca\u975e HTTP(S) \u5730\u5740\u3002\n   - \u8df3\u8fc7\u89c6\u9891 poster\u3001emoji\u3001\u4e8c\u7ef4\u7801\u3001\u8ddf\u8e2a\u50cf\u7d20\u3001UI \u56fe\u548c\u5bbd/\u9ad8\u5c0f\u4e8e 90px \u7684\u88c5\u9970\u56fe\uff1b\u4fdd\u7559\u666e\u901a\u5185\u5bb9\u56fe\uff0c\u5373\u4f7f\u9884\u671f\u6587\u5b57\u4e0d\u591a\u3002\n   - \u4e0b\u8f7d\u65f6\u53ea\u5e26\u6240\u9700\u7684\u5fae\u4fe1\u6d4f\u89c8\u5668\u5934\u548c\u6587\u7ae0 URL \u4f5c\u4e3a `Referer`\uff0c\u4e0d\u5e26 OCR token\u3001cookie \u6216\u5e94\u7528\u51ed\u8bc1\uff1b\u9650\u5236\u6bcf\u5f20\u56fe\u7247 20 MiB\u3001\u8d85\u65f6\uff0c\u5e76\u5728\u53d1\u751f\u91cd\u5b9a\u5411\u65f6\u9010\u8df3\u91cd\u65b0\u6821\u9a8c\u76ee\u6807 URL\u3002\n\n3. \u4fdd\u7559\u6bcf\u4e2a\u56fe\u7247\u8282\u70b9\u7684 `position`\uff0c\u5373\u4f7f OCR \u8bf7\u6c42\u6309 URL \u53bb\u91cd\u4e5f\u4fdd\u7559 `url -> [position, node]` \u6620\u5c04\u3002\u56fe\u7247\u4e0b\u8f7d\u53ca OCR \u90fd\u4f7f\u7528\u5927\u5c0f\u4e3a `min(5, work_count)` \u7684\u6709\u754c\u6c60\uff1b`executor.map` / `recognize_many_ordered` \u7684\u8fd4\u56de\u5217\u8868\u4e0e\u8f93\u5165\u5217\u8868\u540c\u5e8f\uff0c\u56e0\u6b64\u5b8c\u6210\u5feb\u6162\u4e0d\u4f1a\u6539\u53d8\u56de\u586b\u4f4d\u7f6e\u3002\u6bcf\u4e2a\u6210\u529f\u7ed3\u679c\u7d27\u8ddf\u5bf9\u5e94\u56fe\u7247\u8282\u70b9\u63d2\u5165\u7a33\u5b9a\u6807\u8bb0\uff1a\n\n```text\n[\u56fe\u7247\u6587\u5b57 3]\n| \u65e5\u671f | \u4e8b\u9879 |\n| --- | --- |\n| 7 \u6708 20 \u65e5 | \u62a5\u5230 |\n[/\u56fe\u7247\u6587\u5b57 3]\n```\n\n\u5bf9\u540c URL \u7684\u91cd\u590d\u56fe\u7247\uff0c\u590d\u7528\u4e00\u6b21\u7f51\u7edc OCR \u7ed3\u679c\u3001\u4f46\u5728\u6bcf\u4e2a\u539f\u59cb\u56fe\u7247\u4f4d\u7f6e\u63d2\u5165\u5bf9\u5e94\u4f4d\u7f6e\u7684\u6807\u8bb0\uff1b\u8fd9\u6837\u6e90\u6587\u672c\u7684\u7ed3\u6784\u548c DOM \u4e00\u81f4\u3002\n\n4. \u7531\u63d2\u5165\u540e\u7684 DOM \u751f\u6210 `body_html` \u548c `body_text`\uff0c\u5e76\u4e00\u8d77\u6301\u4e45\u5316\u3002`image_ocr` \u5143\u6570\u636e\u53ea\u5b58\u975e\u654f\u611f\u72b6\u6001\uff0c\u4f8b\u5982\uff1a\n\n```json\n{\n  \"attempted\": true,\n  \"model\": \"PaddleOCR-VL-1.5\",\n  \"image_count\": 6,\n  \"unique_image_count\": 4,\n  \"recognized_count\": 5,\n  \"failed_count\": 1\n}\n```\n\n\u4e0d\u5b58 job ID\u3001\u7b7e\u540d `markdownUrl`\u3001\u4e0a\u4f20\u5185\u5bb9\u6216 token\u3002\u5355\u56fe\u5931\u8d25\u4fdd\u7559\u539f\u56fe\u3001\u7ee7\u7eed\u6587\u7ae0\uff0c\u4ec5\u8bb0\u5f55\u53d7\u9650\u9519\u8bef\u7c7b\u522b\uff08\u5982 `timeout`\u3001`network_error`\u3001`job_failed`\u3001`invalid_image`\uff09\uff0c\u7edd\u4e0d\u5199\u8bf7\u6c42\u5934\u3001multipart \u6570\u636e\u6216\u5f02\u5e38\u539f\u6587\u3002\n\n5. \u4f7f\u7528\u73b0\u6709\u672c\u673a Settings \u6d41\u7a0b\u4fdd\u5b58 token\uff1a\u4ec5\u901a\u8fc7\u5bc6\u7801\u8f93\u5165 PUT \u5199\u5165 `data/paddle_ocr_settings.json`\uff0c\u5c3d\u53ef\u80fd `0600`\uff1b\u542f\u52a8\u65f6\u8bfb\u5165\u5185\u5b58\u3002GET \u53ea\u8fd4\u56de `configured`\u3001\u56fa\u5b9a\u6a21\u578b\u540d\u548c\u56fa\u5b9a\u5e76\u53d1\u6570\u3002token \u4e0d\u8fdb\u5165\u73af\u5883\u5bfc\u51fa\u3001\u7f13\u5b58 metadata\u3001\u65e5\u5fd7\u3001\u54cd\u5e94\u3001\u6d4b\u8bd5 fixture\u3001Markdown\u3001\u641c\u7d22\u7d22\u5f15\u6216\u65e5\u62a5\u3002\u8868\u5355\u4fdd\u5b58\u540e\u6e05\u7a7a\u8f93\u5165\u6846\u3002\n\n6. \u660e\u786e\u7f13\u5b58\u56de\u586b\u89c4\u5219\u3002\u65e0 token \u65f6\u6309\u65e2\u6709\u65b9\u5f0f\u6293\u53d6\uff0c\u5e76\u4fdd\u5b58 `attempted: false`\uff1btoken \u914d\u7f6e\u540e\uff0c`pipeline_runner` \u548c `load_content_source_text()` \u5728\u7f13\u5b58\u6587\u7ae0\u201c\u6709\u56fe\u7247\u4e14\u4ece\u672a OCR attempted\u201d\u65f6\u91cd\u65b0\u6293\u53d6\u4e00\u6b21\u3002\u53ea\u8981\u8be5\u6b21\u4ea7\u751f `attempted: true`\uff08\u5373\u4f7f\u90e8\u5206\u56fe\u7247\u5931\u8d25\uff09\uff0c\u540e\u7eed\u8bfb\u53d6\u4e0d\u518d\u53cd\u590d\u6293\u53d6\uff1b\u7528\u6237\u663e\u5f0f\u5237\u65b0\u624d\u5141\u8bb8\u91cd\u65b0\u6267\u884c\u3002\u8fd9\u6837\u65e7\u7f13\u5b58\u4f1a\u5728\u4e0b\u4e00\u6b21\u603b\u7ed3\u3001\u95ee\u7b54\u6216\u62a5\u544a\u4f7f\u7528\u65f6\u60f0\u6027\u8865\u9f50\uff0c\u4e0d\u4f1a\u4ea7\u751f\u65e0\u9650\u91cd\u8bd5\u3002\n\n7. \u4fdd\u8bc1\u4e0b\u6e38\u59cb\u7ec8\u8bfb\u5b8c\u6574\u7684 enriched body\uff1a\n\n   - `pipeline_runner` \u5c06\u7f13\u5b58\u7684 `body_text` \u8d4b\u7ed9 `transcript` \u540e\u518d\u8c03\u7528 DeepSeek\uff0c\u4e14\u7528\u540c\u4e00\u6587\u672c\u5199 Markdown \u548c\u641c\u7d22\u7d22\u5f15\uff1b\u4e0d\u80fd\u5728\u8c03\u7528\u524d\u66ff\u6362\u4e3a\u6458\u8981\u6216\u77ed\u6458\u5f55\u3002\n   - `content_source_text` \u8fd4\u56de\u540c\u4e00\u7f13\u5b58\u6b63\u6587\u5e76\u4ee5\u6b64\u66f4\u65b0\u641c\u7d22\uff1b\u95ee\u7b54\u548c\u5185\u5bb9\u5206\u6790\u6cbf\u7528\u8be5\u5165\u53e3\u3002\n   - `wechat_reports._source_material()` \u4f18\u5148 `load_content_source_text(content_item_id)`\uff0c\u628a\u5b8c\u6574 `article.text`\uff08\u542b `[\u56fe\u7247\u6587\u5b57 n]`\uff09\u653e\u5165\u65e5\u62a5/\u5468\u62a5\u63d0\u793a\u8bcd\uff1b\u8349\u7a3f\u8bfb\u53d6\u53ea\u4f5c\u6e90\u6587\u672c\u4e0d\u53ef\u7528\u65f6\u7684\u56de\u9000\uff0c\u7edd\u4e0d\u80fd\u4ee5 summary \u4ee3\u66ff\u6b63\u6587\u3002\n\n## \u6838\u5fc3\u4f2a\u4ee3\u7801\n\n```python\ndef enrich_wechat_body(content_node, article_url, token):\n    nodes = collect_meaningful_images_in_dom_order(content_node)\n    if not nodes:\n        return ocr_meta(attempted=False, image_count=0)\n    if not token:\n        return ocr_meta(attempted=False, image_count=len(nodes))\n\n    # unique_jobs preserves first DOM occurrence; positions retains all nodes.\n    unique_jobs, positions = dedupe_urls_with_positions(nodes)\n    with ThreadPoolExecutor(max_workers=min(5, len(unique_jobs))) as pool:\n        local_files = list(pool.map(download_public_image_with_referer, unique_jobs))\n\n    client = PaddleOcrAsyncClient(access_token=token, model=\"PaddleOCR-VL-1.5\")\n    results = recognize_many_ordered(client, local_files, max_workers=5)\n    by_url = {result.label: result for result in results}\n\n    # Mutate in source order, never completion order.\n    for position, image_node, url in nodes:\n        result = by_url[url]\n        if result.ok:\n            image_node.insert_after(markdown_annotation(position, result.markdown))\n        else:\n            record_safe_per_image_failure(result.error)\n    return build_nonsecret_ocr_metadata(nodes, unique_jobs, results)\n\ndef fetch_and_persist_wechat_article(url):\n    content = clean_noncontent_nodes(parse_html(fetch_wechat_page(url)))\n    meta = enrich_wechat_body(content, url, local_paddle_token())\n    return ArticleFetchResult(body_html=str(content),\n                              body_text=clean_text(content.get_text(\"\\n\")),\n                              image_ocr=meta)\n\ndef cached_article_needs_ocr_backfill(article_info):\n    return (ocr_is_configured() and article_info[\"images\"]\n            and not article_info.get(\"image_ocr\", {}).get(\"attempted\", False))\n```\n\n`PaddleOcrAsyncClient` handles: `POST` local bytes as `file`, `model=PaddleOCR-VL-1.5`, finite job polling (120 s/image), and unauthenticated fetch of the signed Markdown artifact. All remote failures convert to a bounded result rather than raising through the article.\n\n## \u9a8c\u6536\u6d4b\u8bd5\n\n\u4f7f\u7528 `pytest` \u548c\u786e\u5b9a\u6027 HTTP/mock OCR\uff0c\u4e0d\u63a5\u89e6\u771f\u5b9e\u670d\u52a1\u6216\u771f\u5b9e token\uff1a\n\n1. **\u5e76\u53d1\u4e0e\u987a\u5e8f**\uff1a\u4e09\u5f20\u56fe\u7684 mock \u5b8c\u6210\u987a\u5e8f\u4e3a 3\u30011\u30012\uff1b\u65ad\u8a00\u751f\u6210\u7684 `body_text` \u4ecd\u4e3a\u201c\u6bb5\u843d 1 \u2192 \u56fe\u7247\u6587\u5b57 1 \u2192 \u6bb5\u843d 2 \u2192 \u56fe\u7247\u6587\u5b57 2 \u2192 \u56fe\u7247\u6587\u5b57 3\u201d\u7684 DOM \u987a\u5e8f\uff0c\u5e76\u65ad\u8a00\u6700\u5927\u540c\u65f6\u4efb\u52a1\u6570\u4e0d\u8d85\u8fc7 5\u3002\n2. **\u8868\u683c\u8fdb\u5165\u89c4\u8303\u6b63\u6587\u4e0e DeepSeek**\uff1amock OCR \u8fd4\u56de Markdown \u8868\uff1b\u65ad\u8a00\u7f13\u5b58 `article_info.body_text`\u3001`pipeline_runner.summarize()` \u7684\u8f93\u5165\u3001\u641c\u7d22\u5199\u5165\u5185\u5bb9\u5747\u542b\u8868\u683c\u4e0e\u6807\u8bb0\u3002\n3. **\u62a5\u544a\u4f7f\u7528\u5168\u6587**\uff1a\u5206\u522b\u53c2\u6570\u5316\u65e5\u62a5\u548c\u5468\u62a5\uff0cmock `load_content_source_text()` \u8fd4\u56de\u542b OCR \u8868\u683c\u7684\u957f\u6587\uff1b\u65ad\u8a00\u53d1\u9001\u7ed9 LLM \u7684 prompt \u542b\u5168\u6587\u548c\u8868\u683c\uff0c\u800c\u975e summary \u6216\u56fa\u5b9a\u957f\u5ea6 excerpt\u3002\n4. **\u964d\u7ea7**\uff1a\u4e00\u5f20\u56fe\u63d0\u4ea4/\u8f6e\u8be2\u8d85\u65f6\u3001\u53e6\u4e24\u5f20\u6210\u529f\uff1b\u6587\u7ae0\u4ecd\u6210\u529f\u6301\u4e45\u5316\uff0c\u539f\u56fe\u4ecd\u5728 HTML\uff0c\u6b63\u6587\u542b\u4e24\u6bb5 OCR\uff0c\u5143\u6570\u636e\u663e\u793a\u4e00\u6b21 attempt \u548c\u6b63\u786e\u5931\u8d25\u6570\u3002\n5. **\u672c\u673a token \u8fb9\u754c**\uff1aPUT \u4f7f\u7528\u865a\u62df token \u540e\uff0c\u68c0\u67e5\u6743\u9650\u4e3a owner-only\uff08\u5e73\u53f0\u652f\u6301\u65f6\uff09\uff1bGET\u3001`/api/config`\u3001\u65e5\u5fd7\u6355\u83b7\u3001\u7f13\u5b58 JSON\u3001\u5bfc\u51fa Markdown \u5747\u4e0d\u542b\u8be5\u5b57\u7b26\u4e32\uff1b\u8ba4\u8bc1\u5934\u53ea\u7528\u4e8e Paddle job submit/poll\uff0c\u7edd\u4e0d\u7528\u4e8e\u7ed3\u679c URL/\u56fe\u7247\u4e0b\u8f7d\u3002\n6. **SSRF/\u5927\u5c0f\u9650\u5236**\uff1a\u62d2\u7edd `file:`\u3001localhost\u3001\u79c1\u7f51 IP\u3001\u91cd\u5b9a\u5411\u81f3\u79c1\u7f51\u3001\u975e\u56fe\u7247\u54cd\u5e94\u548c\u8d85\u8fc7\u9650\u5236\u7684\u6d41\uff1b\u8fd9\u4e9b\u5931\u8d25\u4e0d\u5f97\u4e2d\u6b62\u6574\u7bc7\u6587\u7ae0\u3002\n7. **\u7f13\u5b58\u56de\u586b\u4e00\u6b21**\uff1a\u51c6\u5907\u5e26\u56fe\u7247\u4f46\u65e0 `image_ocr.attempted` \u7684\u65e7\u7f13\u5b58\uff1b\u914d\u7f6e token \u540e\u9996\u6b21\u8bfb\u53d6\u89e6\u53d1\u4e00\u6b21\u6293\u53d6\u5e76\u5199 `attempted: true`\uff1b\u518d\u6b21\u8bfb\u53d6\u4e0d\u6293\u53d6\uff0c\u5373\u4f7f\u7b2c\u4e00\u6b21\u6709\u5355\u56fe\u5931\u8d25\u3002\u65e0 token \u65f6\u4e0d\u89e6\u53d1 OCR\u3002\n\n\u5b8c\u6210\u6761\u4ef6\uff1a\u6240\u6709\u6d4b\u8bd5\u901a\u8fc7\uff1b\u8868\u683c\u622a\u56fe\u6587\u5b57\u5728\u9996\u6b21\u603b\u7ed3\u3001\u540e\u7eed\u95ee\u7b54/\u641c\u7d22\u53ca\u65e5\u62a5/\u5468\u62a5\u4e2d\u90fd\u80fd\u539f\u6837\u627e\u5230\uff1b\u65e0\u771f\u5b9e token \u51fa\u73b0\u5728\u4ed3\u5e93\u3001\u8f93\u51fa\u3001\u65e5\u5fd7\u6216 HTTP GET \u54cd\u5e94\u4e2d\u3002\n"}], "grading": {"expectations": [{"text": "OCR is placed before canonical source-text persistence, not only in a UI preview.", "passed": true, "evidence": "Response places OCR after HTML cleanup and before article_info.body_text cache persistence, then traces it into summary, search, Q&A, and reports."}, {"text": "The solution uses bounded concurrency and preserves original DOM order.", "passed": true, "evidence": "Response uses a maximum of five workers, executor.map/recognize_many_ordered, and explicitly mutates the DOM in source order."}, {"text": "The token is not returned by GET endpoints or exposed in source/logs.", "passed": true, "evidence": "Response specifies a password PUT flow, owner-only local storage, GET status-only output, and excludes the token from logs, metadata, exports, and tests."}, {"text": "Daily and weekly reports use the complete enriched article body rather than a short summary excerpt.", "passed": true, "evidence": "Response requires wechat_reports._source_material to load the complete enriched source text and rejects use of a summary or fixed-length excerpt."}], "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}, "execution_metrics": {"tool_calls": {"estimate": 11}, "total_tool_calls": 11, "errors_encountered": 0, "output_chars": 0, "transcript_chars": 0}, "timing": {"total_duration_seconds": 0.0}, "claims": [], "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}, "eval_feedback": {"suggestions": [{"reason": "All assertions passed in both configurations. The next eval should target cache idempotency and partial OCR failure, where a generic plan is less likely to specify an actionable invariant."}], "overall": "Core assertions are valid but not sufficiently discriminating on their own."}}}, {"id": "eval-wechat-pipeline-without_skill-run-1", "prompt": "(No prompt found)", "eval_id": null, "outputs": [{"name": "response.md", "type": "text", "content": "# \u5fae\u4fe1\u516c\u4f17\u53f7\u56fe\u7247 OCR \u63a5\u5165\u8ba1\u5212\n\n\u76ee\u6807\u662f\u628a\u6b63\u6587\u56fe\u7247\uff08\u5c24\u5176\u662f\u8868\u683c\u622a\u56fe\uff09\u7684\u8bc6\u522b\u7ed3\u679c\u4f5c\u4e3a\u6587\u7ae0\u6b63\u6587\u7684\u4e00\u90e8\u5206\u4fdd\u5b58\uff1b\u56fe\u7247\u53ef\u5e76\u53d1\u5904\u7406\uff0c\u4f46\u7ed3\u679c\u5fc5\u987b\u6309 HTML \u4e2d\u7684\u539f\u59cb\u4f4d\u7f6e\u63d2\u56de\uff0c\u56e0\u6b64 DeepSeek \u603b\u7ed3\u3001\u641c\u7d22\u7d22\u5f15\u548c\u65e5\u62a5/\u5468\u62a5\u8bfb\u53d6\u5230\u7684\u662f\u540c\u4e00\u4efd\u5bcc\u96c6\u540e\u7684\u6b63\u6587\u3002\n\n## \u5b9e\u65bd\u987a\u5e8f\n\n1. **\u914d\u7f6e\u4e0e\u51ed\u8bc1**\uff1a\u65b0\u589e `PADDLE_OCR_IMAGE_CONCURRENCY`\uff08\u9ed8\u8ba4 4--5\uff09\u3001\u5355\u56fe\u5927\u5c0f\u4e0a\u9650\u3001\u63d0\u4ea4/\u8f6e\u8be2/\u603b\u8d85\u65f6\u4e0e\u6a21\u578b\u540d\u914d\u7f6e\u3002Token \u4ec5\u7531\u540e\u7aef\u5199\u5165\u672c\u673a\u51ed\u8bc1\u5e93\uff08macOS Keychain \u4f18\u5148\uff1b\u4e0d\u80fd\u4f7f\u7528\u65f6\u4e3a\u672c\u673a\u6570\u636e\u76ee\u5f55\u4e2d `0600` \u7684\u79c1\u6709\u914d\u7f6e\u6587\u4ef6\uff09\uff0c\u6570\u636e\u5e93\u53ea\u4fdd\u5b58\u51ed\u8bc1\u5f15\u7528\u6216 `configured` \u72b6\u6001\u3002\u8bbe\u7f6e API \u7684 `GET` \u53ea\u8fd4\u56de `configured/model/concurrency`\uff0c\u65e5\u5fd7\u3001\u5f02\u5e38\u3001\u5bfc\u51fa\u3001\u540c\u6b65\u548c\u54cd\u5e94\u4f53\u4e00\u5f8b\u4e0d\u56de\u663e token\u3002\n2. **OCR \u670d\u52a1\u5c42**\uff1a\u5728 `backend/services/paddle_ocr.py` \u5b9e\u73b0\u4e00\u4e2a\u4e0e HTTP \u8def\u7531\u89e3\u8026\u7684 `recognize_wechat_images`\u3002\u6bcf\u5f20\u56fe\u5148\u7528\u516c\u4f17\u53f7\u6587\u7ae0 URL \u4f5c Referer \u4e0b\u8f7d\u5230\u5185\u5b58\uff0c\u518d\u4e0a\u4f20\u7ed9 PaddleOCR\u3001\u8f6e\u8be2\u4efb\u52a1\u5e76\u4e0b\u8f7d Markdown \u7ed3\u679c\u3002\u53ea\u5141\u8bb8\u516c\u7f51 `http(s)` \u56fe\u7247\u3001\u62d2\u7edd\u5185\u7f51/\u56de\u73af\u5730\u5740\uff0c\u6821\u9a8c `image/*`\u3001\u9650\u5236\u6d41\u5f0f\u4e0b\u8f7d\u5927\u5c0f\u548c\u6240\u6709\u7f51\u7edc\u8d85\u65f6\u3002\u5355\u56fe\u5931\u8d25\u8fd4\u56de\u7ed3\u6784\u5316\u5931\u8d25\u7ed3\u679c\uff0c\u4e0d\u4f7f\u6574\u7bc7\u6587\u7ae0\u5931\u8d25\u3002\n3. **\u4fdd\u6301\u6b63\u6587\u987a\u5e8f\u5730\u5e76\u53d1**\uff1a\u6293\u53d6\u5668\u5728\u6e05\u6d17\u540e\u7684 `#js_content` \u4e2d\u6309 DOM \u987a\u5e8f\u6536\u96c6\u6709\u6548 `img`\uff0c\u4e3a\u6bcf\u4e2a\u8282\u70b9\u5206\u914d `position`\u3002\u5bf9\u76f8\u540c URL \u4ec5 OCR \u4e00\u6b21\uff0c\u4f46\u4fdd\u7559\u6bcf\u4e2a\u8282\u70b9\u7684\u4f4d\u7f6e\uff1b\u53d7\u9650\u5e76\u53d1\u6267\u884c\u4efb\u52a1\uff0c\u6309\u8f93\u5165\u7d22\u5f15\u6536\u96c6\u7ed3\u679c\uff08`asyncio.gather` \u6216 `executor.map`\uff09\uff0c\u800c\u4e0d\u662f\u6309\u5b8c\u6210\u65f6\u95f4\u8ffd\u52a0\u3002\n4. **\u56de\u586b\u4e0e\u6301\u4e45\u5316**\uff1a\u5728\u6bcf\u4e2a\u56fe\u7247\u8282\u70b9\u540e\u63d2\u5165\u786e\u5b9a\u7684\u6587\u672c\u5757\uff0c\u4f8b\u5982 `[\u56fe\u7247\u6587\u5b57 3]\u2026[/\u56fe\u7247\u6587\u5b57 3]`\uff1b\u968f\u540e\u7531\u73b0\u6709 DOM \u8f6c\u6587\u672c\u6d41\u7a0b\u751f\u6210 `body_text`\u3002\u5c06\u8be5 `body_text` \u5199\u5165\u6587\u7ae0\u7684 source-text/\u8349\u7a3f\u7f13\u5b58\uff0c\u5e76\u8bb0\u5f55\u4e0d\u542b\u654f\u611f\u4fe1\u606f\u7684 OCR \u5143\u6570\u636e\uff08\u56fe\u7247\u6570\u3001\u6210\u529f/\u7a7a\u7ed3\u679c/\u5931\u8d25\u6570\u3001\u8017\u65f6\u3001\u6a21\u578b\uff09\u3002OCR \u672a\u914d\u7f6e\u65f6\u4ecd\u4fdd\u7559\u539f\u6765\u7684\u7eaf\u6587\u672c\u6d41\u7a0b\uff0c\u5e76\u6807\u8bb0\u4e3a\u672a\u5c1d\u8bd5\u3002\n5. **\u4e0b\u6e38\u63a5\u7ebf**\uff1a\u6587\u7ae0\u5904\u7406\u4efb\u52a1\u8c03\u7528 DeepSeek \u65f6\u5fc5\u987b\u4f20\u5165\u5bcc\u96c6\u540e\u7684 `body_text`\uff0c\u4e0d\u80fd\u56de\u9000\u5230\u6293\u53d6\u524d\u7684\u7eaf\u6587\u672c\u5b57\u6bb5\u3002\u65e5\u62a5/\u5468\u62a5\u6309 `content_item_id` \u8bfb\u53d6\u5b8c\u6574 source text\uff1b\u4ec5\u5728\u7f13\u5b58\u7f3a\u5931\u65f6\u624d\u8bfb\u53d6 Markdown \u8349\u7a3f\uff0c\u5e76\u4ece\u201c\u539f\u6587\u6b63\u6587\u201d\u533a\u6bb5\u8bfb\u53d6\u3002\u8fd9\u6837\u8868\u683c\u5185\u5bb9\u4f1a\u540c\u65f6\u8fdb\u5165\u603b\u7ed3\u3001\u68c0\u7d22\u548c\u62a5\u544a\u3002\n6. **\u53d1\u5e03\u4e0e\u89c2\u6d4b**\uff1a\u5148\u4ee5\u4f4e\u5e76\u53d1\u3001\u53ef\u5f00\u5173\u914d\u7f6e\u4e0a\u7ebf\uff1b\u4e3a\u6587\u7ae0\u5904\u7406\u65e5\u5fd7\u589e\u52a0 `ocr_attempted/recognized/failed/elapsed_ms`\u3002\u4e0d\u8981\u8bb0\u5f55\u56fe\u7247\u4e8c\u8fdb\u5236\u3001\u9274\u6743\u5934\u3001\u670d\u52a1\u5546\u539f\u59cb\u9519\u8bef\u6216 token\u3002\u76d1\u6d4b\u5931\u8d25\u7387\u3001\u8d85\u65f6\u7387\u3001\u6bcf\u7bc7 OCR \u5ef6\u8fdf\u548c OCR \u6587\u672c\u8fdb\u5165\u603b\u7ed3\u7684\u8986\u76d6\u7387\uff1b\u5f02\u5e38\u65f6\u5173\u95ed OCR \u5373\u53ef\u5b89\u5168\u964d\u7ea7\u3002\n\n## \u5173\u952e\u4f2a\u4ee3\u7801\n\n```python\n@dataclass\nclass OcrResult:\n    url: str\n    text: str = \"\"\n    status: Literal[\"succeeded\", \"empty\", \"failed\", \"not_configured\"] = \"empty\"\n    error_code: str | None = None\n\nasync def recognize_wechat_images(urls: list[str], article_url: str) -> list[OcrResult]:\n    # urls \u7684\u987a\u5e8f\u5c31\u662f DOM \u987a\u5e8f\uff1b\u4e0d\u53ef\u7528 token \u65f6\u4e0d\u53d1\u7f51\u7edc\u8bf7\u6c42\u3002\n    if not local_secret_store.has(\"paddle_ocr_token\"):\n        return [OcrResult(url=u, status=\"not_configured\") for u in urls]\n\n    semaphore = asyncio.Semaphore(settings.ocr_image_concurrency)\n    async def one(url: str) -> OcrResult:\n        try:\n            async with semaphore:\n                assert_public_http_url(url)       # \u9632 SSRF\n                blob, mime, name = await download_limited_image(\n                    url, referer=article_url, max_bytes=settings.ocr_max_image_bytes\n                )\n                job_id = await paddle.submit(blob, mime, name, token=local_secret_store.get(...))\n                markdown = await paddle.poll_result(job_id, deadline=settings.ocr_deadline)\n                return OcrResult(url, clean_markdown(markdown), \"succeeded\")\n        except TimeoutError:\n            return OcrResult(url, status=\"failed\", error_code=\"timeout\")\n        except Exception:\n            return OcrResult(url, status=\"failed\", error_code=\"request_failed\")\n\n    # gather returns in task creation order even when task completion order differs.\n    return await asyncio.gather(*(one(url) for url in urls))\n\ndef enrich_article_dom(content, article_url):\n    nodes = [(index, img, resolved_url(img)) for index, img in enumerate(valid_images(content), 1)]\n    unique_urls = list(dict.fromkeys(url for _, _, url in nodes))\n    result_by_url = {r.url: r for r in await_or_threaded(recognize_wechat_images(unique_urls, article_url))}\n    for position, img, url in nodes:              # explicitly DOM order\n        result = result_by_url[url]\n        if result.status == \"succeeded\" and result.text:\n            img.insert_after(make_paragraph(f\"[\u56fe\u7247\u6587\u5b57 {position}]\\n{result.text}\\n[/\u56fe\u7247\u6587\u5b57 {position}]\"))\n    return normalize_text(content.get_text(\"\\n\", strip=True))\n\narticle = fetch_wechat_article(url)               # article.body_text is now enriched\nsave_source_text(item.id, article.body_text)\nsummary = deepseek.summarize(article.body_text, article.title)\nreport_material = load_content_source_text(item.id).text\n```\n\n\u5728\u5f53\u524d\u540c\u6b65\u6293\u53d6\u8def\u5f84\u4e2d\uff0c\u53ef\u7528\u53d7\u9650 `ThreadPoolExecutor.map` \u66ff\u4ee3\u534f\u7a0b\uff1b\u540c\u6837\u5fc5\u987b\u4ee5\u8f93\u5165\u5217\u8868\u4e3a\u7ed3\u679c\u987a\u5e8f\uff0c\u4e14\u4e0d\u80fd\u5728 worker \u5185\u76f4\u63a5\u5199 DOM \u6216\u6570\u636e\u5e93\u3002\n\n## \u9a8c\u6536\u6d4b\u8bd5\n\n| \u5c42\u7ea7 | \u573a\u666f\u4e0e\u65ad\u8a00 |\n| --- | --- |\n| OCR \u5355\u5143\u6d4b\u8bd5 | mock \u4e09\u5f20\u56fe\u4ee5\u4e71\u5e8f\u5b8c\u6210\uff1b\u7ed3\u679c\u6570\u7ec4\u548c\u56de\u586b\u5757\u4ecd\u4e3a 1\u30012\u30013 \u987a\u5e8f\u3002\u9a8c\u8bc1\u5e76\u53d1\u6570\u4e0d\u8d85\u8fc7\u914d\u7f6e\u3001\u53bb\u91cd URL \u53ea\u8c03\u7528\u4e00\u6b21\u3001\u7a7a\u7ed3\u679c/\u8d85\u65f6/HTTP \u5931\u8d25\u4e0d\u4f1a\u4e2d\u65ad\u5176\u5b83\u56fe\u7247\u3002 |\n| \u6293\u53d6\u96c6\u6210\u6d4b\u8bd5 | HTML \u4e3a\u201c\u6bb5\u843d A \u2192 \u8868\u683c\u56fe\u7247 \u2192 \u6bb5\u843d B\u201d\uff1b\u65ad\u8a00 `body_text` \u4e2d A < \u56fe\u7247\u6587\u5b57 < B\uff0c\u8868\u683c Markdown \u5b8c\u6574\u51fa\u73b0\uff0c`body_html` \u4e2d\u56fe\u7247\u540e\u7d27\u90bb\u6807\u8bb0\u5757\u3002 |\n| \u5b89\u5168\u4e0e\u914d\u7f6e\u6d4b\u8bd5 | token \u4fdd\u5b58\u540e\u6743\u9650\u4e3a\u4ec5\u5f53\u524d\u7528\u6237\uff1b`GET` \u8bbe\u7f6e\u3001\u9519\u8bef\u3001\u65e5\u5fd7\u548c\u5bfc\u51fa\u5747\u4e0d\u5305\u542b token\u3002\u62d2\u7edd `file:`\u3001localhost\u3001\u79c1\u7f51 IP\u3001\u975e\u56fe\u7247\u7c7b\u578b\u3001\u8d85\u9650\u56fe\u7247\u548c\u91cd\u5b9a\u5411\u5230\u79c1\u7f51\u5730\u5740\u3002 |\n| \u4e0b\u6e38\u56de\u5f52\u6d4b\u8bd5 | mock DeepSeek\uff0c\u65ad\u8a00\u5176\u8f93\u5165\u542b `[\u56fe\u7247\u6587\u5b57]` \u4e0e\u8868\u683c\u5355\u5143\u683c\uff1b\u751f\u6210\u65e5\u62a5/\u5468\u62a5\u65f6\u65ad\u8a00 prompt \u4f7f\u7528\u5b8c\u6574 source text \u800c\u975e\u6458\u8981\u7247\u6bb5\u3002 |\n| \u7aef\u5230\u7aef\u4e0e\u964d\u7ea7 | \u4f7f\u7528\u672c\u5730 fixture \u9875\u9762\u548c mock Paddle \u670d\u52a1\u8dd1 FastAPI \u5904\u7406\u4efb\u52a1\uff0c\u786e\u8ba4 OCR \u6587\u672c\u88ab\u4fdd\u5b58\u3001\u6458\u8981\u4e0e\u65e5\u62a5\u53ef\u89c1\uff1b\u672a\u914d\u7f6e\u6216\u5173\u95ed OCR \u65f6\u6587\u7ae0\u4ecd\u6210\u529f\u5165\u5e93\u4e14\u72b6\u6001\u660e\u786e\u3002 |\n\n\u5b8c\u6210\u6761\u4ef6\uff1a\u4e00\u7bc7\u542b\u8868\u683c\u622a\u56fe\u7684\u516c\u4f17\u53f7\u6587\u7ae0\uff0c\u4ece\u6293\u53d6\u3001\u4fdd\u5b58\u3001DeepSeek \u603b\u7ed3\u5230\u65e5\u62a5\u7684\u6bcf\u4e00\u6bb5\u90fd\u80fd\u8ffd\u8e2a\u5230\u540c\u4e00\u6bb5 OCR \u6587\u672c\uff1b\u4efb\u4e00\u56fe\u7247\u6216 OCR \u670d\u52a1\u5931\u8d25\u53ea\u964d\u4f4e\u8be5\u56fe\u7247\u8986\u76d6\u7387\uff0c\u4e0d\u963b\u585e\u6587\u7ae0\u5904\u7406\u3002\n"}], "grading": {"expectations": [{"text": "OCR is placed before canonical source-text persistence, not only in a UI preview.", "passed": true, "evidence": "Response saves enriched body_text before sending it to the summary and reports."}, {"text": "The solution uses bounded concurrency and preserves original DOM order.", "passed": true, "evidence": "Response uses a semaphore and asyncio.gather / executor.map while retaining node positions."}, {"text": "The token is not returned by GET endpoints or exposed in source/logs.", "passed": true, "evidence": "Response limits GET settings output and describes private token storage and log exclusion."}, {"text": "Daily and weekly reports use the complete enriched article body rather than a short summary excerpt.", "passed": true, "evidence": "Response requires reports to use complete source text and not a summary fragment."}], "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}, "execution_metrics": {"tool_calls": {"estimate": 6}, "total_tool_calls": 6, "errors_encountered": 0, "output_chars": 0, "transcript_chars": 0}, "timing": {"total_duration_seconds": 0.0}, "claims": [], "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}, "eval_feedback": {"suggestions": [{"reason": "All assertions passed in both configurations. Add a cache-specific test that verifies a partial OCR failure marks the article attempted and prevents infinite refetching."}], "overall": "Core assertions are valid but not sufficiently discriminating on their own."}}}], "previous_feedback": {}, "previous_outputs": {}, "benchmark": {"metadata": {"skill_name": "paddleocr-async-integration", "skill_path": "<path/to/skill>", "executor_model": "<model-name>", "analyzer_model": "<model-name>", "timestamp": "2026-07-14T18:08:20Z", "evals_run": [1, 3], "runs_per_configuration": 3}, "runs": [{"eval_id": 3, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 4, "failed": 0, "total": 4, "time_seconds": 0.0, "tokens": 0, "tool_calls": 4, "errors": 0}, "expectations": [{"text": "Defines non-sensitive metadata that distinguishes not-configured/not-attempted from a completed OCR attempt.", "passed": true, "evidence": "Response defines state values including deferred_no_token, not_attempted, in_progress, and completed with attempted, model, counts, safe failures, and no secret fields."}, {"text": "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.", "passed": true, "evidence": "eligible_for_ocr requires a configured token, image_count > 0, allowed unattempted state, and attempted=false. Finalization marks completed/attempted=true even for partial failures."}, {"text": "Keeps the enriched canonical source text as the report/summarization input.", "passed": true, "evidence": "Response names canonical_source_text as the only input to summaries, Q&A/RAG, export, daily, and weekly reports."}, {"text": "Includes deterministic tests for one-time refresh, partial failure, order, and secret non-disclosure.", "passed": true, "evidence": "Tests explicitly cover legacy backfill once, partial failure without reattempt, completion-order independence, concurrent readers, downstream consistency, and token sentinel non-disclosure."}], "notes": []}, {"eval_id": 1, "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 4, "failed": 0, "total": 4, "time_seconds": 0.0, "tokens": 0, "tool_calls": 11, "errors": 0}, "expectations": [{"text": "OCR is placed before canonical source-text persistence, not only in a UI preview.", "passed": true, "evidence": "Response places OCR after HTML cleanup and before article_info.body_text cache persistence, then traces it into summary, search, Q&A, and reports."}, {"text": "The solution uses bounded concurrency and preserves original DOM order.", "passed": true, "evidence": "Response uses a maximum of five workers, executor.map/recognize_many_ordered, and explicitly mutates the DOM in source order."}, {"text": "The token is not returned by GET endpoints or exposed in source/logs.", "passed": true, "evidence": "Response specifies a password PUT flow, owner-only local storage, GET status-only output, and excludes the token from logs, metadata, exports, and tests."}, {"text": "Daily and weekly reports use the complete enriched article body rather than a short summary excerpt.", "passed": true, "evidence": "Response requires wechat_reports._source_material to load the complete enriched source text and rejects use of a summary or fixed-length excerpt."}], "notes": []}, {"eval_id": 3, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 0.75, "passed": 3, "failed": 1, "total": 4, "time_seconds": 0.0, "tokens": 0, "tool_calls": 0, "errors": 0}, "expectations": [{"text": "Defines non-sensitive metadata that distinguishes not-configured/not-attempted from a completed OCR attempt.", "passed": true, "evidence": "Response has configuration revision, cache row status, and secret-excluding fields."}, {"text": "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.", "passed": false, "evidence": "Response permits retryable_failed rows to be queued again after next_retry_at. It is a valid queue design, but does not meet this skill's intended one-attempt cache invariant for partial image failure."}, {"text": "Keeps the enriched canonical source text as the report/summarization input.", "passed": true, "evidence": "Response uses a derived source_text to feed downstream consumers and rebuilds it in image ordinal order."}, {"text": "Includes deterministic tests for one-time refresh, partial failure, order, and secret non-disclosure.", "passed": true, "evidence": "Response provides fixed-clock tests for queue deduplication, retries, order, secret persistence boundaries, and downstream stability."}], "notes": []}, {"eval_id": 1, "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 4, "failed": 0, "total": 4, "time_seconds": 0.0, "tokens": 0, "tool_calls": 6, "errors": 0}, "expectations": [{"text": "OCR is placed before canonical source-text persistence, not only in a UI preview.", "passed": true, "evidence": "Response saves enriched body_text before sending it to the summary and reports."}, {"text": "The solution uses bounded concurrency and preserves original DOM order.", "passed": true, "evidence": "Response uses a semaphore and asyncio.gather / executor.map while retaining node positions."}, {"text": "The token is not returned by GET endpoints or exposed in source/logs.", "passed": true, "evidence": "Response limits GET settings output and describes private token storage and log exclusion."}, {"text": "Daily and weekly reports use the complete enriched article body rather than a short summary excerpt.", "passed": true, "evidence": "Response requires reports to use complete source text and not a summary fragment."}], "notes": []}], "run_summary": {"with_skill": {"pass_rate": {"mean": 1.0, "stddev": 0.0, "min": 1.0, "max": 1.0}, "time_seconds": {"mean": 0.0, "stddev": 0.0, "min": 0.0, "max": 0.0}, "tokens": {"mean": 0.0, "stddev": 0.0, "min": 0, "max": 0}}, "without_skill": {"pass_rate": {"mean": 0.875, "stddev": 0.1768, "min": 0.75, "max": 1.0}, "time_seconds": {"mean": 0.0, "stddev": 0.0, "min": 0.0, "max": 0.0}, "tokens": {"mean": 0.0, "stddev": 0.0, "min": 0, "max": 0}}, "delta": {"pass_rate": "+0.12", "time_seconds": "+0.0", "tokens": "+0"}}, "notes": []}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

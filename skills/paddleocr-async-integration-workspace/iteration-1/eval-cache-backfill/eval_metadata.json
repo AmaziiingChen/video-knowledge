@@ -1,0 +1,11 @@
+{
+  "eval_id": 3,
+  "eval_name": "cache-backfill-idempotency",
+  "prompt": "已经有一批公众号文章缓存于 OCR 接入之前。现在用户补填了 PaddleOCR token，如何让旧文章有机会补上图片文字、又避免每次读取文章都重复 OCR？请给出数据模型和测试策略。",
+  "assertions": [
+    "Defines non-sensitive metadata that distinguishes not-configured/not-attempted from a completed OCR attempt.",
+    "Backfills only image-bearing pre-OCR caches after token configuration, then remains idempotent even if one image failed.",
+    "Keeps the enriched canonical source text as the report/summarization input.",
+    "Includes deterministic tests for one-time refresh, partial failure, order, and secret non-disclosure."
+  ]
+}

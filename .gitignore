@@ -1,0 +1,31 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.egg-info/
+
+# Local secrets and runtime data
+backend/.env
+data/
+.claude/settings.local.json
+
+# Frontend build/dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/dist-public-report/
+frontend/.pytest_cache/
+frontend/*.local
+
+# Desktop packaging outputs
+desktop/backend/
+desktop/build/
+
+# Logs
+*.log
+logs/

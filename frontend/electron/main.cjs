@@ -1,0 +1,582 @@
+const { app, BrowserWindow, clipboard, dialog, shell, ipcMain, net, protocol, safeStorage, session, Tray, Menu, nativeImage } = require('electron')
+const { spawn } = require('child_process')
+const { randomUUID } = require('crypto')
+const fs = require('fs')
+const http = require('http')
+const path = require('path')
+const { pathToFileURL } = require('url')
+const { createCampusWebVpnController } = require('./campus-webvpn.cjs')
+const { createPlatformAuthController } = require('./platform-auth.cjs')
+const { directChildEnvironment } = require('./network-env.cjs')
+const { exportMarkdownDocument } = require('./markdown-export.cjs')
+const { isExpectedBackendHealth } = require('./backend-health.cjs')
+const { backendSpawnOptions, terminateBackendProcess } = require('./backend-process.cjs')
+
+const ROOT_DIR = path.resolve(__dirname, '..', '..')
+const BACKEND_URL = 'http://127.0.0.1:8000'
+const HEALTH_URL = `${BACKEND_URL}/api/health`
+const WECHAT_PREVIEW_PARTITION = 'persist:knowledgehub-wechat-preview'
+const LOCAL_HTML_PREVIEW_PARTITION = 'persist:knowledgehub-local-html-preview'
+const APP_PROTOCOL = 'knowledgehub'
+const APP_ORIGIN = `${APP_PROTOCOL}://app`
+const BACKEND_INSTANCE_TOKEN = randomUUID()
+
+// KnowledgeHub owns explicit direct-network clients. Do not let Electron
+// navigation or platform login windows silently follow the macOS system proxy.
+app.commandLine.appendSwitch('no-proxy-server')
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+])
+
+let backendProcess = null
+let mainWindow = null
+let campusWebVpn = null
+let platformAuth = null
+let isQuitting = false
+let backendReady = false
+let backendReadyWaiters = []
+let notificationTray = null
+let pendingNotifications = []
+
+function trayIcon() {
+  return nativeImage.createFromDataURL('data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path fill="black" d="M9 1.5a5 5 0 0 0-5 5v3.4L2.6 12v1.2h12.8V12L14 9.9V6.5a5 5 0 0 0-5-5ZM6.7 14.4a2.5 2.5 0 0 0 4.6 0H6.7Z"/></svg>'
+  ))
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function updateNotificationTray() {
+  if (!notificationTray) return
+  const entries = pendingNotifications.slice(0, 8).map((item) => ({
+    label: String(item.title || '待查看资料').replace(/\s+/g, ' ').slice(0, 54),
+    toolTip: String(item.body || item.title || ''),
+    click: () => {
+      showMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('knowledgehub:open-pending-notification', item)
+    },
+  }))
+  const unread = pendingNotifications.length
+  notificationTray.setTitle(unread ? String(unread) : '')
+  notificationTray.setToolTip(unread ? `KnowledgeHub：${unread} 条待查看` : 'KnowledgeHub')
+  notificationTray.setContextMenu(Menu.buildFromTemplate([
+    { label: unread ? `待查看 ${unread} 条` : '暂无待查看事项', enabled: false },
+    ...(entries.length ? entries : []),
+    { type: 'separator' },
+    { label: '打开 KnowledgeHub', click: showMainWindow },
+    { label: '退出 KnowledgeHub', click: () => app.quit() },
+  ]))
+}
+
+function createNotificationTray() {
+  if (process.platform !== 'darwin' || notificationTray) return
+  notificationTray = new Tray(trayIcon())
+  notificationTray.setPressedImage(trayIcon())
+  notificationTray.on('click', showMainWindow)
+  updateNotificationTray()
+}
+
+function markBackendReady() {
+  backendReady = true
+  for (const resolve of backendReadyWaiters) resolve(true)
+  backendReadyWaiters = []
+}
+
+function logRendererDiagnostic(kind, detail) {
+  try {
+    const runtime = backendRuntime()
+    fs.mkdirSync(runtime.logDir, { recursive: true })
+    const entry = `[${new Date().toISOString()}] ${kind}: ${detail}\n`
+    fs.appendFileSync(path.join(runtime.logDir, 'desktop-frontend.log'), entry)
+  } catch {
+    // Diagnostics must never prevent the desktop window from opening.
+  }
+}
+
+function normalizeExternalUrl(value) {
+  try {
+    const url = new URL(String(value || ''))
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? url.toString() : ''
+  } catch {
+    return ''
+  }
+}
+
+async function openExternalUrl(value) {
+  const url = normalizeExternalUrl(value)
+  if (!url) throw new Error('不支持的外部链接')
+  await shell.openExternal(url)
+  return true
+}
+
+function isWechatPreviewUrl(value) {
+  try {
+    const url = new URL(String(value || ''))
+    return url.protocol === 'https:' && url.hostname === 'mp.weixin.qq.com'
+  } catch {
+    return false
+  }
+}
+
+function isLocalHtmlPreviewUrl(value) {
+  try {
+    const url = new URL(String(value || ''))
+    return url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function isSameSiteLocalHtmlPreviewNavigation(currentValue, nextValue) {
+  try {
+    const current = new URL(String(currentValue || ''))
+    const next = new URL(String(nextValue || ''))
+    return current.protocol === 'https:'
+      && next.protocol === 'https:'
+      && current.hostname === next.hostname
+      && current.port === next.port
+  } catch {
+    return false
+  }
+}
+
+function configureWechatPreviewSession() {
+  const previewSession = session.fromPartition(WECHAT_PREVIEW_PARTITION)
+  previewSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  return previewSession
+}
+
+function configureLocalHtmlPreviewSession() {
+  const previewSession = session.fromPartition(LOCAL_HTML_PREVIEW_PARTITION)
+  previewSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  return previewSession
+}
+
+function frontendAssetsDirectory() {
+  return app.isPackaged
+    ? path.join(app.getAppPath(), 'dist')
+    : path.join(ROOT_DIR, 'frontend', 'dist')
+}
+
+function registerLocalAppProtocol() {
+  protocol.handle(APP_PROTOCOL, (request) => {
+    try {
+      const url = new URL(request.url)
+      if (url.protocol !== `${APP_PROTOCOL}:` || url.hostname !== 'app') {
+        return new Response('Not found', { status: 404 })
+      }
+      const relativePath = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html'
+      const root = frontendAssetsDirectory()
+      const target = path.resolve(root, relativePath)
+      const relativeTarget = path.relative(root, target)
+      if (relativeTarget.startsWith('..') || path.isAbsolute(relativeTarget) || !fs.statSync(target).isFile()) {
+        return new Response('Not found', { status: 404 })
+      }
+      return net.fetch(pathToFileURL(target).toString())
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
+
+ipcMain.handle('knowledgehub:choose-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] })
+  return result.canceled ? '' : (result.filePaths[0] || '')
+})
+
+ipcMain.handle('knowledgehub:choose-executable', async (_event, toolName = '') => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: toolName ? `选择 ${toolName} 可执行文件` : '选择可执行文件',
+    properties: ['openFile'],
+  })
+  return result.canceled ? '' : (result.filePaths[0] || '')
+})
+
+ipcMain.handle('knowledgehub:export-markdown', async (_event, payload = {}) => {
+  const runtime = backendRuntime()
+  const request = payload && typeof payload === 'object' ? payload : {}
+  return exportMarkdownDocument({
+    dataDir: runtime.dataDir,
+    title: request.title,
+    markdown: request.markdown,
+  })
+})
+
+ipcMain.handle('knowledgehub:copy-text', (_event, value) => {
+  const text = typeof value === 'string' ? value : ''
+  if (!text.trim()) throw new Error('没有可复制的内容')
+  clipboard.writeText(text)
+  return true
+})
+
+ipcMain.handle('knowledgehub:reveal-path', (_event, value) => {
+  const requestedPath = typeof value === 'string' ? value.trim() : ''
+  if (!requestedPath) throw new Error('没有可打开的位置')
+  const targetPath = path.resolve(requestedPath)
+  if (!fs.existsSync(targetPath)) throw new Error('文件或文件夹不存在')
+  shell.showItemInFolder(targetPath)
+  return true
+})
+
+ipcMain.handle('knowledgehub:open-path', async (_event, value) => {
+  const requestedPath = typeof value === 'string' ? value.trim() : ''
+  if (!requestedPath) throw new Error('没有可打开的文件')
+  const targetPath = path.resolve(requestedPath)
+  if (!fs.existsSync(targetPath)) throw new Error('原始文件不存在')
+  const error = await shell.openPath(targetPath)
+  if (error) throw new Error(error)
+  return true
+})
+
+ipcMain.handle('knowledgehub:open-external', async (_event, url = '') => openExternalUrl(url))
+ipcMain.handle('knowledgehub:wait-for-backend', () => {
+  if (backendReady) return true
+  return new Promise((resolve) => backendReadyWaiters.push(resolve))
+})
+ipcMain.handle('knowledgehub:set-pending-notifications', (_event, items = []) => {
+  pendingNotifications = Array.isArray(items)
+    ? items.slice(0, 100).map((item) => ({
+      id: String(item?.id || ''), title: String(item?.title || '').slice(0, 240),
+      body: String(item?.body || '').slice(0, 800), content_item_id: String(item?.content_item_id || ''),
+      target_view: String(item?.target_view || 'library'),
+    })).filter((item) => item.id && item.title)
+    : []
+  updateNotificationTray()
+  return true
+})
+
+ipcMain.handle('knowledgehub:campus-auth-status', async () => campusWebVpn.status())
+
+ipcMain.handle('knowledgehub:campus-connect', async () => campusWebVpn.connect(mainWindow))
+
+ipcMain.handle('knowledgehub:campus-disconnect', async () => campusWebVpn.disconnect())
+
+ipcMain.handle('knowledgehub:campus-sync-gwt', async (_event, request = 20) => campusWebVpn.sync(request))
+ipcMain.handle('knowledgehub:campus-download-attachment', async (_event, payload = {}) => {
+  const request = payload && typeof payload === 'object' ? payload : {}
+  return campusWebVpn.downloadAttachment(request.url, request.name)
+})
+
+ipcMain.handle('knowledgehub:platform-auth-connect', async (_event, platform) => platformAuth.connect(platform, mainWindow))
+ipcMain.handle('knowledgehub:platform-auth-disconnect', async (_event, platform) => platformAuth.disconnect(platform))
+
+function waitForHealth(url, timeoutMs = 45000) {
+  const started = Date.now()
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      inspectBackendHealth(url).then((health) => {
+        if (health.ready) {
+          resolve()
+          return
+        }
+        if (Date.now() - started > timeoutMs) {
+          reject(new Error('后端服务启动超时'))
+          return
+        }
+        setTimeout(tick, 500)
+      })
+    }
+    tick()
+  })
+}
+
+function inspectBackendHealth(url) {
+  return new Promise((resolve) => {
+    const request = http.get(url, { timeout: 1200 }, (response) => {
+      let body = ''
+      response.setEncoding('utf8')
+      response.on('data', (chunk) => {
+        if (body.length < 16_384) body += chunk
+      })
+      response.on('end', () => {
+        let payload = null
+        try {
+          payload = JSON.parse(body)
+        } catch {
+          payload = null
+        }
+        resolve({
+          reachable: true,
+          ready: response.statusCode >= 200
+            && response.statusCode < 300
+            && isExpectedBackendHealth(payload, BACKEND_INSTANCE_TOKEN),
+        })
+      })
+    })
+    request.on('timeout', () => {
+      request.destroy()
+      resolve({ reachable: false, ready: false })
+    })
+    request.on('error', () => resolve({ reachable: false, ready: false }))
+  })
+}
+
+function pickPython() {
+  if (process.env.PYTHON_BIN) return process.env.PYTHON_BIN
+  if (process.platform === 'win32') return 'python'
+  const candidates = [
+    '/opt/miniconda3/bin/python',
+    '/opt/homebrew/bin/python3',
+    '/usr/local/bin/python3',
+    'python3',
+  ]
+  return candidates.find((candidate) => candidate === 'python3' || fs.existsSync(candidate)) || 'python3'
+}
+
+function backendRuntime() {
+  if (!app.isPackaged) {
+    const dataDir = path.join(ROOT_DIR, 'data')
+    return {
+      cwd: path.join(ROOT_DIR, 'backend'),
+      command: pickPython(),
+      args: ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000', '--reload', '--reload-dir', path.join(ROOT_DIR, 'backend')],
+      dataDir,
+      envFile: path.join(ROOT_DIR, 'backend', '.env'),
+      logDir: path.join(dataDir, 'logs'),
+    }
+  }
+
+  const dataDir = path.join(app.getPath('userData'), 'data')
+  const executable = process.platform === 'win32' ? 'knowledgehub-backend.exe' : 'knowledgehub-backend'
+  return {
+    cwd: path.join(process.resourcesPath, 'backend', 'knowledgehub-backend'),
+    command: path.join(process.resourcesPath, 'backend', 'knowledgehub-backend', executable),
+    args: [],
+    dataDir,
+    envFile: path.join(app.getPath('userData'), 'settings.env'),
+    logDir: path.join(dataDir, 'logs'),
+  }
+}
+
+async function ensureBackend() {
+  const existingHealth = await inspectBackendHealth(HEALTH_URL)
+  if (existingHealth.ready) return
+  if (existingHealth.reachable) {
+    throw new Error('本机端口 8000 已被另一个后端或其他服务占用，请先关闭该进程后重试')
+  }
+
+  const runtime = backendRuntime()
+  fs.mkdirSync(runtime.logDir, { recursive: true })
+  const backendLog = path.join(runtime.logDir, 'desktop-backend.log')
+  const log = fs.openSync(backendLog, 'a')
+  const pathEntries = process.platform === 'darwin'
+    ? ['/opt/miniconda3/bin', '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '']
+    : [process.env.PATH || '']
+  const env = {
+    ...directChildEnvironment(process.env),
+    PATH: pathEntries.filter(Boolean).join(path.delimiter),
+    NO_PROXY: '127.0.0.1,localhost',
+    no_proxy: '127.0.0.1,localhost',
+    DATA_DIR: runtime.dataDir,
+    KNOWLEDGEHUB_ENV_FILE: runtime.envFile,
+    KNOWLEDGEHUB_BACKEND_HOST: '127.0.0.1',
+    KNOWLEDGEHUB_BACKEND_PORT: '8000',
+    KNOWLEDGEHUB_INSTANCE_TOKEN: BACKEND_INSTANCE_TOKEN,
+    APP_VERSION: app.getVersion(),
+  }
+
+  backendProcess = spawn(
+    runtime.command,
+    runtime.args,
+    {
+      cwd: runtime.cwd,
+      env,
+      stdio: ['ignore', log, log],
+      ...backendSpawnOptions(),
+    },
+  )
+
+  backendProcess.on('exit', () => {
+    backendProcess = null
+  })
+
+  await waitForHealth(HEALTH_URL)
+}
+
+function createWindow(entryPath = 'index.html') {
+  const macTitleBarOptions = process.platform === 'darwin'
+    ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 14 } }
+    : {}
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 980,
+    minHeight: 680,
+    title: 'KnowledgeHub',
+    frame: false,
+    ...macTitleBarOptions,
+    backgroundColor: '#FDF6E3',
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: true,
+      webSecurity: true,
+      backgroundThrottling: false,
+    },
+  })
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show()
+  })
+
+  mainWindow.webContents.on('console-message', (event, legacyDetails) => {
+    // Electron 42 moved console fields onto the event object.  Accept the
+    // former shape too so a renderer exception never turns into a blank log
+    // entry (which made a white screen impossible to diagnose).
+    const details = event?.message !== undefined ? event : legacyDetails
+    if (Number(details?.level) < 2) return
+    logRendererDiagnostic(
+      'renderer-console',
+      `${details?.sourceId || 'unknown'}:${details?.lineNumber || 0} ${details?.message || '未提供错误文本'}`,
+    )
+  })
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    logRendererDiagnostic('load-failed', `${errorCode} ${errorDescription} (${validatedURL})`)
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    logRendererDiagnostic('renderer-gone', `${details.reason || 'unknown'} (${details.exitCode ?? ''})`)
+  })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    void openExternalUrl(url).catch(() => {})
+    return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    const isWechatPreview = isWechatPreviewUrl(params.src) && params.partition === WECHAT_PREVIEW_PARTITION
+    const isLocalHtmlPreview = isLocalHtmlPreviewUrl(params.src) && params.partition === LOCAL_HTML_PREVIEW_PARTITION
+    if (!isWechatPreview && !isLocalHtmlPreview) {
+      event.preventDefault()
+      return
+    }
+    webPreferences.contextIsolation = true
+    webPreferences.nodeIntegration = false
+    webPreferences.sandbox = true
+    webPreferences.webSecurity = true
+    delete webPreferences.preload
+  })
+
+  mainWindow.webContents.on('did-attach-webview', (_event, guestContents) => {
+    const isWechatPreview = guestContents.session === session.fromPartition(WECHAT_PREVIEW_PARTITION)
+    const isLocalHtmlPreview = guestContents.session === session.fromPartition(LOCAL_HTML_PREVIEW_PARTITION)
+    guestContents.setWindowOpenHandler(({ url }) => {
+      if (isLocalHtmlPreview && isSameSiteLocalHtmlPreviewNavigation(guestContents.getURL(), url)) {
+        void guestContents.loadURL(url).catch(() => {})
+        return { action: 'deny' }
+      }
+      void openExternalUrl(url).catch(() => {})
+      return { action: 'deny' }
+    })
+    guestContents.on('before-input-event', (event, input) => {
+      const key = String(input?.key || '').toLowerCase()
+      if (input?.type !== 'keyDown' || key !== 'f' || !(input.control || input.meta) || input.alt) return
+      event.preventDefault()
+      if (!mainWindow?.isDestroyed()) mainWindow.webContents.send('knowledgehub:preview-find')
+    })
+    if (isWechatPreview) {
+      guestContents.on('will-navigate', (event, url) => {
+        if (isWechatPreviewUrl(url)) return
+        event.preventDefault()
+        void openExternalUrl(url).catch(() => {})
+      })
+    } else if (isLocalHtmlPreview) {
+      let isInitialPageLoad = true
+      guestContents.once('did-finish-load', () => {
+        isInitialPageLoad = false
+      })
+      guestContents.on('will-navigate', (event, url) => {
+        // Keep same-site reading navigation in the in-app preview.  The
+        // original load may also follow HTTPS redirects; other destinations
+        // remain external so this surface never becomes a general browser.
+        if (isInitialPageLoad && isLocalHtmlPreviewUrl(url)) return
+        if (isSameSiteLocalHtmlPreviewNavigation(guestContents.getURL(), url)) return
+        event.preventDefault()
+        void openExternalUrl(url).catch(() => {})
+      })
+    }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith(`${APP_ORIGIN}/`)) return
+    event.preventDefault()
+    void openExternalUrl(url).catch(() => {})
+  })
+
+  mainWindow.on('close', (event) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      event.preventDefault()
+      mainWindow.hide()
+    }
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+
+  const entryHtml = path.join(frontendAssetsDirectory(), entryPath)
+  if (!fs.existsSync(entryHtml)) {
+    throw new Error(`未找到前端资源：${entryHtml}`)
+  }
+  mainWindow.loadURL(`${APP_ORIGIN}/${entryPath}`)
+}
+
+app.whenReady().then(async () => {
+  registerLocalAppProtocol()
+  configureWechatPreviewSession()
+  configureLocalHtmlPreviewSession()
+  campusWebVpn = createCampusWebVpnController({ app, BrowserWindow, session, safeStorage, dialog })
+  platformAuth = createPlatformAuthController({ BrowserWindow, session, backendUrl: BACKEND_URL })
+  // Render the real Vue workbench immediately. Its data hydration waits on the
+  // bridge below, so the visible shell does not make failed API requests while
+  // Python is still booting.
+  createWindow()
+  createNotificationTray()
+
+  try {
+    await ensureBackend()
+    markBackendReady()
+  } catch (error) {
+    dialog.showErrorBox(
+      'KnowledgeHub 启动失败',
+      `${error.message}\n\n后端日志：${path.join(backendRuntime().logDir, 'desktop-backend.log')}`,
+    )
+    app.quit()
+  }
+})
+
+app.on('activate', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+  } else {
+    createWindow()
+  }
+})
+
+app.on('before-quit', () => {
+  isQuitting = true
+  terminateBackendProcess(backendProcess)
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})

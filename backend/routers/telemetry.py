@@ -1,0 +1,39 @@
+from typing import Literal
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+from services import telemetry
+
+
+router = APIRouter()
+
+
+class TelemetrySettingsRequest(BaseModel):
+    enabled: bool
+
+
+class TelemetryEventRequest(BaseModel):
+    event_name: Literal[
+        "app_started", "workspace_opened", "import_started", "import_completed", "task_enqueued",
+        "pipeline_stage_completed", "pipeline_stage_failed", "task_finished", "task_control_used",
+        "paddle_ocr_completed", "obsidian_sync_completed", "search_completed", "clipboard_listener_changed",
+        "update_check_completed", "telemetry_consent_changed", "update_download_page_opened",
+        "media_download_completed", "asr_completed", "ai_summary_completed", "export_completed",
+    ]
+    properties: dict[str, str] = {}
+
+
+@router.get("/telemetry")
+def telemetry_status() -> dict[str, object]:
+    return telemetry.status()
+
+
+@router.put("/telemetry")
+def save_telemetry_settings(request: TelemetrySettingsRequest) -> dict[str, object]:
+    return telemetry.set_enabled(request.enabled)
+
+
+@router.post("/telemetry/events", status_code=204)
+def record_telemetry_event(request: TelemetryEventRequest) -> None:
+    telemetry.record(request.event_name, request.properties)

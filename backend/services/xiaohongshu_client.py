@@ -1,0 +1,343 @@
+"""Narrow local bridge to the bundled Spider_XHS PC collector.
+
+Only read-side note and personal-favorites calls are exposed here.  Keeping
+the third-party signing runtime behind this module prevents it leaking into
+the normal provider, task, and reader contracts.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from pathlib import Path
+import sys
+from threading import Lock
+from urllib.parse import parse_qs, urlparse
+
+from config import settings
+from services.source_context import MAX_STORED_COMMENTS
+
+
+_VENDOR_ROOT = (
+    Path(getattr(sys, "_MEIPASS")) / "vendor" / "Spider_XHS"
+    if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None)
+    else Path(__file__).resolve().parents[1] / "vendor" / "Spider_XHS"
+)
+_IMPORT_LOCK = Lock()
+
+
+class XiaohongshuClientError(ValueError):
+    """A safe, actionable error from the local XHS collector."""
+
+
+@dataclass(frozen=True)
+class XiaohongshuNote:
+    note_id: str
+    source_url: str
+    title: str
+    author: str
+    author_url: str
+    avatar_url: str
+    description: str
+    image_urls: tuple[str, ...]
+    published_at: str
+    tags: tuple[str, ...]
+    stats: dict[str, int]
+    ip_location: str
+    comment_sample: tuple[dict[str, object], ...] = ()
+    comments_complete: bool = False
+
+
+def xiaohongshu_cookie_path() -> Path:
+    return settings.data_dir / "xiaohongshu_cookie.txt"
+
+
+def save_xiaohongshu_cookie(cookie: str) -> None:
+    value = str(cookie or "").strip()
+    if not value:
+        raise XiaohongshuClientError("小红书 Cookie 不能为空")
+    path = xiaohongshu_cookie_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        # Windows and a few network volumes do not expose POSIX permissions.
+        pass
+
+
+def clear_xiaohongshu_cookie() -> None:
+    xiaohongshu_cookie_path().unlink(missing_ok=True)
+
+
+def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
+    path = xiaohongshu_cookie_path()
+    configured = path.is_file() and bool(path.read_text(encoding="utf-8", errors="ignore").strip())
+    if not configured:
+        return {
+            "configured": False,
+            "state": "missing",
+            "label": "小红书登录态未连接",
+            "detail": "请在应用内登录，或手动粘贴 Cookie。",
+        }
+    if not probe:
+        return {
+            "configured": True,
+            "state": "unknown",
+            "label": "小红书登录态已保存",
+            "detail": "已保存到本机；点击“检查可用性”验证。",
+        }
+    try:
+        success, message, profile = _api().get_user_me()
+        user_id = str(((profile or {}).get("data") or {}).get("user_id") or "").strip()
+        if success and user_id:
+            return {
+                "configured": True,
+                "state": "valid",
+                "label": "小红书登录态可用",
+                "detail": "会话已验证，可读取图文和“我的收藏”。",
+            }
+        return {
+            "configured": True,
+            "state": "invalid",
+            "label": "小红书登录态需要更新",
+            "detail": str(message or "平台未确认当前会话")[:300],
+        }
+    except Exception as exc:
+        return {
+            "configured": True,
+            "state": "unknown",
+            "label": "小红书登录态待确认",
+            "detail": str(exc)[:300],
+        }
+
+
+def normalize_note_url(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    note_id = parsed.path.rstrip("/").split("/")[-1]
+    if not note_id or note_id in {"explore", "discovery", ""}:
+        raise XiaohongshuClientError("不是有效的小红书笔记链接")
+    query = parse_qs(parsed.query)
+    token = str((query.get("xsec_token") or [""])[-1]).strip()
+    source = str((query.get("xsec_source") or ["pc_search"])[-1]).strip() or "pc_search"
+    suffix = f"?xsec_token={token}&xsec_source={source}" if token else f"?xsec_source={source}"
+    return f"https://www.xiaohongshu.com/explore/{note_id}{suffix}"
+
+
+def note_id_from_url(value: str) -> str:
+    return urlparse(normalize_note_url(value)).path.rsplit("/", 1)[-1]
+
+
+def fetch_note(
+    source_url: str,
+    *,
+    include_comments: bool = True,
+    comment_limit: int = 24,
+    comment_pages: int = 1,
+) -> XiaohongshuNote:
+    api = _api()
+    url = normalize_note_url(source_url)
+    try:
+        success, message, payload = api.get_note_info(url)
+    except Exception as exc:  # Signing/runtime details must not leak to the UI.
+        raise XiaohongshuClientError(f"小红书笔记读取失败：{exc}") from exc
+    if not success or not isinstance(payload, dict):
+        raise XiaohongshuClientError(f"小红书笔记读取失败：{message or '未知错误'}")
+    try:
+        raw = ((payload.get("data") or {}).get("items") or [])[0]
+        note = _note_from_raw(raw, source_url=url)
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        raise XiaohongshuClientError("小红书未返回可读取的图文笔记") from exc
+    if not include_comments:
+        return note
+    comments, complete = _fetch_note_comment_sample(
+        api,
+        url,
+        limit=comment_limit,
+        pages=comment_pages,
+    )
+    return replace(note, comment_sample=tuple(comments), comments_complete=complete)
+
+
+def fetch_my_favorites(*, limit: int = 5) -> list[XiaohongshuNote]:
+    api = _api()
+    try:
+        success, message, profile = api.get_user_me()
+        user_id = str(((profile or {}).get("data") or {}).get("user_id") or "").strip()
+        if not success or not user_id:
+            raise XiaohongshuClientError(message or "未读取到当前登录账号")
+        # The upstream helper walks every page of a user's collection.  This
+        # product deliberately samples only the first page: background sync is
+        # incremental and capped, so fetching a large history wastes time and
+        # makes a normal source check look stalled.
+        success, message, payload = api.get_user_collect_note_info(user_id, "", xsec_source="pc_user")
+        notes = list(((payload or {}).get("data") or {}).get("notes") or [])
+    except Exception as exc:
+        raise XiaohongshuClientError(f"读取小红书收藏失败：{exc}") from exc
+    if not success:
+        raise XiaohongshuClientError(f"读取小红书收藏失败：{message or '未知错误'}")
+    resolved: list[XiaohongshuNote] = []
+    for entry in list(notes or [])[: max(1, min(int(limit), 20))]:
+        note_id = str(entry.get("note_id") or entry.get("id") or "").strip()
+        token = str(entry.get("xsec_token") or "").strip()
+        if not note_id:
+            continue
+        url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={token}&xsec_source=pc_user"
+        try:
+            resolved.append(fetch_note(url, include_comments=False))
+        except XiaohongshuClientError:
+            continue
+    return resolved
+
+
+def _api():
+    cookie_path = xiaohongshu_cookie_path()
+    try:
+        cookie = cookie_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise XiaohongshuClientError("请先在设置中填写小红书 Cookie") from exc
+    if not cookie:
+        raise XiaohongshuClientError("请先在设置中填写小红书 Cookie")
+    if not _VENDOR_ROOT.is_dir():
+        raise XiaohongshuClientError("小红书采集组件未安装")
+    with _IMPORT_LOCK:
+        vendor = str(_VENDOR_ROOT)
+        if vendor not in sys.path:
+            sys.path.insert(0, vendor)
+        from apis.xhs_pc_apis import XHS_Apis
+        from xhs_utils.xhs_pc import XHSPcAuth
+    try:
+        return XHS_Apis(XHSPcAuth.from_cookie(cookie)).bootstrap()
+    except Exception as exc:
+        raise XiaohongshuClientError("小红书登录状态失效，请重新填写 Cookie") from exc
+
+
+def _note_from_raw(raw: dict, *, source_url: str) -> XiaohongshuNote:
+    card = raw.get("note_card") or {}
+    user = card.get("user") or {}
+    images = []
+    for image in list(card.get("image_list") or []):
+        info_list = list(image.get("info_list") or [])
+        candidate = next((str(item.get("url") or "") for item in reversed(info_list) if item.get("url")), "")
+        if candidate:
+            images.append(candidate)
+    interaction = card.get("interact_info") or {}
+    raw_id = str(raw.get("id") or note_id_from_url(source_url))
+    return XiaohongshuNote(
+        note_id=raw_id,
+        source_url=normalize_note_url(source_url),
+        title=str(card.get("title") or "").strip() or "无标题小红书笔记",
+        author=str(user.get("nickname") or "小红书用户").strip(),
+        author_url=f"https://www.xiaohongshu.com/user/profile/{str(user.get('user_id') or '').strip()}",
+        avatar_url=str(user.get("avatar") or ""),
+        description=str(card.get("desc") or "").strip(),
+        image_urls=tuple(images),
+        published_at=_format_timestamp(card.get("time")),
+        tags=tuple(str(tag.get("name") or "").strip() for tag in list(card.get("tag_list") or []) if tag.get("name")),
+        stats={key: _as_int(interaction.get(field)) for key, field in {"liked": "liked_count", "collected": "collected_count", "comment": "comment_count", "shared": "share_count"}.items()},
+        ip_location=str(card.get("ip_location") or ""),
+    )
+
+
+def _fetch_note_comment_sample(
+    api,
+    source_url: str,
+    *,
+    limit: int,
+    pages: int,
+) -> tuple[list[dict[str, object]], bool]:
+    query = parse_qs(urlparse(source_url).query)
+    token = str((query.get("xsec_token") or [""])[-1]).strip()
+    if not token:
+        return [], False
+    bounded_limit = max(1, min(int(limit), MAX_STORED_COMMENTS))
+    bounded_pages = max(1, min(int(pages), 6))
+    comments: list[dict[str, object]] = []
+    known_ids: set[str] = set()
+    cursor = ""
+    complete = False
+    for _page_number in range(bounded_pages):
+        try:
+            success, _message, payload = api.get_note_out_comment(
+                note_id_from_url(source_url),
+                cursor,
+                token,
+            )
+        except Exception:
+            break
+        if not success or not isinstance(payload, dict):
+            break
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        roots = data.get("comments") if isinstance(data.get("comments"), list) else []
+        for root in roots:
+            if not isinstance(root, dict):
+                continue
+            root_id = str(root.get("id") or "")
+            _append_xiaohongshu_comment(comments, known_ids, root, limit=bounded_limit)
+            for child in root.get("sub_comments") if isinstance(root.get("sub_comments"), list) else []:
+                if isinstance(child, dict):
+                    _append_xiaohongshu_comment(
+                        comments,
+                        known_ids,
+                        child,
+                        parent_id=root_id,
+                        limit=bounded_limit,
+                    )
+                if len(comments) >= bounded_limit:
+                    break
+            if len(comments) >= bounded_limit:
+                break
+        complete = not bool(data.get("has_more"))
+        if complete or len(comments) >= bounded_limit:
+            break
+        next_cursor = str(data.get("cursor") or "").strip()
+        if not next_cursor or next_cursor == cursor:
+            break
+        cursor = next_cursor
+    return comments, complete
+
+
+def _append_xiaohongshu_comment(
+    target: list[dict[str, object]],
+    known_ids: set[str],
+    raw: dict[str, object],
+    *,
+    parent_id: str = "",
+    limit: int,
+) -> None:
+    if len(target) >= limit:
+        return
+    comment_id = str(raw.get("id") or "")
+    if comment_id and comment_id in known_ids:
+        return
+    target.append(_xiaohongshu_comment(raw, parent_id=parent_id))
+    if comment_id:
+        known_ids.add(comment_id)
+
+
+def _xiaohongshu_comment(raw: dict[str, object], *, parent_id: str = "") -> dict[str, object]:
+    user = raw.get("user_info") if isinstance(raw.get("user_info"), dict) else {}
+    return {
+        "comment_id": raw.get("id"),
+        "parent_id": parent_id,
+        "author": user.get("nickname"),
+        "text": raw.get("content"),
+        "like_count": raw.get("like_count"),
+        "reply_count": raw.get("sub_comment_count"),
+        "created_at": _format_timestamp(raw.get("create_time")),
+        "ip_location": raw.get("ip_location"),
+    }
+
+
+def _format_timestamp(value: object) -> str:
+    try:
+        from datetime import datetime
+        return datetime.fromtimestamp(int(value) / 1000).astimezone().strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _as_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0

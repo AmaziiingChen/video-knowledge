@@ -1,0 +1,13 @@
+{
+  "status": "completed",
+  "network_calls": 0,
+  "app_code_modified": false,
+  "implementation_sections": [
+    "data_model",
+    "refresh_predicate_and_pseudocode",
+    "downstream_source_text",
+    "deterministic_tests"
+  ],
+  "deterministic_test_cases": 11,
+  "secrets_persisted": false
+}

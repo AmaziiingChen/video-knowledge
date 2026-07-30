@@ -1,0 +1,8 @@
+[
+  {
+    "id": "latex-001",
+    "question": "填写一条由人工核验的真实问题。",
+    "sources": [{"provider": "wechat", "name": "LaTeX工作室"}],
+    "expected_content_item_ids": ["填写支持该答案的文章 content_item_id"]
+  }
+]

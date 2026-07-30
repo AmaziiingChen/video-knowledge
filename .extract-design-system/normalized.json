@@ -1,0 +1,41 @@
+{
+  "source": {
+    "url": "http://127.0.0.1:5173/",
+    "extractedAt": "2026-07-16T13:57:35.654Z",
+    "extractor": "dembrandt"
+  },
+  "colors": {
+    "primary": "rgb(253, 246, 227)",
+    "palette": [
+      "rgb(253, 246, 227)"
+    ],
+    "cssVariables": {}
+  },
+  "typography": {
+    "headingFont": "-apple-system",
+    "bodyFont": "-apple-system"
+  },
+  "spacing": {
+    "scale": [
+      "1px",
+      "2px",
+      "3px",
+      "5px",
+      "6px",
+      "8px",
+      "9px",
+      "10px",
+      "12px",
+      "14px",
+      "16px",
+      "34px",
+      "802px"
+    ]
+  },
+  "radius": {
+    "scale": []
+  },
+  "shadows": {
+    "scale": []
+  }
+}

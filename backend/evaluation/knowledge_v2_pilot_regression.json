@@ -1,0 +1,122 @@
+[
+  {
+    "id": "latex-stability",
+    "question": "LaTeX 编辑器升级后，针对异常退出和稳定性有什么改进？",
+    "sources": [{"provider": "wechat", "name": "LaTeX工作室"}],
+    "expected_content_item_ids": ["d5acd4bdca114a1b9c894bb0d215047f"]
+  },
+  {
+    "id": "latex-matrix",
+    "question": "现代 LaTeX 中给矩阵添加行列标签和边框时，旧命令有什么兼容性问题，应该用什么替代？",
+    "sources": [{"provider": "wechat", "name": "LaTeX工作室"}],
+    "expected_content_item_ids": ["64632e79335a44d3bbec066035971797"]
+  },
+  {
+    "id": "latex-exam",
+    "question": "如何利用 TeX 宏包和文件读写机制，把试题和答案自动拆分？",
+    "sources": [{"provider": "wechat", "name": "LaTeX工作室"}],
+    "expected_content_item_ids": ["5897badae4684df983e0ab98e1605404"]
+  },
+  {
+    "id": "latex-offline",
+    "question": "有没有不依赖云端账号、断网仍可用于写论文的开源 LaTeX 工具？",
+    "sources": [{"provider": "wechat", "name": "LaTeX工作室"}],
+    "expected_content_item_ids": ["29a16029ee0540be9feabd06d9b6b956"]
+  },
+  {
+    "id": "baoyu-token",
+    "question": "某种让 Agent 说话更精简的方法，宣传与实测的 Token 节省差距为何很大？",
+    "sources": [{"provider": "rss", "name": "宝玉的分享"}],
+    "expected_content_item_ids": ["153eb9337d9f4e7ebd67d92fd188ecbd"]
+  },
+  {
+    "id": "baoyu-products",
+    "question": "ChatGPT、Codex 和 Work 三者分别定位于什么使用方式？",
+    "sources": [{"provider": "rss", "name": "宝玉的分享"}],
+    "expected_content_item_ids": ["4b73eb6a861141b493651723a7c8cdb9"]
+  },
+  {
+    "id": "baoyu-agent",
+    "question": "对未来 Agent 产品的开放性、通用性和插件生态，有哪些判断？",
+    "sources": [{"provider": "rss", "name": "宝玉的分享"}],
+    "expected_content_item_ids": ["376a1885ebbb4377abbdf3e1a6c1c480"]
+  },
+  {
+    "id": "baoyu-engineering",
+    "question": "为什么软件开发不能仅凭感觉让 AI 直接写代码？",
+    "sources": [{"provider": "rss", "name": "宝玉的分享"}],
+    "expected_content_item_ids": ["6af6d9a7087f4894bd721c01d19b41fe"]
+  },
+  {
+    "id": "tencent-economy",
+    "question": "人工智能经济会带来 K 型复苏还是历史拐点？",
+    "sources": [{"provider": "wechat", "name": "腾讯研究院"}],
+    "expected_content_item_ids": ["ea904594525f48cf8c21f3fcb0ce3899"]
+  },
+  {
+    "id": "tencent-ethics",
+    "question": "智能向善中，如何理解让人放心与把人放大的关系？",
+    "sources": [{"provider": "wechat", "name": "腾讯研究院"}],
+    "expected_content_item_ids": ["7121a1e9ee994383a763a627826939e9"]
+  },
+  {
+    "id": "tencent-agent-world",
+    "question": "Agent 从数字世界走向现实世界时会遇到哪些障碍？",
+    "sources": [{"provider": "wechat", "name": "腾讯研究院"}],
+    "expected_content_item_ids": ["e8988450c53b4c21bd057e25bd8ca982"]
+  },
+  {
+    "id": "tencent-to-a",
+    "question": "为什么说企业服务不应只区分 To B 或 To C，而要进入 To A？",
+    "sources": [{"provider": "wechat", "name": "腾讯研究院"}],
+    "expected_content_item_ids": ["2a3ff8d0abc34f3ca0fee92d85041b0d"]
+  },
+  {"id":"latex-math-industrial","question":"陶哲轩的 ICM 演讲如何描述 AI 对数学研究方式的改变？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["0e12702c25174e0b9554084b0813afe3"]},
+  {"id":"latex-deng-talk","question":"如何复刻 2026 菲尔兹奖得主邓煜的学术报告 Beamer？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["f3fb336d27f34f22b3244a7ddb45bebe"]},
+  {"id":"latex-hilbert","question":"哪个讲演将希尔伯特第六问题与牛顿定律、玻尔兹曼方程和流体方程串联起来？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["8b07adb6b6e24054a6734b74ed49a5a3"]},
+  {"id":"latex-deng-prize","question":"邓煜因哪类研究获得 2026 菲尔兹奖，以及怎样复刻其报告幻灯片？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["b56c7b0ac2664454a189862011cfa46c"]},
+  {"id":"latex-fields-theme","question":"2026 菲尔兹奖相关的 Beamer 主题在哪里可以找到？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["f95c3003e19c4907826f2cf557c2285c"]},
+  {"id":"latex-tikz","question":"有没有面向中文用户的 TikZ 图形编辑器？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["f525148afd724d75acd93db08828bfa7"]},
+  {"id":"latex-hust-template","question":"华中科技大学开题或答辩如何使用无需手调校徽配色的 LaTeX 汇报模板？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["9d9a5ebf055243ff8d9db1b869ed3d8e"]},
+  {"id":"latex-chromacards","question":"如何用 LaTeX 制作带流光效果的英语单词卡片？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["7fa709d986e34753895eb4b453cfa2bc"]},
+  {"id":"latex-lonely-notes","question":"适合数学笔记、偏二次元视觉风格的 LaTeX 模板是什么？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["e7293a1a302048a09372c33386cbba6b"]},
+  {"id":"latex-fields-news","question":"2026 年有哪些中国籍数学家获得菲尔兹奖？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["5f266d9f192b440bb27869582aae6653"]},
+  {"id":"latex-rainbow-theme","question":"有哪些精致彩虹贴纸风格的 Beamer 主题可用？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["386b11aa776540ff8b112527353f2cfb"]},
+  {"id":"latex-agent-book","question":"怎样通过 LaTeX 阅读或输出一份开源 AI Agent 实战书？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["797e0ca878b04693be430a06c5b83e5c"]},
+  {"id":"latex-sakura","question":"Sakura Notes 是怎样的 LaTeX 笔记主题？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["70ae6c5214ea4ce38039b9d4b51202af"]},
+  {"id":"latex-wenyuan-font","question":"文渊字体有哪些发布信息或适用场景？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["412de0545c74448c81958a92ed11a7f1"]},
+  {"id":"latex-lualatex-live","question":"原生 LuaLaTeX 的实时渲染技术有什么新进展？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["081c487d9c134005ad500ff7461beb26"]},
+  {"id":"latex-pine","question":"有没有本地优先、结合 AI 的 LaTeX 写作工作台？","sources":[{"provider":"wechat","name":"LaTeX工作室"}],"expected_content_item_ids":["9ce50f18b1644e298cfbf14433a2ec66"]},
+  {"id":"baoyu-loops","question":"如何从零开始理解和使用循环式 Agent 工作流？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["99deeb9e088944d69b56ada83dc8e59f"]},
+  {"id":"baoyu-codex-design","question":"为什么 Codex 还没有推出类似设计工具的产品？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["03e6f7a2024d42408a1895786800fbe7"]},
+  {"id":"baoyu-deepseek-strategy","question":"DeepSeek 的万亿美元级战略主要在讨论什么？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["daccd7e4879b4a999ba98851cfe9ec31"]},
+  {"id":"baoyu-codex-official","question":"Codex 官方团队推荐怎样把 Codex 用到极致？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["8ec7f0e7bdaf42a68f2830215547d4d2"]},
+  {"id":"baoyu-ai-startup","question":"打造 AI 原生创业公司时，创始人应优先考虑什么？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["a506dbdff9944f269b27e17cd97407ef"]},
+  {"id":"baoyu-fde","question":"AI 时代的 Forward Deployed Engineer 是什么岗位，为什么受到重视？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["6b56224c9fc346d18324957e2c206394"]},
+  {"id":"baoyu-expertise","question":"为什么资深开发者有时讲不清自己的专业能力？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["060aa935f7ff4bfe97ee34e5fee17711"]},
+  {"id":"baoyu-team","question":"AI 时代应该怎样管理工程团队？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["fcee324209ab48b0a3f263c44d42c19c"]},
+  {"id":"baoyu-mcp-skills","question":"Codex、MCP 与 Skill 的下一步可能是什么？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["77bf79e5ae8b4b668e5852720165db70"]},
+  {"id":"baoyu-harness","question":"构建 AI Agent Harness 时有哪些关键组成？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["7f344bd1b35f4b5dad38ad89c5de8ce9"]},
+  {"id":"baoyu-layoffs","question":"为什么 AI 商业价值不足会让裁员潮持续？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["2c422c13db8c4bb692fd4013e1076c36"]},
+  {"id":"baoyu-wam","question":"VLA 之后的 WAM 机器人路线意味着什么？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["7e88db6304ff4b96a476e69577cf7c41"]},
+  {"id":"baoyu-claude-html","question":"Claude Code 在处理 HTML 时有哪些出人意料的用法？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["4e0d305e563544e4a9d265f214b2991c"]},
+  {"id":"baoyu-claude-limit","question":"Claude 为什么会频繁限速，官方对话中给出哪些背景？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["80d7e29233734c68acc11dee7f7f7edc"]},
+  {"id":"baoyu-manage-agent","question":"Claude Code 之后，软件开发为什么更像管理 Agent？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["ef5b2380db5f4c28933fe066d765a49b"]},
+  {"id":"baoyu-ai-ready","question":"公司在引入 AI 前，为什么要先把目标和工作流说清楚？","sources":[{"provider":"rss","name":"宝玉的分享"}],"expected_content_item_ids":["db00fe1fe56e4a0b9eca0a804f95851d"]},
+  {"id":"tencent-tech-narrative","question":"技术史中狂热者与反思者的叙事如何影响我们理解创新？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["aa6dabb316154c50a1aac56cd72ff1c5"]},
+  {"id":"tencent-intelligent-economy","question":"我国打造智能经济新形态有哪些综合优势和重点部署？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["897c2d1be4bb45b6a2537037a7cc833f"]},
+  {"id":"tencent-consciousness","question":"人工智能距离觉醒意识还缺少什么条件？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["06d7b13b4d4544adbc9e1119fa3e2803"]},
+  {"id":"tencent-org-os","question":"AI 时代企业为什么需要重构组织变革的操作系统？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["e97efd820a5248d28a488fe25d8430e6"]},
+  {"id":"tencent-game","question":"AI 原生游戏会怎样改变玩家体验和玩法？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["99f858c28bef4310b18102d937d8fc44"]},
+  {"id":"tencent-career","question":"AI 与职业的关系在近三年发生了哪些变化？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["aa29365066624730acda44adf862fbc9"]},
+  {"id":"tencent-embodied","question":"具身智能何时会迎来类似 iPhone 时刻的普及拐点？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["6cb9c8a3af1d4d449cecc4734e9320a4"]},
+  {"id":"tencent-philosopher","question":"AI 公司为什么开始邀请哲学家进入实验室？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["2858ea50765e4e2a88f53bd76ee7434e"]},
+  {"id":"tencent-openai-profit","question":"OpenAI 的商业模式最终能否盈利？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["c8d910b08525486787cddd8da29a5c09"]},
+  {"id":"tencent-fde","question":"硅谷一线的 FDE 在 AI 产品落地中有哪些非共识做法？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["167b8ee72a5944bca009682eccbcf6ee"]},
+  {"id":"tencent-alignment","question":"人机对齐讨论中，为什么可能是人正在向机器对齐？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["c260b544b1a14337865921ff4b997f0d"]},
+  {"id":"tencent-social-good","question":"如果想用 AI 做一件社会价值的好事，有哪些可参考的行动灵感？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["4877ad6b26b34e5d92c6b899f8bd8f5a"]},
+  {"id":"tencent-super-individual","question":"怎样把超级个体的生产力转化为组织能力？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["f91f145e244c4cd6b77e51839bd1f2c5"]},
+  {"id":"tencent-content-view","question":"为什么今天需要重新建立 AI 内容观？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["609751944e31494ba37396c25a636d6c"]},
+  {"id":"tencent-token-economy","question":"为什么说 Token 在现实世界任务中并不经济？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["bdc17b880381498a97d7bac006d78631"]},
+  {"id":"tencent-ai-three-things","question":"AI 无法教会人类的三件事是什么？","sources":[{"provider":"wechat","name":"腾讯研究院"}],"expected_content_item_ids":["28d973ff61394d5b8e80a8ca829b9901"]}
+]

@@ -1,0 +1,8 @@
+{
+  "tool_call_count_estimate": 4,
+  "files_modified": 2,
+  "app_code_modified": false,
+  "skill_used": "paddleocr-async-integration",
+  "real_network_or_token_access": false,
+  "real_tokens_in_output": false
+}
