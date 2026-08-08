@@ -247,6 +247,7 @@ class AsrBackendTests(unittest.TestCase):
             audio_path.write_bytes(b"")
 
             with (
+                patch("services.transcriber.preferred_asr_backend", return_value="mlx"),
                 patch(
                     "services.transcriber._transcribe_mlx",
                     return_value=TranscriptionResult(success=False, error="mlx failed", backend="mlx"),
@@ -2308,17 +2309,23 @@ class SubtitleTests(unittest.TestCase):
                 settings.obsidian_vault = Path(temp_dir) / "vault"
                 settings.obsidian_vault.mkdir(parents=True)
                 settings.deepseek_api_key = "test-key"
-                summary_started = threading.Event()
-                download_saw_summary = []
+                download_started = threading.Event()
+                allow_download_finish = threading.Event()
+                download_finished = threading.Event()
 
-                def download_after_summary(_url, _platform, output_dir, **_kwargs):
-                    download_saw_summary.append(summary_started.wait(timeout=1))
+                def download_while_summary_runs(_url, _platform, output_dir, **_kwargs):
+                    download_started.set()
+                    if not allow_download_finish.wait(timeout=5):
+                        raise AssertionError("summary did not start while the preview download was in flight")
                     video_path = output_dir / "preview.mp4"
                     video_path.write_bytes(b"video")
+                    download_finished.set()
                     return SimpleNamespace(success=True, video_path=video_path, logs=[], error="", video_info=None)
 
                 def summarize_while_downloading(*_args, **_kwargs):
-                    summary_started.set()
+                    if not download_started.wait(timeout=5):
+                        raise AssertionError("preview download did not start before summary")
+                    allow_download_finish.set()
                     return "并行字幕笔记", "## 快速判断\n已由外挂字幕总结"
 
                 with (
@@ -2331,7 +2338,7 @@ class SubtitleTests(unittest.TestCase):
                     # subtitle-first route even when automatic preview
                     # downloads are disabled.
                     patch("services.pipeline_runner.should_auto_download_bilibili_video", return_value=False),
-                    patch("services.pipeline_runner.download_video", side_effect=download_after_summary),
+                    patch("services.pipeline_runner.download_video", side_effect=download_while_summary_runs),
                     patch("services.pipeline_runner.extract_audio_with_details") as extract_mock,
                     patch("services.pipeline_runner.transcribe_with_details") as transcribe_mock,
                     patch("services.pipeline_runner.summarize_stream", side_effect=summarize_while_downloading),
@@ -2349,8 +2356,8 @@ class SubtitleTests(unittest.TestCase):
                     )
 
                 self.assertTrue(result.success)
-                self.assertTrue(download_saw_summary)
-                self.assertTrue(download_saw_summary[0])
+                self.assertTrue(download_started.is_set())
+                self.assertTrue(download_finished.is_set())
                 self.assertEqual(result.summary, "## 快速判断\n已由外挂字幕总结")
                 self.assertTrue(result.video_path.endswith("preview.mp4"))
                 extract_mock.assert_not_called()
