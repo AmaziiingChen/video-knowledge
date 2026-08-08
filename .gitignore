@@ -33,3 +33,5 @@ desktop/build/
 # Logs
 *.log
 logs/
+!frontend/src/features/logs/
+!frontend/src/features/logs/**
