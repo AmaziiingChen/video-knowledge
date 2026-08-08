@@ -1,4 +1,5 @@
 const integerFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 })
+const reportTimeZone = 'Asia/Shanghai'
 
 export function formatReportCount(value) {
   const count = Number(value)
@@ -69,6 +70,7 @@ export function reportCallPlan(preflight = {}) {
 
 function dateTimeParts(value) {
   const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: reportTimeZone,
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',
