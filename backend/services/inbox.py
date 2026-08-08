@@ -21,7 +21,12 @@ class InboxCaptureResult:
     error: str | None = None
 
 
-def capture_link_to_inbox(url: str, *, manual_collection: bool = True) -> InboxCaptureResult:
+def capture_link_to_inbox(
+    url: str,
+    *,
+    manual_collection: bool = True,
+    library_folder_id: str | None = None,
+) -> InboxCaptureResult:
     parsed = parse_share_text(url)
     if parsed and parsed.platform == "xiaohongshu":
         try:
@@ -42,7 +47,9 @@ def capture_link_to_inbox(url: str, *, manual_collection: bool = True) -> InboxC
     initialize_database()
     with connect() as connection:
         repository = ContentRepository(connection)
-        folder_id = ensure_manual_collection_target_folder(connection, provider.name) if manual_collection else None
+        folder_id = library_folder_id
+        if folder_id is None and manual_collection:
+            folder_id = ensure_manual_collection_target_folder(connection, provider.name)
         if resolved is None:
             canonical_id = normalized
             existing = repository.find_by_canonical_id(

@@ -11,6 +11,42 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
+_CONTENT_PROVIDER_LABELS = {
+    "bilibili": "B站视频",
+    "douyin": "抖音视频",
+    "xiaohongshu": "小红书图文",
+    "wechat": "微信公众号文章",
+    "rss": "RSS 文章",
+    "campus": "校园文章",
+}
+
+
+def stable_content_title(
+    title: str | None,
+    *,
+    source_provider: str,
+    content_type: str,
+    canonical_source_id: str | None = None,
+    source_url: str | None = None,
+) -> str:
+    """Return a readable title even while remote metadata is still unavailable.
+
+    A blank (or whitespace-only) title is especially harmful in the lazy file
+    tree: it looks like an unknown, non-actionable row.  Keep the remote ID as
+    a stable, inspectable fallback until a later capture replaces it with the
+    real title.
+    """
+    cleaned = " ".join(str(title or "").split())
+    if cleaned:
+        return cleaned
+    provider = str(source_provider or "").strip().lower()
+    label = _CONTENT_PROVIDER_LABELS.get(provider)
+    if not label:
+        label = "未命名文章" if content_type == "article" else "未命名视频"
+    identity = " ".join(str(canonical_source_id or source_url or "").split())
+    return f"{label} · {identity[:40]}" if identity else label
+
+
 @dataclass(frozen=True)
 class ContentItemRecord:
     id: str
@@ -73,6 +109,13 @@ class ContentRepository:
     ) -> ContentItemRecord:
         now = utc_now_iso()
         item_id = new_id()
+        title = stable_content_title(
+            title,
+            source_provider=source_provider,
+            content_type=content_type,
+            canonical_source_id=canonical_source_id,
+            source_url=source_url,
+        )
         self.connection.execute(
             """
             INSERT INTO content_items (
@@ -337,6 +380,14 @@ class ContentRepository:
         source_name: str | None,
         source_section: str | None,
     ) -> ContentItemRecord:
+        current = self.get_content_item(item_id)
+        title = stable_content_title(
+            title,
+            source_provider=current.source_provider,
+            content_type=current.content_type,
+            canonical_source_id=current.canonical_source_id,
+            source_url=current.source_url,
+        )
         self.connection.execute(
             """
             UPDATE content_items
@@ -370,7 +421,13 @@ class ContentRepository:
             WHERE id = ?
             """,
             (
-                current.title if title is None else title,
+                current.title if title is None else stable_content_title(
+                    title,
+                    source_provider=current.source_provider,
+                    content_type=current.content_type,
+                    canonical_source_id=current.canonical_source_id,
+                    source_url=current.source_url,
+                ),
                 library_folder_id,
                 current.sort_order if sort_order is None else sort_order,
                 utc_now_iso(),

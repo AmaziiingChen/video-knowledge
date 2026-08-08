@@ -27,8 +27,10 @@ import {
   messageConfig
 } from 'element-plus'
 import 'element-plus/dist/index.css'
+import axios from 'axios'
 import App from './App.vue'
 import AppTooltip from './components/AppTooltip.vue'
+import { installLocalApiAuth } from './utils/localApiAuth.js'
 
 const root = document.querySelector('#app')
 let appMounted = false
@@ -112,6 +114,7 @@ try {
 }
 
 try {
+  installLocalApiAuth(axios)
   const app = createApp(App)
   app.config.errorHandler = (error) => {
     if (appMounted) {

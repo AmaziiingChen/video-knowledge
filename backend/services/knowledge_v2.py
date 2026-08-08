@@ -479,27 +479,58 @@ def list_source_sets() -> list[dict[str, object]]:
     with connect() as db:
         rows = db.execute(
             """
-            SELECT content.source_provider,content.source_name,
-                   COUNT(DISTINCT document.content_item_id) AS document_count,
-                   COUNT(DISTINCT CASE WHEN snapshot.state='ready' THEN document.content_item_id END) AS ready_document_count,
-                   COUNT(DISTINCT child.id) AS child_chunk_count,
-                   COUNT(DISTINCT embedding.chunk_id) AS embedded_child_count
-            FROM content_documents AS document
-            JOIN content_items AS content ON content.id=document.content_item_id
-            LEFT JOIN knowledge_source_snapshots AS snapshot ON snapshot.content_item_id=content.id
-            LEFT JOIN knowledge_v2_chunks AS child
-              ON child.content_item_id=content.id AND child.chunk_kind='child'
-            LEFT JOIN knowledge_v2_embeddings AS embedding
-              ON embedding.chunk_id=child.id
-             AND embedding.embedding_model=?
-             AND embedding.dimensions=?
-             AND embedding.source_hash=child.source_hash
-            WHERE content.deleted_at IS NULL
-              AND NULLIF(TRIM(content.source_name),'') IS NOT NULL
-              AND content.source_provider NOT IN ('wechat_report')
-              AND content.content_type != 'report'
-            GROUP BY content.source_provider,content.source_name
-            ORDER BY content.source_provider,content.source_name COLLATE NOCASE
+            WITH eligible_documents AS (
+                SELECT content.id,content.source_provider,content.source_name
+                FROM content_documents AS document
+                JOIN content_items AS content ON content.id=document.content_item_id
+                WHERE content.deleted_at IS NULL
+                  AND NULLIF(TRIM(content.source_name),'') IS NOT NULL
+                  AND content.source_provider NOT IN ('wechat_report')
+                  AND content.content_type != 'report'
+            ),
+            document_counts AS (
+                SELECT source_provider,source_name,COUNT(*) AS document_count
+                FROM eligible_documents
+                GROUP BY source_provider,source_name
+            ),
+            ready_document_counts AS (
+                SELECT document.source_provider,document.source_name,COUNT(*) AS ready_document_count
+                FROM eligible_documents AS document
+                JOIN knowledge_source_snapshots AS snapshot
+                  ON snapshot.content_item_id=document.id AND snapshot.state='ready'
+                GROUP BY document.source_provider,document.source_name
+            ),
+            child_chunk_counts AS (
+                SELECT document.source_provider,document.source_name,COUNT(*) AS child_chunk_count
+                FROM eligible_documents AS document
+                JOIN knowledge_v2_chunks AS child
+                  ON child.content_item_id=document.id AND child.chunk_kind='child'
+                GROUP BY document.source_provider,document.source_name
+            ),
+            embedded_child_counts AS (
+                SELECT document.source_provider,document.source_name,COUNT(*) AS embedded_child_count
+                FROM eligible_documents AS document
+                JOIN knowledge_v2_chunks AS child
+                  ON child.content_item_id=document.id AND child.chunk_kind='child'
+                JOIN knowledge_v2_embeddings AS embedding
+                  ON embedding.chunk_id=child.id
+                 AND embedding.embedding_model=?
+                 AND embedding.dimensions=?
+                 AND embedding.source_hash=child.source_hash
+                GROUP BY document.source_provider,document.source_name
+            )
+            SELECT documents.source_provider,documents.source_name,documents.document_count,
+                   COALESCE(ready.ready_document_count, 0) AS ready_document_count,
+                   COALESCE(children.child_chunk_count, 0) AS child_chunk_count,
+                   COALESCE(embedded.embedded_child_count, 0) AS embedded_child_count
+            FROM document_counts AS documents
+            LEFT JOIN ready_document_counts AS ready
+              ON ready.source_provider=documents.source_provider AND ready.source_name=documents.source_name
+            LEFT JOIN child_chunk_counts AS children
+              ON children.source_provider=documents.source_provider AND children.source_name=documents.source_name
+            LEFT JOIN embedded_child_counts AS embedded
+              ON embedded.source_provider=documents.source_provider AND embedded.source_name=documents.source_name
+            ORDER BY documents.source_provider,documents.source_name COLLATE NOCASE
             """,
             (settings.campus_embedding_api_model, int(settings.campus_embedding_api_dimensions)),
         ).fetchall()

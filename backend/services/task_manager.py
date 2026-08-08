@@ -4,6 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from queue import Empty, Full, Queue
 from threading import Lock
 from typing import Literal
 import json
@@ -28,6 +29,11 @@ TaskStatus = Literal["queued", "running", "paused", "succeeded", "failed", "canc
 BACKGROUND_TASK_PRIORITY = 800
 TASK_PERSISTENCE_ATTEMPTS = 3
 TASK_PERSISTENCE_BUSY_TIMEOUT_MS = 1_000
+# A coordinator is deliberately cheap: actual media downloads and ASR have
+# their own single-resource gates.  Three coordinators let one downloaded
+# video transcribe while the next one is fetched and a previous one awaits AI.
+MEDIA_PIPELINE_COORDINATOR_WORKERS = 3
+SUMMARY_STATE_PERSIST_INTERVAL_SECONDS = 0.35
 logger = logging.getLogger(__name__)
 
 
@@ -139,12 +145,16 @@ class TaskManager:
     def __init__(self) -> None:
         self._tasks: dict[str, TaskRecord] = {}
         self._lock = Lock()
-        # Never download or transcribe several videos in parallel on the
-        # desktop. Keep this invariant even if an old environment file still
-        # contains a higher pipeline_concurrency value.
-        self._max_workers = 1
+        # These threads coordinate independent pipeline stages; they do not
+        # mean three downloads or ASR runs. ``pipeline_runner`` and
+        # ``transcriber`` serialize those resource-heavy operations globally.
+        self._max_workers = max(
+            1,
+            min(int(settings.pipeline_concurrency), MEDIA_PIPELINE_COORDINATOR_WORKERS),
+        )
         self._executor = ThreadPoolExecutor(max_workers=self._max_workers, thread_name_prefix="video-pipeline")
         self._active_task_ids: set[str] = set()
+        self._subscribers: dict[str, set[Queue[TaskRecord]]] = {}
 
     def create(
         self,
@@ -165,6 +175,62 @@ class TaskManager:
         )
         self._schedule_next()
         return self.get(task_id)
+
+    def subscribe_updates(self, task_id: str):
+        """Yield live task snapshots for a single local client connection.
+
+        A bounded queue keeps a slow UI from retaining every intermediate LLM
+        token.  It always preserves the newest snapshot, which is the only
+        state a renderer needs to continue a cumulative text stream.
+        """
+        subscriber: Queue[TaskRecord] = Queue(maxsize=1)
+        with self._lock:
+            current = self._tasks.get(task_id)
+            if current is None:
+                return
+            self._subscribers.setdefault(task_id, set()).add(subscriber)
+            initial = self._copy_record(current)
+        if initial is not None:
+            subscriber.put_nowait(initial)
+        try:
+            while True:
+                try:
+                    yield subscriber.get(timeout=15)
+                except Empty:
+                    # The router turns this into an SSE comment to keep a
+                    # quiet local proxy from closing a healthy stream.
+                    yield None
+        finally:
+            with self._lock:
+                listeners = self._subscribers.get(task_id)
+                if listeners is None:
+                    return
+                listeners.discard(subscriber)
+                if not listeners:
+                    self._subscribers.pop(task_id, None)
+
+    def _broadcast_update(self, record: TaskRecord | None) -> None:
+        if record is None:
+            return
+        with self._lock:
+            listeners = tuple(self._subscribers.get(record.task_id, ()))
+        for subscriber in listeners:
+            snapshot = self._copy_record(record)
+            if snapshot is None:
+                continue
+            try:
+                subscriber.put_nowait(snapshot)
+            except Full:
+                try:
+                    subscriber.get_nowait()
+                except Empty:
+                    pass
+                try:
+                    subscriber.put_nowait(snapshot)
+                except Full:
+                    # Another delivery won the small race; its snapshot is
+                    # newer than the one we were about to enqueue.
+                    continue
 
     def create_source_sync(
         self,
@@ -368,6 +434,7 @@ class TaskManager:
             snapshot = self._copy_record(record)
         if should_persist:
             self._persist_state(snapshot)
+            self._broadcast_update(snapshot)
             if should_schedule:
                 self._persist_content_status(snapshot)
         if should_schedule:
@@ -378,6 +445,27 @@ class TaskManager:
         if snapshot and snapshot.cancel_requested:
             record_telemetry("task_control_used", {"action": "cancel"})
         return snapshot
+
+    def cancel_active(self) -> list[TaskRecord]:
+        """Request cancellation for every currently active local task.
+
+        Use the same cancellation path as the one-task action so queued work
+        becomes terminal immediately and running work receives its cooperative
+        cancellation signal.  The task list is snapshotted first because each
+        individual cancellation may reschedule the executor.
+        """
+        with self._lock:
+            task_ids = [
+                record.task_id
+                for record in self._tasks.values()
+                if record.status in {"queued", "running", "paused"}
+            ]
+        cancelled: list[TaskRecord] = []
+        for task_id in task_ids:
+            record = self.cancel(task_id)
+            if record and record.cancel_requested:
+                cancelled.append(record)
+        return cancelled
 
     def _schedule_next(self) -> None:
         while True:
@@ -465,11 +553,14 @@ class TaskManager:
                     cancelled_snapshot = None
             if cancelled_snapshot:
                 self._persist_state(cancelled_snapshot)
+                self._broadcast_update(cancelled_snapshot)
                 return
             self._persist_state(running_snapshot)
+            self._broadcast_update(running_snapshot)
+            last_state_persist_at = time.monotonic()
 
             def on_update(result: PipelineResponse) -> None:
-                nonlocal last_telemetry_stage
+                nonlocal last_telemetry_stage, last_state_persist_at
                 snapshot = None
                 with self._lock:
                     current = self._tasks.get(task_id)
@@ -483,7 +574,15 @@ class TaskManager:
                     current.content_item_id = result.content_item_id or current.content_item_id
                     current.updated_at = _now_iso()
                     snapshot = self._copy_record(current)
-                self._persist_state(snapshot)
+                is_streamed_summary = bool(result.summary) and result.step == "summarize"
+                now = time.monotonic()
+                if not is_streamed_summary or now - last_state_persist_at >= SUMMARY_STATE_PERSIST_INTERVAL_SECONDS:
+                    self._persist_state(snapshot)
+                    last_state_persist_at = now
+                # The desktop detail view subscribes to this in-memory snapshot
+                # directly. Persisting every LLM token would make SQLite the
+                # bottleneck, while the final terminal state is still durable.
+                self._broadcast_update(snapshot)
                 stage = str(result.step or "")
                 if stage and stage != last_telemetry_stage:
                     last_telemetry_stage = stage
@@ -587,6 +686,7 @@ class TaskManager:
                 final_snapshot = self._copy_record(current)
             self._persist_state(final_snapshot)
             self._persist_content_status(final_snapshot)
+            self._broadcast_update(final_snapshot)
             if final_snapshot.status == "succeeded" and final_snapshot.content_item_id:
                 try:
                     from services.completion_notifications import record_content_ready, record_manual_media_ready
@@ -649,6 +749,7 @@ class TaskManager:
                 failed_snapshot = self._copy_record(current)
             self._persist_state(failed_snapshot)
             self._persist_content_status(failed_snapshot)
+            self._broadcast_update(failed_snapshot)
             record_telemetry("task_finished", {"result": "failed", "stage": "executor"})
             self._wake_openclaw_terminal_delivery()
         finally:

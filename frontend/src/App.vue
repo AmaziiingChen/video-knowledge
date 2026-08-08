@@ -1,124 +1,135 @@
 <template>
   <div class="app-shell">
     <a class="skip-link" href="#main-workspace">跳到主内容</a>
-    <header class="topbar">
+    <header v-if="isSinglePaneWorkspaceView(activeView)" class="topbar is-single-pane-topbar">
       <div class="brand">
         <div class="brand-mark">KH</div>
         <h1>KnowledgeHub</h1>
       </div>
+
       <div class="topbar-actions">
-        <button class="topbar-command-trigger" type="button" aria-label="快速打开（Command K）" @click="commandPaletteOpen = true">
-          <el-icon><Search /></el-icon>
-          <span>快速打开</span>
-          <kbd>⌘K</kbd>
-        </button>
-        <el-popover placement="bottom-end" :width="320" trigger="click" popper-class="completion-notification-popper">
-          <template #reference>
-            <button class="topbar-icon-button layout-toggle-button completion-notification-trigger" type="button" :class="{ 'is-on': completionNotifications.length }" :aria-label="completionNotifications.length ? `${completionNotifications.length} 条待查看` : '暂无待查看事项'">
-              <SvgMaskIcon :src="notificationIcon" :size="18" />
-              <span v-if="completionNotifications.length" class="completion-notification-count">{{ completionNotifications.length > 9 ? '9+' : completionNotifications.length }}</span>
-            </button>
-          </template>
-          <section class="completion-notification-menu" aria-label="待查看事项">
-            <p class="completion-notification-heading">{{ completionNotifications.length ? `待查看 ${completionNotifications.length} 条` : '暂无待查看事项' }}</p>
-            <button v-for="item in completionNotifications" :key="item.id" type="button" class="completion-notification-item" @click="openCompletionNotification(item)">
-              <strong>{{ item.title }}</strong><span>{{ item.body || '点击查看详情' }}</span>
-            </button>
-          </section>
-        </el-popover>
-        <div class="layout-toggle-group" aria-label="布局切换">
-          <el-tooltip :content="openclawStatusText" placement="bottom">
-            <button
-              class="topbar-icon-button layout-toggle-button"
-              type="button"
-              :class="{ 'is-on': openclawRunning, 'is-off': !openclawRunning, loading: openclawScanning }"
-              aria-label="启动或查看 OpenClaw Gateway"
-              :disabled="startupBlocking || openclawScanning"
-              @click="startOpenClawGateway"
-            >
-              <SvgMaskIcon :src="openclawIcon" :size="18" />
-            </button>
-          </el-tooltip>
-          <el-tooltip :content="clipboardWatching ? '关闭剪贴板监听' : '开启剪贴板监听'" placement="bottom">
-            <button
-              class="topbar-icon-button layout-toggle-button"
-              type="button"
-              :class="{ 'is-on': clipboardWatching, 'is-off': !clipboardWatching, loading: clipboardScanning }"
-              aria-label="本机剪贴板监听"
-              :aria-pressed="clipboardWatching"
-              :disabled="startupBlocking || clipboardScanning"
-              @click="toggleClipboardWatching(!clipboardWatching)"
-            >
-              <SvgMaskIcon :src="clipboardIcon" :size="18" />
-            </button>
-          </el-tooltip>
-          <el-tooltip :content="telegramStatusText" placement="bottom">
-            <button
-              class="topbar-icon-button layout-toggle-button"
-              type="button"
-              :class="{ 'is-on': telegramWatching, 'is-off': !telegramWatching, loading: telegramScanning }"
-              aria-label="Telegram 监听"
-              :aria-pressed="telegramWatching"
-              :disabled="startupBlocking || telegramScanning"
-              @click="toggleTelegramWatching(!telegramWatching)"
-            >
-              <SvgMaskIcon :src="telegramIcon" :size="18" />
-            </button>
-          </el-tooltip>
-          <el-tooltip v-if="!isSinglePaneWorkspaceView(activeView)" :content="primarySidebarOpen ? '隐藏左侧栏' : '显示左侧栏'" placement="bottom">
-            <button
-              class="topbar-icon-button layout-toggle-button"
-              type="button"
-              :class="{ 'is-on': primarySidebarOpen, 'is-off': !primarySidebarOpen }"
-              aria-label="展开或折叠左侧栏"
-              :aria-pressed="primarySidebarOpen"
-              @click="primarySidebarOpen = !primarySidebarOpen"
-            >
-              <PanelToggleIcon side="left" :collapsed="!primarySidebarOpen" />
-            </button>
-          </el-tooltip>
-          <el-tooltip v-if="['library', 'knowledge'].includes(activeView)" :content="contextSidebarOpen ? (activeView === 'knowledge' ? '隐藏引用原文' : '隐藏 AI 助手') : (activeView === 'knowledge' ? '显示引用原文' : '显示 AI 助手')" placement="bottom">
-            <button
-              class="topbar-icon-button layout-toggle-button"
-              type="button"
-              :class="{ 'is-on': contextSidebarOpen, 'is-off': !contextSidebarOpen }"
-              aria-label="展开或折叠右侧栏"
-              :aria-pressed="contextSidebarOpen"
-              @click="contextSidebarOpen = !contextSidebarOpen"
-            >
-              <PanelToggleIcon side="right" :collapsed="!contextSidebarOpen" />
-            </button>
-          </el-tooltip>
-          <el-tooltip :content="processLogOpen ? '隐藏处理日志' : '显示处理日志'" placement="bottom">
-            <button
-              class="topbar-icon-button layout-toggle-button"
-              type="button"
-              :class="{ 'is-on': processLogOpen, 'is-off': !processLogOpen }"
-              aria-label="展开或折叠处理日志"
-              :aria-pressed="processLogOpen"
-              @click="processLogOpen = !processLogOpen"
-            >
-              <ProcessLogToggleIcon :collapsed="!processLogOpen" />
-            </button>
-          </el-tooltip>
-        </div>
+        <WorkspaceChromeActions
+          class="single-pane-chrome-actions"
+          v-bind="workspaceChromeActionProps"
+          @start-openclaw="startOpenClawGateway"
+          @toggle-clipboard="toggleClipboardWatching"
+          @toggle-context="contextSidebarOpen = !contextSidebarOpen"
+          @toggle-process-log="processLogOpen = !processLogOpen"
+        />
       </div>
     </header>
 
     <main id="main-workspace" class="workspace" tabindex="-1" :aria-busy="startupBlocking">
       <WorkbenchShell
+          ref="workbenchShell"
           v-model:active-view="activeView"
           :ribbon-items="ribbonItems"
           :workspace-layout="workspaceLayout"
           :editor-pane-size="editorPaneSize"
           :show-primary-pane="showPrimaryPane"
           :show-context-pane="showContextPane"
+          :primary-pane-transitioning="primaryPaneTransitioning"
+          :integrated-chrome="!isSinglePaneWorkspaceView(activeView)"
           @open-settings="openSettings"
           @resized="handleWorkspaceResize"
           @snap-collapse="handlePaneSnapCollapse"
           @snap-open="handlePaneSnapOpen"
           @pane-drag-resize="handlePaneDragResize"
+          @pane-visibility-transition-end="handlePaneVisibilityTransitionEnd"
         >
+          <template #primary-header>
+            <div v-if="!primaryPaneTransitioning" class="workspace-primary-controls" aria-label="左侧栏工具">
+              <el-tooltip v-if="activeView === 'library'" content="文件管理" placement="bottom">
+                <button
+                  class="topbar-icon-button topbar-left-mode-button"
+                  type="button"
+                  :class="{ 'is-on': librarySidebarMode === 'files' }"
+                  aria-label="打开文件管理"
+                  @click="showLibraryFiles"
+                >
+                  <SvgMaskIcon :src="folderIcon" :size="17" />
+                </button>
+              </el-tooltip>
+              <el-tooltip v-if="activeView === 'library'" content="搜索资料" placement="bottom">
+                <button
+                  class="topbar-icon-button topbar-left-mode-button"
+                  type="button"
+                  :class="{ 'is-on': librarySidebarMode === 'search' }"
+                  aria-label="搜索资料"
+                  @click="focusLibrarySearch"
+                >
+                  <SvgMaskIcon :src="magnifyingglassIcon" :size="16" />
+                </button>
+              </el-tooltip>
+              <el-tooltip :content="primarySidebarOpen ? '隐藏左侧栏' : '显示左侧栏'" placement="bottom">
+                <button
+                  class="topbar-icon-button layout-toggle-button workspace-primary-collapse"
+                  type="button"
+                  :class="{ 'is-on': primarySidebarOpen, 'is-off': !primarySidebarOpen }"
+                  aria-label="展开或折叠左侧栏"
+                  :aria-pressed="primarySidebarOpen"
+                  @click="setPrimarySidebarOpen(!primarySidebarOpen, $event)"
+                >
+                  <PanelToggleIcon side="left" :collapsed="!primarySidebarOpen" />
+                </button>
+              </el-tooltip>
+            </div>
+          </template>
+
+          <template #editor-header>
+            <div
+              class="workspace-editor-header-content"
+              :class="{
+                'is-primary-collapsed': !showPrimaryPane,
+                'is-context-collapsed': !showContextPane,
+              }"
+            >
+              <div v-if="!showPrimaryPane && !primaryPaneTransitioning" class="workspace-primary-controls is-collapsed" aria-label="左侧栏工具">
+                <el-tooltip content="显示左侧栏" placement="bottom">
+                  <button
+                    class="topbar-icon-button layout-toggle-button workspace-primary-collapse"
+                    type="button"
+                    aria-label="显示左侧栏"
+                    :aria-pressed="false"
+                    @click="setPrimarySidebarOpen(true, $event)"
+                  >
+                    <PanelToggleIcon side="left" :collapsed="true" />
+                  </button>
+                </el-tooltip>
+              </div>
+              <WorkspaceTabs
+                v-if="activeView === 'library' && workspaceTabs.length"
+                :tabs="workspaceTabs"
+                :active-tab-id="activeWorkspaceTab?.id || ''"
+                allow-reveal
+                allow-delete
+                @activate="activateWorkspaceTab"
+                @close="closeWorkspaceTab"
+                @close-tabs="closeWorkspaceTabs"
+                @reveal-tab="revealWorkspaceTabLocation"
+                @delete-tab="deleteWorkspaceTabContent"
+              />
+              <WorkspaceTabs
+                v-else-if="activeView === 'prompts' && promptWorkspaceTabs.length"
+                :tabs="promptWorkspaceTabs"
+                :active-tab-id="activePromptTabId"
+                @activate="activatePromptWorkspaceTab"
+                @close="closePromptWorkspaceTab"
+                @close-tabs="closePromptWorkspaceTabs"
+              />
+            </div>
+          </template>
+
+          <template #global-header-actions>
+            <WorkspaceChromeActions
+              v-bind="workspaceChromeActionProps"
+              @start-openclaw="startOpenClawGateway"
+              @toggle-clipboard="toggleClipboardWatching"
+              @toggle-context="contextSidebarOpen = !contextSidebarOpen"
+              @toggle-process-log="processLogOpen = !processLogOpen"
+            />
+          </template>
+
           <template #primary>
           <KnowledgeSidebar
             v-if="activeView === 'knowledge'"
@@ -130,9 +141,12 @@
           />
           <PrimarySidebar
             v-else
+            ref="primarySidebar"
             v-memo="[
               activeView,
+              librarySidebarMode,
               searchQuery,
+              librarySearchScope,
               shareText,
               running,
               result.task_id,
@@ -166,6 +180,8 @@
             v-model:share-text="shareText"
             v-model:prompt-task-type="promptTaskType"
             :active-view="activeView"
+            :library-mode="librarySidebarMode"
+            :search-scope="librarySearchScope"
             :sidebar-tree-items="sidebarTreeItems"
             :library-content-items="allContentItems"
             :library-content-load-status="contentPageLoadStatus"
@@ -194,7 +210,8 @@
             :prompt-task-label="promptTaskLabel"
             :format-bytes="formatBytes"
             @search="searchContent"
-            @clear-search="searchResults = []"
+            @update:search-scope="librarySearchScope = $event"
+            @clear-search="searchQuery = ''"
             @input-change="onInputChange"
             @run-full-pipeline="runFullPipeline"
             @open-content="openContentFromSidebar"
@@ -273,6 +290,7 @@
             @delete-subscription="deleteWeChatSubscription"
             @copy-rss="copyWeChatRss"
             @clear-search-results="clearWeChatSearchResults"
+            @library-changed="loadContentItems"
           />
           <CampusManager
             v-else-if="activeView === 'campus'"
@@ -320,7 +338,7 @@
             v-else-if="activeView === 'knowledge'"
             ref="knowledgeWorkspace"
             @conversation-activated="activeKnowledgeConversationId = $event"
-            @conversation-saved="knowledgeSidebar?.refresh()"
+            @conversation-saved="knowledgeSidebar?.refreshConversations()"
             @conversation-usage-changed="knowledgeConversationUsage = $event"
             @navigation-changed="knowledgeSidebar?.refresh()"
             @open-evidence="openKnowledgeEvidence"
@@ -443,6 +461,7 @@
             @clear="clearLogs"
             @copy="copyText($event, '日志已复制')"
             @cancel-task="cancelBatchTask"
+            @cancel-active-tasks="cancelActiveTasks"
             @retry-task="retryBatchTask"
             @load-task-details="loadBatchTaskDetails"
             @reconnect-douyin-and-retry="reconnectDouyinAndRetryTask"
@@ -478,8 +497,8 @@
             :article-ocr-status="currentArticleOcrStatus"
             :prioritizing-article-ocr="prioritizingArticleOcr"
             :asking-question="askingQuestion"
-            :generating-ai-summary="generatingAiSummary"
-            :generating-summary-text="generatingSummaryText"
+            :generating-ai-summary="generatingAiSummary || isPipelineSummaryGenerating"
+            :generating-summary-text="generatingSummaryText || pipelineGeneratingSummaryText"
             :starting-new-chat="startingNewChat"
             :current-qa-enabled="currentQaEnabled"
             :current-qa-hint="currentQaHint"
@@ -524,12 +543,15 @@
 
       <Transition name="startup-gate">
         <section v-if="startupBlocking" class="startup-gate" aria-live="polite" aria-label="正在准备工作台">
-          <div class="startup-gate-card" role="status">
-            <span class="startup-gate-label">KnowledgeHub</span>
-            <strong>{{ startupStatus.title }}</strong>
-            <p>{{ startupStatus.detail }}</p>
+          <div class="startup-gate-content" role="status">
+            <p class="startup-gate-status">
+              {{ startupStatus.title }}<span v-if="!startupCanRetry" aria-hidden="true">…</span>
+            </p>
             <div class="startup-gate-progress" aria-hidden="true"><span></span></div>
-            <el-button v-if="startupCanRetry" class="startup-gate-retry" size="small" @click="retryStartupHydration">重新连接</el-button>
+            <div v-if="startupCanRetry" class="startup-gate-recovery">
+              <span>{{ startupStatus.detail }}</span>
+              <el-button class="startup-gate-retry" size="small" @click="retryStartupHydration">重新连接</el-button>
+            </div>
           </div>
         </section>
       </Transition>
@@ -546,12 +568,6 @@
         @processing-started="handleCreatorProcessingStarted"
         :initial-section="settingsInitialSection"
         v-model:selected-theme="selectedTheme"
-        v-model:selected-asr-backend="selectedAsrBackend"
-        v-model:asr-model-strategy="asrModelStrategy"
-        v-model:asr-short-video-model="asrShortVideoModel"
-        v-model:asr-long-video-model="asrLongVideoModel"
-        v-model:selected-model="selectedModel"
-        v-model:asr-vad-filter="asrVadFilter"
         v-model:selected-ai-model="selectedAiModel"
         v-model:deepseek-api-key="deepseekApiKey"
         v-model:deepseek-base-url="deepseekBaseUrl"
@@ -569,9 +585,6 @@
         v-model:obsidian-vault-path="obsidianVaultPath"
         v-model:markdown-export-path="markdownExportPath"
         v-model:obsidian-auto-write="obsidianAutoWrite"
-        v-model:telegram-bot-token="telegramBotToken"
-        v-model:telegram-allowed-user-ids="telegramAllowedUserIds"
-        v-model:telegram-reply-enabled="telegramReplyEnabled"
         v-model:cookie-input="cookieInput"
         v-model:bilibili-cookie-input="bilibiliCookieInput"
         v-model:ffmpeg-path="ffmpegPath"
@@ -592,8 +605,6 @@
         v-model:wechat-qwen-cover-model="wechatQwenCoverModel"
         :theme-options="themeOptions"
         :selected-theme-option="selectedThemeOption"
-        :available-asr-backends="availableAsrBackends"
-        :model-profile-options="modelProfileOptions"
         :available-ai-models="availableAiModels"
         :clipboard-watching="clipboardWatching"
         :clipboard-scanning="clipboardScanning"
@@ -605,11 +616,6 @@
         :openclaw-status-text="openclawStatusText"
         :openclaw-connection-items="openclawConnectionItems"
         :openclaw-status-tone="openclawStatusTone"
-        :openclaw-transcript-mirror-enabled="openclawTranscriptMirrorEnabled"
-        :openclaw-transcript-retention-days="openclawTranscriptRetentionDays"
-        :telegram-watching="telegramWatching"
-        :telegram-scanning="telegramScanning"
-        :telegram-status-text="telegramStatusText"
         :wechat-accounts="wechatAccounts"
         :wechat-subscriptions="wechatSubscriptions"
         :wechat-loading="loadingWeChatSubscriptions"
@@ -663,10 +669,6 @@
         @choose-folder-import="chooseFolderImportDirectory"
         @toggle-folder-import="toggleFolderImportWatching"
         @start-openclaw="startOpenClawGateway"
-        @save-openclaw-conversation-settings="saveOpenClawConversationSettings"
-        @save-telegram="saveTelegramSettingsFromForm"
-        @test-telegram="testTelegramConnection"
-        @toggle-telegram="toggleTelegramWatching"
         @load-wechat="loadWeChatSubscriptions"
         @start-wechat-qr="startWeChatQrLogin"
         @reauthorize-account="startWeChatQrLogin($event)"
@@ -880,58 +882,62 @@
     <AppleDeleteConfirmDialog />
 
     <footer class="statusbar">
-      <div v-if="!statusbarProgress.visible" class="statusbar-breadcrumb-slot">
-        <StatusBreadcrumb
-          :items="statusbarBreadcrumbItems"
-          @select="handleStatusBreadcrumbSelect"
-        />
-      </div>
-      <div
-        v-if="statusbarProgress.visible"
-        class="statusbar-progress"
-        :class="{ 'is-indeterminate': statusbarProgress.percent === null }"
-        :title="`${statusbarProgress.label} · ${statusbarProgress.detail}`"
-        role="status"
-        aria-live="polite"
-      >
-        <span class="statusbar-progress-stage">{{ statusbarProgress.label }}</span>
-        <span class="statusbar-progress-detail">{{ statusbarProgress.detail }}</span>
-        <div v-if="statusbarProgress.percent !== null" class="statusbar-progress-track" role="progressbar" :aria-valuenow="statusbarProgress.percent" aria-valuemin="0" aria-valuemax="100">
-          <div
-            class="statusbar-progress-fill"
-            :style="{ transform: `scaleX(${Math.max(0, Math.min(100, statusbarProgress.percent || 0)) / 100})` }"
-          ></div>
+      <div class="statusbar-context-slot">
+        <div v-if="!statusbarProgress.visible" class="statusbar-breadcrumb-slot">
+          <StatusBreadcrumb
+            :items="statusbarBreadcrumbItems"
+            @select="handleStatusBreadcrumbSelect"
+          />
         </div>
-        <div v-else class="statusbar-progress-track statusbar-progress-track-indeterminate" aria-label="正在处理"></div>
-        <span class="statusbar-progress-metric">{{ statusbarProgress.percent === null ? '进行中' : `${statusbarProgress.percent}%` }}</span>
-      </div>
-      <div class="statusbar-static" aria-label="运行状态概览">
-        <span
-          class="statusbar-preparation"
-          :class="{ 'is-active': articlePreparationStatusLabel !== '空闲' }"
-          :title="articlePreparationStatusTooltip"
+        <div
+          v-else
+          class="statusbar-progress"
+          :class="{ 'is-indeterminate': statusbarProgress.percent === null }"
+          :title="`${statusbarProgress.label} · ${statusbarProgress.detail}`"
+          role="status"
+          aria-live="polite"
         >
-          正文预抓取：{{ articlePreparationStatusLabel }}
-        </span>
-        <div class="statusbar-cache" aria-label="全局缓存概览">
-          <span v-for="item in cacheStatusItems" :key="item.label" class="statusbar-cache-item" :title="`${item.label}：${item.value}`">
-            <small>{{ item.label }}</small>
-            <span>{{ item.value }}</span>
-          </span>
+          <span class="statusbar-progress-stage">{{ statusbarProgress.label }}</span>
+          <span class="statusbar-progress-detail">{{ statusbarProgress.detail }}</span>
+          <div v-if="statusbarProgress.percent !== null" class="statusbar-progress-track" role="progressbar" :aria-valuenow="statusbarProgress.percent" aria-valuemin="0" aria-valuemax="100">
+            <div
+              class="statusbar-progress-fill"
+              :style="{ transform: `scaleX(${Math.max(0, Math.min(100, statusbarProgress.percent || 0)) / 100})` }"
+            ></div>
+          </div>
+          <div v-else class="statusbar-progress-track statusbar-progress-track-indeterminate" aria-label="正在处理"></div>
+          <span class="statusbar-progress-metric">{{ statusbarProgress.percent === null ? '进行中' : `${statusbarProgress.percent}%` }}</span>
         </div>
       </div>
-      <div class="statusbar-right">
-        <el-tooltip :content="aiTokenUsage.tooltip" placement="top" popper-class="statusbar-token-tooltip">
-          <button
-            type="button"
-            class="statusbar-token-usage"
-            :class="{ 'has-usage': aiTokenUsage.hasUsage, 'has-unreported-usage': aiTokenUsage.hasUnreportedUsage }"
-            :aria-label="aiTokenUsage.toggleLabel"
-            @click="toggleAiTokenDisplayMode"
+      <div class="statusbar-summary">
+        <div class="statusbar-static" aria-label="运行状态概览">
+          <span
+            class="statusbar-preparation"
+            :class="{ 'is-active': articlePreparationStatusLabel !== '空闲' }"
+            :title="articlePreparationStatusTooltip"
           >
-            {{ aiTokenUsage.label }}
-          </button>
-        </el-tooltip>
+            正文预抓取：{{ articlePreparationStatusLabel }}
+          </span>
+          <div class="statusbar-cache" aria-label="全局缓存概览">
+            <span v-for="item in cacheStatusItems" :key="item.label" class="statusbar-cache-item" :title="`${item.label}：${item.value}`">
+              <small>{{ item.label }}</small>
+              <span>{{ item.value }}</span>
+            </span>
+          </div>
+        </div>
+        <div class="statusbar-right">
+          <el-tooltip :content="aiTokenUsage.tooltip" placement="top" popper-class="statusbar-token-tooltip">
+            <button
+              type="button"
+              class="statusbar-token-usage"
+              :class="{ 'has-usage': aiTokenUsage.hasUsage, 'has-unreported-usage': aiTokenUsage.hasUnreportedUsage }"
+              :aria-label="aiTokenUsage.toggleLabel"
+              @click="toggleAiTokenDisplayMode"
+            >
+              {{ aiTokenUsage.label }}
+            </button>
+          </el-tooltip>
+        </div>
       </div>
     </footer>
   </div>
@@ -941,20 +947,19 @@
 import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
 import SvgMaskIcon from './components/SvgMaskIcon.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import PanelToggleIcon from './components/PanelToggleIcon.vue'
-import ProcessLogToggleIcon from './components/ProcessLogToggleIcon.vue'
 import StatusBreadcrumb from './components/StatusBreadcrumb.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
-import openclawIcon from '../assets/openclaw.svg'
-import clipboardIcon from '../assets/document.on.clipboard.svg'
-import telegramIcon from '../assets/Telegram (Telegram).svg'
-import notificationIcon from '../assets/tray.badge.svg'
+const folderIcon = 'folder'
+const magnifyingglassIcon = 'magnifyingglass'
 import { formatTokenCount } from './utils/viewFormatters'
+import { localApiAuthHeaders, localApiRequestUrl } from './utils/localApiAuth.js'
 import WorkbenchShell from './workbench/WorkbenchShell.vue'
+import WorkspaceTabs from './workbench/WorkspaceTabs.vue'
+import WorkspaceChromeActions from './workbench/WorkspaceChromeActions.vue'
 import EditorHost from './workbench/EditorHost.vue'
 import ProcessLogDock from './workbench/ProcessLogDock.vue'
 import PrimarySidebar from './workbench/PrimarySidebar.vue'
@@ -1001,7 +1006,6 @@ const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
 
 const {
   activeView,
-  completionNotifications,
   workspaceTabs,
   workspaceLayout,
   shareText,
@@ -1025,6 +1029,7 @@ const {
   autoDownloadBilibiliVideo,
   douyinVideoQuality,
   searchQuery,
+  librarySearchScope,
   searchResults,
   retryingContentId,
   libraryFolders,
@@ -1068,7 +1073,9 @@ const {
   setContentViewedState,
   askingQuestion,
   generatingAiSummary,
+  isPipelineSummaryGenerating,
   generatingSummaryText,
+  pipelineGeneratingSummaryText,
   startingNewChat,
   lastQaSaved,
   clipboardWatching,
@@ -1078,16 +1085,7 @@ const {
   openclawStatusText,
   openclawConnectionItems,
   openclawStatusTone,
-  openclawTranscriptMirrorEnabled,
-  openclawTranscriptRetentionDays,
   loadOpenClawStatus,
-  saveOpenClawConversationSettings,
-  telegramWatching,
-  telegramScanning,
-  telegramStatusText,
-  telegramBotToken,
-  telegramAllowedUserIds,
-  telegramReplyEnabled,
   obsidianVaultPath,
   markdownExportPath,
   obsidianAutoWrite,
@@ -1159,7 +1157,6 @@ const {
   sourceProviderLabel,
   promptTaskLabel,
   openContentFromSidebar,
-  openCompletionNotification,
   activateWorkspaceTab,
   closeWorkspaceTab,
   closeWorkspaceTabs,
@@ -1174,10 +1171,6 @@ const {
   renderMarkdown,
   toggleClipboardWatching,
   startOpenClawGateway,
-  toggleTelegramWatching,
-  testTelegramConnection,
-  persistTelegramSettings,
-  saveTelegramSettingsFromForm,
   saveObsidianSettingsFromForm,
   saveCookie,
   saveBilibiliCookie,
@@ -1203,6 +1196,7 @@ const {
   redownloadContentVideo,
   retryBatchTask,
   cancelBatchTask,
+  cancelActiveTasks,
   loadBatchTaskDetails,
   pollBatchTasks,
   saveVideoDownloadSettings,
@@ -1390,6 +1384,10 @@ function readWorkspacePaneVisibility() {
 const savedWorkspacePaneVisibility = readWorkspacePaneVisibility()
 const contextSidebarOpen = ref(savedWorkspacePaneVisibility.context)
 const primarySidebarOpen = ref(savedWorkspacePaneVisibility.primary)
+const primaryPaneTransitioning = ref(false)
+const workbenchShell = ref(null)
+const primarySidebar = ref(null)
+const librarySidebarMode = ref('files')
 const knowledgeWorkspace = ref(null)
 const knowledgeSidebar = ref(null)
 const editorHost = ref(null)
@@ -4107,9 +4105,9 @@ async function consumeWeChatReportStream(groupId, reportType, options, onProgres
 }
 
 async function consumeReportEventStream(url, payload, onProgress) {
-  const response = await fetch(url, {
+  const response = await fetch(localApiRequestUrl(url), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload)
   })
   if (!response.ok || !response.body) {
@@ -4590,15 +4588,61 @@ const showContextPane = computed(() => {
     && (activeView.value === 'library' || Boolean(knowledgeEvidence.value))
 })
 
+const workspaceChromeActionProps = computed(() => ({
+  openclawStatusText: openclawStatusText.value,
+  openclawRunning: openclawRunning.value,
+  openclawScanning: openclawScanning.value,
+  startupBlocking: startupBlocking.value,
+  clipboardWatching: clipboardWatching.value,
+  clipboardScanning: clipboardScanning.value,
+  activeView: activeView.value,
+  contextSidebarOpen: contextSidebarOpen.value,
+  processLogOpen: processLogOpen.value,
+}))
+
 const editorPaneSize = computed(() => {
   const primarySize = showPrimaryPane.value ? workspaceLayout.primary : 0
   const contextSize = showContextPane.value ? workspaceLayout.context : 0
   return Math.max(18, 100 - primarySize - contextSize)
 })
 
+async function openLibrarySidebar() {
+  activeView.value = 'library'
+  setPrimarySidebarOpen(true)
+  await nextTick()
+}
+
+function setPrimarySidebarOpen(open, event) {
+  const next = Boolean(open)
+  if (primarySidebarOpen.value === next || primaryPaneTransitioning.value) return
+  const origin = event?.currentTarget?.getBoundingClientRect?.()
+  if (origin) workbenchShell.value?.beginPrimaryToggleMotion?.(origin, next)
+  // The collapse control belongs to different headers in the open and
+  // collapsed layouts. Do not render either copy while Splitpanes animates,
+  // otherwise their distinct positioning contexts visibly hand off mid-frame.
+  primaryPaneTransitioning.value = true
+  primarySidebarOpen.value = next
+}
+
+function handlePaneVisibilityTransitionEnd({ side } = {}) {
+  if (side === 'primary') primaryPaneTransitioning.value = false
+}
+
+async function showLibraryFiles() {
+  librarySidebarMode.value = 'files'
+  await openLibrarySidebar()
+  primarySidebar.value?.showLibraryFiles?.()
+}
+
+async function focusLibrarySearch() {
+  librarySidebarMode.value = 'search'
+  await openLibrarySidebar()
+  primarySidebar.value?.showLibrarySearch?.()
+}
+
 function handlePaneSnapCollapse(side) {
   if (side === 'primary') {
-    primarySidebarOpen.value = false
+    setPrimarySidebarOpen(false)
     return
   }
   if (side === 'context') contextSidebarOpen.value = false
@@ -4607,7 +4651,7 @@ function handlePaneSnapCollapse(side) {
 function handlePaneSnapOpen(side) {
   if (side === 'primary') {
     workspaceLayout.primary = Math.max(workspaceLayout.primary, minimumSidebarPercent())
-    primarySidebarOpen.value = true
+    setPrimarySidebarOpen(true)
     return
   }
   if (side === 'context' && ['library', 'knowledge'].includes(activeView.value)) {

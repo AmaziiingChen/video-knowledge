@@ -1,6 +1,6 @@
-import documentIcon from '../../assets/text.document.svg'
-import filmIcon from '../../assets/film.svg'
-import waveformIcon from '../../assets/waveform.svg'
+const documentIcon = 'text.document'
+const filmIcon = 'film'
+const waveformIcon = 'waveform'
 
 export const VIDEO_ICON_PROVIDERS = new Set(['bilibili', 'douyin'])
 

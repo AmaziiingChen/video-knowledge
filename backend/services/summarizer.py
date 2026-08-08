@@ -147,6 +147,119 @@ def summarize(
         raise Exception(f"DeepSeek API 调用失败: {str(e)}")
 
 
+def summarize_stream(
+    transcript: str,
+    video_title: str = "",
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    task_type: str = "summary",
+    task_id: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    transcript_segments: list[dict] | None = None,
+    source_context: dict[str, object] | None = None,
+    on_delta: Callable[[str, str], None] | None = None,
+) -> tuple[str, str]:
+    """Generate a summary while exposing safe, renderable partial text.
+
+    The background pipeline persists these snapshots for the desktop client.
+    ``on_delta`` receives the same title/body split as the final result, so a
+    video title line is never rendered as part of the growing summary body.
+    """
+    should_record = provider is None or ai_call_callback is not None
+    llm = provider or default_llm_provider(model)
+    normalized_task_type = task_type if task_type in {"summary", "article_summary"} else "summary"
+    system_prompt = get_active_system_prompt(normalized_task_type)
+    timestamp_seconds: set[int] = set()
+    if normalized_task_type == "article_summary":
+        material = prepare_article_summary_material(
+            transcript,
+            llm=llm,
+            task_id=task_id,
+            content_item_id=content_item_id,
+            ai_call_callback=ai_call_callback,
+            preparation_call_type="article_summary_prepare",
+        )
+        user_content = f"文章标题：{video_title}\n\n正文文本：\n{material}"
+    else:
+        material, timestamp_seconds = timestamped_video_transcript(transcript, transcript_segments)
+        timestamp_guidance = ""
+        if timestamp_seconds:
+            timestamp_guidance = (
+                "\n\n转写中的时间链接对应可回看的原始片段。仅在最关键的 3–8 个观点、"
+                "案例、转折或结论旁保留这些链接；必须逐字复制材料中已有的链接，"
+                "不得编造、估算或改写时间。没有必要时可以少于 3 个。"
+            )
+        user_content = f"视频标题：{video_title}\n\n转写文本：\n{material}{timestamp_guidance}"
+    context_material = render_source_context_for_prompt(source_context)
+    if context_material:
+        user_content += f"\n\n{context_material}"
+    messages = [LLMMessage(role="system", content=system_prompt)]
+    if context_material:
+        messages.append(LLMMessage(role="system", content=active_source_context_system_prompt()))
+    messages.append(LLMMessage(role="user", content=user_content))
+    input_chars = sum(len(message.content) for message in messages)
+    started_at = time.perf_counter()
+    chunks: list[str] = []
+    stream_usage: LLMUsage | None = None
+
+    def remember_usage(usage: LLMUsage) -> None:
+        nonlocal stream_usage
+        stream_usage = usage
+
+    def split_summary(raw: str) -> tuple[str, str]:
+        content = raw.strip()
+        if normalized_task_type == "article_summary":
+            return video_title or "未命名文章", content
+        lines = content.split("\n")
+        title = lines[0].strip().strip("#").strip() if lines else ""
+        summary = normalize_video_summary_timestamps("\n".join(lines[1:]).strip(), timestamp_seconds)
+        if not title or len(title) > 30:
+            title = video_title or "未命名视频"
+        return title, summary
+
+    try:
+        for chunk in llm.chat_stream(messages, temperature=0.3, on_usage=remember_usage):
+            chunks.append(chunk)
+            if on_delta:
+                title, partial_summary = split_summary("".join(chunks))
+                on_delta(title, partial_summary)
+
+        raw_content = "".join(chunks)
+        title, summary = split_summary(raw_content)
+        if should_record:
+            provider_response = LLMResponse(
+                content=raw_content,
+                provider=llm.name,
+                model=llm.model,
+                usage=stream_usage,
+            )
+            record = record_ai_call(
+                call_type="summary",
+                provider_response=provider_response,
+                input_chars=input_chars,
+                output_chars=len(raw_content),
+                elapsed_seconds=time.perf_counter() - started_at,
+                task_id=task_id,
+                content_item_id=content_item_id,
+            )
+            if record and ai_call_callback:
+                ai_call_callback(record)
+        return title, summary
+    except Exception as exc:
+        if should_record:
+            record_ai_call(
+                call_type="summary",
+                provider_response=None,
+                input_chars=input_chars,
+                elapsed_seconds=time.perf_counter() - started_at,
+                task_id=task_id,
+                content_item_id=content_item_id,
+                error=str(exc),
+            )
+        raise Exception(f"DeepSeek API 调用失败: {str(exc)}") from exc
+
+
 def _trim_transcript_for_qa(transcript: str) -> str:
     if len(transcript) <= MAX_QA_TRANSCRIPT_CHARS:
         return transcript
@@ -306,7 +419,14 @@ def _build_regeneration_messages(
         ]
     if context_material:
         messages.insert(1, LLMMessage(role="system", content=active_source_context_system_prompt()))
-        messages[-1].content += f"\n\n{context_material}"
+        # LLMMessage is deliberately immutable so callers cannot alter a
+        # prompt after it has been handed to a provider.  Build the enriched
+        # user message instead of assigning to ``content`` in place.
+        source_message = messages[-1]
+        messages[-1] = LLMMessage(
+            role=source_message.role,
+            content=f"{source_message.content}\n\n{context_material}",
+        )
     return messages
 
 

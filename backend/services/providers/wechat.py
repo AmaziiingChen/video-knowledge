@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-import re
-
 from services.providers.base import ResolvedContent, ResolvedSeries, SubtitleResult
-
-
-WECHAT_ARTICLE_RE = re.compile(r"https?://mp\.weixin\.qq\.com/[^\s]+")
+from services.wechat_urls import (
+    canonical_wechat_article_id,
+    is_wechat_article_url,
+    normalize_wechat_url,
+)
 
 
 class WechatProvider:
     name = "wechat"
 
     def can_handle(self, url: str) -> bool:
-        return bool(WECHAT_ARTICLE_RE.search(url))
+        return is_wechat_article_url(url)
 
     def normalize_url(self, url: str) -> str:
-        return url.strip().rstrip("，。；、,.!?)）]")
+        return normalize_wechat_url(url)
 
     def resolve(self, url: str) -> ResolvedContent:
         normalized = self.normalize_url(url)
@@ -23,7 +23,7 @@ class WechatProvider:
             provider=self.name,
             content_type="article",
             source_url=normalized,
-            canonical_source_id=normalized,
+            canonical_source_id=canonical_wechat_article_id(normalized),
             title=normalized,
         )
 

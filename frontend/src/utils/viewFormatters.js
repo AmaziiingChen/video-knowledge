@@ -14,6 +14,16 @@ export { stripMarkdownMetadata } from './markdownMetadata.js'
 
 const MARKDOWN_RENDER_CACHE_LIMIT = 80
 const markdownRenderCache = new Map()
+const SAFE_HTML_TAGS = new Set([
+  'a', 'b', 'blockquote', 'br', 'code', 'del', 'details', 'div', 'em', 'figcaption',
+  'figure', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'kbd', 'li',
+  'mark', 'math', 'mfrac', 'mi', 'mn', 'mo', 'mrow', 'msqrt', 'mstyle', 'msub',
+  'msubsup', 'msup', 'mtext', 'ol', 'p', 'pre', 's', 'section', 'semantics', 'span',
+  'strong', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
+])
+const DROP_HTML_TAGS = new Set(['embed', 'form', 'iframe', 'input', 'link', 'meta', 'object', 'script', 'style', 'svg'])
+const SAFE_GLOBAL_ATTRIBUTES = new Set(['aria-describedby', 'aria-hidden', 'aria-label', 'class', 'id', 'role', 'title'])
+const SAFE_MATH_ATTRIBUTES = new Set(['accent', 'columnalign', 'columnspacing', 'display', 'displaystyle', 'encoding', 'fence', 'form', 'lspace', 'mathvariant', 'minsize', 'movablelimits', 'rspace', 'rowalign', 'rowspacing', 'scriptlevel', 'separator', 'stretchy', 'symmetric', 'xmlns'])
 
 function renderLatex(expression, displayMode) {
   return katex.renderToString(String(expression || '').trim(), {
@@ -346,14 +356,21 @@ export function formatDateTime(value) {
 export function sanitizeHtml(html) {
   const template = document.createElement('template')
   template.innerHTML = html
-  template.content.querySelectorAll('script, style, iframe, object, embed, link, meta').forEach((node) => node.remove())
-  template.content.querySelectorAll('*').forEach((node) => {
+  for (const node of [...template.content.querySelectorAll('*')].reverse()) {
+    const tagName = node.tagName.toLowerCase()
+    if (!SAFE_HTML_TAGS.has(tagName)) {
+      if (DROP_HTML_TAGS.has(tagName)) node.remove()
+      else node.replaceWith(...node.childNodes)
+      continue
+    }
     for (const attr of [...node.attributes]) {
       const name = attr.name.toLowerCase()
-      const value = attr.value.trim().toLowerCase()
-      if (name.startsWith('on') || value.startsWith('javascript:')) {
-        node.removeAttribute(attr.name)
-      }
+      const allowed = SAFE_GLOBAL_ATTRIBUTES.has(name)
+        || (tagName === 'a' && name === 'href')
+        || (tagName === 'img' && ['alt', 'decoding', 'height', 'loading', 'src', 'width'].includes(name))
+        || (tagName === 'math' || tagName.startsWith('m')) && SAFE_MATH_ATTRIBUTES.has(name)
+        || name === 'data-external-link'
+      if (!allowed) node.removeAttribute(attr.name)
     }
     if (node.tagName === 'A') {
       const href = node.getAttribute('href') || ''
@@ -370,8 +387,25 @@ export function sanitizeHtml(html) {
         node.removeAttribute('rel')
       }
     }
-  })
+    if (node.tagName === 'IMG' && !isSafeEmbeddedImage(node.getAttribute('src') || '')) {
+      const alt = node.getAttribute('alt') || '外部图片'
+      node.replaceWith(document.createTextNode(`[${alt}：为保护隐私未加载]`))
+    }
+  }
   return template.innerHTML
+}
+
+function isSafeEmbeddedImage(value) {
+  const source = String(value || '').trim()
+  if (/^data:image\/(?:avif|gif|jpe?g|png|webp);base64,/i.test(source) || source.startsWith('blob:')) return true
+  try {
+    const url = new URL(source, window.location.href)
+    if (url.protocol === 'knowledgehub:') return true
+    return ['http://127.0.0.1:8000', 'http://localhost:8000'].includes(url.origin)
+      && url.pathname.startsWith('/api/media')
+  } catch {
+    return false
+  }
 }
 
 export function renderMarkdown(markdown) {

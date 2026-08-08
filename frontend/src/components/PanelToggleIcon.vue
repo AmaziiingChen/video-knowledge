@@ -4,15 +4,14 @@
     :class="[`is-${side}`, { 'is-collapsed': collapsed }]"
     aria-hidden="true"
   >
-    <span class="panel-toggle-icon-art" v-html="svgMarkup"></span>
+    <svg class="panel-toggle-icon-art" viewBox="0 0 20 20" fill="none">
+      <rect x="1.5" y="2.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.5" />
+      <path class="panel-toggle-icon-fill" :d="side === 'left' ? 'M3 4h6v12H3z' : 'M11 4h6v12h-6z'" fill="currentColor" />
+    </svg>
   </span>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import leftPanelSvg from '../../assets/inset.filled.lefthalf.rectangle.svg?raw'
-import rightPanelSvg from '../../assets/inset.filled.trailinghalf.rectangle.svg?raw'
-
 const props = defineProps({
   side: {
     type: String,
@@ -25,7 +24,6 @@ const props = defineProps({
   }
 })
 
-const svgMarkup = computed(() => (props.side === 'left' ? leftPanelSvg : rightPanelSvg))
 </script>
 
 <style scoped>
@@ -38,34 +36,24 @@ const svgMarkup = computed(() => (props.side === 'left' ? leftPanelSvg : rightPa
   color: currentColor;
 }
 
-.panel-toggle-icon-art :deep(svg) {
-  width: 19px;
-  height: 19px;
-  display: block;
-  overflow: visible;
-}
+.panel-toggle-icon-art { overflow: visible; }
 
-.panel-toggle-icon-art :deep(path) {
-  fill: currentColor !important;
-}
-
-/* The last path is the filled half-pane supplied by the native SVG. */
-.panel-toggle-icon-art :deep(path:last-of-type) {
+.panel-toggle-icon-fill {
   transform-box: fill-box;
   transform-origin: left center;
   transition: transform var(--vk-motion-panel) var(--vk-ease-out);
 }
 
-.panel-toggle-icon.is-right .panel-toggle-icon-art :deep(path:last-of-type) {
+.panel-toggle-icon.is-right .panel-toggle-icon-fill {
   transform-origin: right center;
 }
 
-.panel-toggle-icon.is-collapsed .panel-toggle-icon-art :deep(path:last-of-type) {
+.panel-toggle-icon.is-collapsed .panel-toggle-icon-fill {
   transform: scaleX(0.22);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .panel-toggle-icon-art :deep(path:last-of-type) {
+  .panel-toggle-icon-fill {
     transition: none;
   }
 }

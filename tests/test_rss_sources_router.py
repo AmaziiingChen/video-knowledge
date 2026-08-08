@@ -9,14 +9,15 @@ sys.path.insert(0, str(ROOT / "backend"))
 from routers import rss_sources
 
 
-def test_create_rss_source_maps_auto_analyze_to_service(monkeypatch):
+def test_create_rss_source_maps_preferences_to_service(monkeypatch):
     received = {}
 
-    def create_source(*, feed_url, sync_interval_minutes, auto_analyze):
+    def create_source(*, feed_url, sync_interval_minutes, auto_analyze, notify_on_new):
         received.update(
             feed_url=feed_url,
             sync_interval_minutes=sync_interval_minutes,
             auto_analyze=auto_analyze,
+            notify_on_new=notify_on_new,
         )
         return {"source": {"id": "rss-source"}, "created_count": 0}
 
@@ -37,4 +38,5 @@ def test_create_rss_source_maps_auto_analyze_to_service(monkeypatch):
         "feed_url": "https://example.com/feed.xml",
         "sync_interval_minutes": 180,
         "auto_analyze": True,
+        "notify_on_new": False,
     }

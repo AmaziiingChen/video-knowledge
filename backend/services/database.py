@@ -12,7 +12,7 @@ from threading import RLock
 from config import ensure_private_data_directory, ensure_private_data_file, settings
 
 
-SCHEMA_VERSION = 86
+SCHEMA_VERSION = 92
 _DATABASE_INITIALIZE_LOCK = RLock()
 _INITIALIZED_DATABASES: set[Path] = set()
 DATABASE_BUSY_TIMEOUT_MS = 30_000
@@ -2447,6 +2447,177 @@ def _migration_079_backfill_wechat_source_names(connection: sqlite3.Connection) 
     )
 
 
+def _migration_090_unify_video_source_subscriptions(connection: sqlite3.Connection) -> None:
+    """Move legacy Bilibili/Douyin favorites into the durable source model.
+
+    Favorites used to be scheduled through a separate table despite being the
+    same kind of incremental media source as a creator page.  Preserve every
+    old row and history record, but let the creator-source scheduler become
+    the only active scheduler for these two providers.  Xiaohongshu remains
+    intentionally untouched until its URL-based source contract is proven.
+    """
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS creator_source_items (
+            source_id TEXT NOT NULL REFERENCES creator_sources(id) ON DELETE CASCADE,
+            content_item_id TEXT NOT NULL REFERENCES content_items(id) ON DELETE CASCADE,
+            remote_item_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(source_id, remote_item_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_creator_source_items_content
+        ON creator_source_items(content_item_id, source_id);
+        """
+    )
+    rows = connection.execute(
+        """SELECT * FROM favorite_sources
+           WHERE provider IN ('bilibili', 'douyin')"""
+    ).fetchall()
+    for row in rows:
+        provider = str(row["provider"])
+        source_url = str(row["source_url"])
+        if provider == "douyin":
+            source_kind, creator_key = "favorites", "self"
+        else:
+            match = re.search(r"space\\.bilibili\\.com/(\\d+)/favlist[^#]*[?&]fid=(\\d+)", source_url)
+            if not match:
+                # Keep an unrecognised legacy row intact and disabled in its
+                # original table instead of guessing an identity.
+                continue
+            source_kind, creator_key = "favorites", f"{match.group(1)}:{match.group(2)}"
+        identity = f"{provider}:{source_kind}:{creator_key}"
+        existing = connection.execute(
+            "SELECT id FROM creator_sources WHERE source_identity=?", (identity,)
+        ).fetchone()
+        target_id = str(existing["id"]) if existing else str(row["id"])
+        if not existing:
+            connection.execute(
+                """INSERT INTO creator_sources (
+                    id, provider, source_url, source_kind, creator_key, creator_name,
+                    source_identity, library_folder_id, enabled, auto_process,
+                    processing_mode, sync_interval_minutes, sync_limit, queue_limit,
+                    last_sync_at, next_sync_at, last_seen_published_at, last_error,
+                    consecutive_failure_count, last_discovered_count, last_created_count,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
+                (
+                    target_id, provider, source_url, source_kind, creator_key,
+                    str(row["title"] or ("我的抖音收藏" if provider == "douyin" else "B站收藏夹")),
+                    identity, row["library_folder_id"], row["enabled"], row["auto_analyze"],
+                    "full" if bool(row["auto_analyze"]) else "metadata",
+                    row["sync_interval_minutes"], row["sync_limit"], 1,
+                    row["last_sync_at"], row["next_sync_at"], row["last_error"],
+                    row["consecutive_failure_count"], row["last_discovered_count"],
+                    row["last_created_count"], row["created_at"], row["updated_at"],
+                ),
+            )
+        connection.execute(
+            """INSERT OR IGNORE INTO creator_source_items
+               (source_id, content_item_id, remote_item_id, created_at)
+               SELECT ?, content_item_id, remote_video_id, created_at
+               FROM favorite_source_items WHERE source_id=?""",
+            (target_id, str(row["id"])),
+        )
+        connection.execute(
+            """INSERT OR IGNORE INTO creator_sync_runs
+               (id, source_id, status, message, discovered_count, created_count, created_at)
+               SELECT id, ?, CASE WHEN status='success' THEN 'succeeded' ELSE status END,
+                      message, discovered_count, created_count, created_at
+               FROM favorite_sync_runs WHERE source_id=?""",
+            (target_id, str(row["id"])),
+        )
+        # A migrated source is now scheduled only by creator_scheduler.  The
+        # old rows remain as a recoverable audit trail and for downgrade safety.
+        connection.execute("UPDATE favorite_sources SET enabled=0 WHERE id=?", (str(row["id"]),))
+
+
+def _migration_091_unify_xiaohongshu_favorite_subscription(connection: sqlite3.Connection) -> None:
+    """Move the session-scoped XHS favorites source into creator subscriptions.
+
+    The old implementation had its own five-item scheduler.  It is retained
+    as an audit record only; active checks, source membership and de-duplication
+    now all live in the shared creator-source contract.
+    """
+    rows = connection.execute("SELECT * FROM xiaohongshu_favorite_sources").fetchall()
+    for row in rows:
+        legacy_id = str(row["id"])
+        identity = "xiaohongshu:favorites:self"
+        existing = connection.execute(
+            "SELECT id FROM creator_sources WHERE source_identity=?", (identity,)
+        ).fetchone()
+        target_id = str(existing["id"]) if existing else legacy_id
+        if not existing:
+            connection.execute(
+                """INSERT INTO creator_sources (
+                    id, provider, source_url, source_kind, creator_key, creator_name,
+                    source_identity, library_folder_id, enabled, auto_process,
+                    processing_mode, sync_interval_minutes, sync_limit, queue_limit,
+                    last_sync_at, next_sync_at, last_seen_published_at, last_error,
+                    consecutive_failure_count, last_discovered_count, last_created_count,
+                    created_at, updated_at
+                ) VALUES (?, 'xiaohongshu', ?, 'favorites', 'self', ?, ?, ?, ?, ?, ?, ?, 1,
+                          ?, ?, ?, NULL, ?, 0, 0, 0, ?, ?)""",
+                (
+                    target_id,
+                    "https://www.xiaohongshu.com/user/profile/self?tab=collect",
+                    str(row["title"] or "我的小红书收藏"),
+                    identity,
+                    row["library_folder_id"],
+                    row["enabled"],
+                    row["auto_analyze"],
+                    "full" if bool(row["auto_analyze"]) else "metadata",
+                    row["sync_interval_minutes"],
+                    row["sync_limit"],
+                    row["last_sync_at"],
+                    row["next_sync_at"],
+                    row["last_error"],
+                    row["created_at"],
+                    row["updated_at"],
+                ),
+            )
+        connection.execute(
+            """INSERT OR IGNORE INTO creator_source_items
+               (source_id, content_item_id, remote_item_id, created_at)
+               SELECT ?, content_item_id, note_id, created_at
+               FROM xiaohongshu_favorite_items WHERE source_id=?""",
+            (target_id, legacy_id),
+        )
+        connection.execute(
+            "UPDATE xiaohongshu_favorite_sources SET enabled=0 WHERE id=?", (legacy_id,)
+        )
+
+
+def _migration_092_repair_placeholder_content_items(connection: sqlite3.Connection) -> None:
+    """Repair legacy rows that were created before metadata/title contracts settled."""
+    rows = connection.execute(
+        """
+        SELECT id, source_provider, content_type, canonical_source_id, source_url, title
+        FROM content_items
+        WHERE source_provider = 'xiaohongshu'
+           OR trim(COALESCE(title, '')) = ''
+           OR (source_provider IN ('bilibili', 'douyin') AND title = '未命名视频')
+        """
+    ).fetchall()
+    for row in rows:
+        provider = str(row["source_provider"] or "")
+        content_type = "article" if provider == "xiaohongshu" else str(row["content_type"] or "video")
+        raw_title = " ".join(str(row["title"] or "").split())
+        placeholder_titles = {"", "未命名视频", "无标题小红书笔记", "小红书图文"}
+        title = raw_title
+        if raw_title in placeholder_titles:
+            labels = {
+                "bilibili": "B站视频",
+                "douyin": "抖音视频",
+                "xiaohongshu": "小红书图文",
+            }
+            identity = str(row["canonical_source_id"] or row["source_url"] or "").strip()
+            title = f"{labels.get(provider, '未命名内容')} · {identity[:40]}" if identity else labels.get(provider, "未命名内容")
+        connection.execute(
+            "UPDATE content_items SET content_type=?, title=? WHERE id=?",
+            (content_type, title, row["id"]),
+        )
+
+
 def _migration_080_structural_knowledge_index(connection: sqlite3.Connection) -> None:
     """Add the V2 source snapshot and parent/child retrieval index.
 
@@ -2622,6 +2793,196 @@ def _migration_086_wechat_collection_guardrails(connection: sqlite3.Connection) 
     )
 
 
+def _migration_087_wechat_public_discovery(connection: sqlite3.Connection) -> None:
+    """Persist public WeChat discovery separately from authenticated subscriptions."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS wechat_public_sources (
+            id TEXT PRIMARY KEY,
+            source_key TEXT NOT NULL UNIQUE,
+            source_kind TEXT NOT NULL
+                CHECK(source_kind IN ('manual', 'album')),
+            title TEXT NOT NULL DEFAULT '',
+            source_url TEXT,
+            biz TEXT,
+            album_id TEXT,
+            coverage_label TEXT NOT NULL DEFAULT '',
+            last_discovery_at TEXT,
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS wechat_discovery_runs (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL REFERENCES wechat_public_sources(id) ON DELETE CASCADE,
+            task_id TEXT,
+            mode TEXT NOT NULL CHECK(mode IN ('manual', 'album')),
+            status TEXT NOT NULL DEFAULT 'queued'
+                CHECK(status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+            request_json TEXT NOT NULL DEFAULT '{}',
+            cursor_json TEXT NOT NULL DEFAULT '{}',
+            candidate_count INTEGER NOT NULL DEFAULT 0,
+            verified_count INTEGER NOT NULL DEFAULT 0,
+            imported_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT NOT NULL DEFAULT '',
+            started_at TEXT,
+            finished_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS wechat_discovery_candidates (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES wechat_discovery_runs(id) ON DELETE CASCADE,
+            normalized_url TEXT NOT NULL,
+            canonical_source_id TEXT,
+            discovered_via TEXT NOT NULL,
+            observed_title TEXT NOT NULL DEFAULT '',
+            observed_biz TEXT NOT NULL DEFAULT '',
+            published_at TEXT,
+            verification_state TEXT NOT NULL DEFAULT 'pending'
+                CHECK(verification_state IN ('pending', 'verified', 'rejected')),
+            import_state TEXT NOT NULL DEFAULT 'pending'
+                CHECK(import_state IN ('pending', 'imported', 'duplicate', 'failed')),
+            content_item_id TEXT REFERENCES content_items(id) ON DELETE SET NULL,
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(run_id, normalized_url)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wechat_discovery_runs_created
+        ON wechat_discovery_runs(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_wechat_discovery_candidates_run
+        ON wechat_discovery_candidates(run_id, created_at);
+        """
+    )
+    from services.wechat_urls import canonical_wechat_article_id, is_wechat_article_url
+
+    # Earlier builds used the entire URL as the content identity, so tracking
+    # parameters could create duplicates. Promote existing public articles
+    # without deleting or merging any user record when two legacy rows already
+    # collide.
+    legacy_rows = connection.execute(
+        """
+        SELECT id, source_url, canonical_source_id
+        FROM content_items
+        WHERE source_provider = 'wechat' AND source_url IS NOT NULL
+        """
+    ).fetchall()
+    for row in legacy_rows:
+        source_url = str(row["source_url"] or "")
+        if not is_wechat_article_url(source_url):
+            continue
+        canonical_id = canonical_wechat_article_id(source_url)
+        if not canonical_id or canonical_id == str(row["canonical_source_id"] or ""):
+            continue
+        try:
+            connection.execute(
+                "UPDATE content_items SET canonical_source_id = ? WHERE id = ?",
+                (canonical_id, row["id"]),
+            )
+        except sqlite3.IntegrityError:
+            continue
+
+
+def _migration_088_wechat_seed_discovery_review(connection: sqlite3.Connection) -> None:
+    """Add reviewable public-search discovery without changing phase-one modes."""
+    _add_column_if_missing(
+        connection,
+        "wechat_public_sources",
+        "discovery_strategy",
+        "TEXT NOT NULL DEFAULT 'direct'",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_discovery_runs",
+        "discovery_strategy",
+        "TEXT NOT NULL DEFAULT 'direct'",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_discovery_runs",
+        "review_required",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    _add_column_if_missing(connection, "wechat_discovery_runs", "reviewed_at", "TEXT")
+    _add_column_if_missing(
+        connection,
+        "wechat_discovery_runs",
+        "review_import_status",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_discovery_candidates",
+        "observed_source_name",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_discovery_candidates",
+        "search_provider",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_discovery_candidates",
+        "search_query",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_discovery_candidates",
+        "search_rank",
+        "INTEGER",
+    )
+
+
+def _migration_089_wechat_album_subscriptions(connection: sqlite3.Connection) -> None:
+    """Make persisted public albums eligible for low-frequency incremental checks."""
+    _add_column_if_missing(
+        connection,
+        "wechat_public_sources",
+        "enabled",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_public_sources",
+        "auto_analyze",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_public_sources",
+        "sync_interval_minutes",
+        "INTEGER NOT NULL DEFAULT 720",
+    )
+    _add_column_if_missing(connection, "wechat_public_sources", "next_sync_at", "TEXT")
+    _add_column_if_missing(
+        connection,
+        "wechat_public_sources",
+        "consecutive_failure_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    _add_column_if_missing(
+        connection,
+        "wechat_public_sources",
+        "last_new_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_public_sources_due
+        ON wechat_public_sources(source_kind, enabled, next_sync_at)
+        """
+    )
+
+
 _MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _migration_001_initial_schema),
     (2, _migration_002_library_tree),
@@ -2707,4 +3068,10 @@ _MIGRATIONS: list[tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (84, _migration_084_source_context_analysis_prompt),
     (85, _migration_085_repair_source_context_assets),
     (86, _migration_086_wechat_collection_guardrails),
+    (87, _migration_087_wechat_public_discovery),
+    (88, _migration_088_wechat_seed_discovery_review),
+    (89, _migration_089_wechat_album_subscriptions),
+    (90, _migration_090_unify_video_source_subscriptions),
+    (91, _migration_091_unify_xiaohongshu_favorite_subscription),
+    (92, _migration_092_repair_placeholder_content_items),
 ]

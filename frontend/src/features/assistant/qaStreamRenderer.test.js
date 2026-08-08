@@ -26,7 +26,7 @@ function frameHarness() {
   }
 }
 
-test('drains bursty model deltas as ordered visual batches', async () => {
+test('coalesces a burst only until the next visual frame', async () => {
   const frames = frameHarness()
   const commits = []
   let renderedLength = 0
@@ -48,11 +48,11 @@ test('drains bursty model deltas as ordered visual batches', async () => {
   await drained
 
   assert.equal(commits.join(''), expected)
-  assert.ok(commits.length > 2)
+  assert.equal(commits.length, 1)
   assert.ok(commits.every(Boolean))
 })
 
-test('visual batches do not split an emoji surrogate pair', () => {
+test('a visual frame preserves a complete emoji-containing model delta', () => {
   const frames = frameHarness()
   const commits = []
   const renderer = createQaStreamRenderer({
@@ -65,7 +65,7 @@ test('visual batches do not split an emoji surrogate pair', () => {
 
   renderer.enqueue('123🙂abcd')
   frames.run(0)
-  assert.equal(commits[0], '123🙂')
+  assert.equal(commits[0], '123🙂abcd')
   renderer.flush()
 
   assert.equal(commits.join(''), '123🙂abcd')

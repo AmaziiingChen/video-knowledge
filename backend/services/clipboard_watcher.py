@@ -12,6 +12,7 @@ from services.inbox import capture_link_to_inbox
 from services.manual_collection_settings import manual_collection_settings
 from services.pipeline_runner import PipelineRequest
 from services.task_manager import TaskRecord, task_manager
+from services.url_parser import XIAOHONGSHU_PATTERN, XIAOHONGSHU_SHORT_PATTERN
 
 
 VIDEO_LINK_PATTERNS = [
@@ -19,11 +20,10 @@ VIDEO_LINK_PATTERNS = [
     re.compile(r"https?://(?:www\.)?bilibili\.com/video/[A-Za-z0-9]+"),
     re.compile(r"https?://b23\.tv/[A-Za-z0-9]+"),
     re.compile(r"https?://mp\.weixin\.qq\.com/[^\s]+"),
-    re.compile(
-        r"https?://(?:www\.)?xiaohongshu\.com/(?:explore|discovery/item|search_result)/[^\s]+",
-        re.IGNORECASE,
-    ),
-    re.compile(r"https?://(?:www\.)?xhslink\.com/[^\s]+", re.IGNORECASE),
+    # Reuse the ingest parser's canonical patterns so clipboard listening does
+    # not silently lag behind supported Xiaohongshu share-link domains.
+    XIAOHONGSHU_PATTERN,
+    XIAOHONGSHU_SHORT_PATTERN,
 ]
 
 

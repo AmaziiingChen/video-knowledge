@@ -32,6 +32,10 @@ const PLATFORM_CONFIG = {
   },
 }
 
+function isVerifiedPlatformSession(status) {
+  return status?.state === 'valid'
+}
+
 function createPlatformAuthController({ BrowserWindow, session, backendUrl }) {
   const loginWindows = new Map()
 
@@ -136,7 +140,10 @@ function createPlatformAuthController({ BrowserWindow, session, backendUrl }) {
     const persistIfSignedIn = async () => {
       if (completing || loginWindow.isDestroyed()) return false
       const saved = await persistSession(platform).catch(() => null)
-      if (!saved) return false
+      // Xiaohongshu can issue a `web_session` cookie to an anonymous visitor.
+      // Keep the login window open until the backend has verified the actual
+      // session rather than treating the cookie name alone as completion.
+      if (!isVerifiedPlatformSession(saved)) return false
       completing = true
       setTimeout(() => {
         if (!loginWindow.isDestroyed()) loginWindow.close()
@@ -211,4 +218,4 @@ function requestJson(baseUrl, path, { method = 'GET', body = null } = {}) {
   })
 }
 
-module.exports = { PLATFORM_CONFIG, createPlatformAuthController }
+module.exports = { PLATFORM_CONFIG, createPlatformAuthController, isVerifiedPlatformSession }

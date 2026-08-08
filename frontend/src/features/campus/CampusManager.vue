@@ -79,11 +79,11 @@
                 :size="28"
                 :style="{ color: sourceIconColor(source) }"
               />
-              <img
+              <SvgMaskIcon
                 v-else
                 class="campus-manager-source-mark"
                 :src="sourceIcon(source)"
-                alt=""
+                :size="28"
               />
               <span class="campus-manager-source-copy">
                 <strong>{{ source.name }}</strong>
@@ -153,22 +153,22 @@ import HistorySyncDialog from '../../components/HistorySyncDialog.vue'
 import ReportGroupMultiSelect from '../../components/ReportGroupMultiSelect.vue'
 import CollectionState from '../../components/CollectionState.vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
-import gwtIcon from '../../../assets/01-公文通.svg'
-import sztuIcon from '../../../assets/shield.fill.svg'
-import sgimIcon from '../../../assets/02-中德智能制造学院.svg'
-import aiIcon from '../../../assets/03-人工智能学院.svg'
-import nmneIcon from '../../../assets/04-新材料与新能源学院.svg'
-import utlIcon from '../../../assets/05-城市交通与物流学院.svg'
-import hseeIcon from '../../../assets/06-健康与环境工程学院.svg'
-import cepIcon from '../../../assets/07-工程物理学院.svg'
-import copIcon from '../../../assets/08-药学院.svg'
-import icocIcon from '../../../assets/09-集成电路与光电芯片学院.svg'
-import futureIcon from '../../../assets/10-未来技术学院.svg'
-import designIcon from '../../../assets/11-创意设计学院.svg'
-import businessIcon from '../../../assets/12-商学院.svg'
-import sflIcon from '../../../assets/13-外国语学院.svg'
-import musicIcon from '../../../assets/14-音乐学院.svg'
-import procurementIcon from '../../../assets/chineseyuanrenminbisign.bank.building.fill.svg'
+const gwtIcon = '01-公文通'
+const sztuIcon = 'shield.fill'
+const sgimIcon = '02-中德智能制造学院'
+const aiIcon = '03-人工智能学院'
+const nmneIcon = '04-新材料与新能源学院'
+const utlIcon = '05-城市交通与物流学院'
+const hseeIcon = '06-健康与环境工程学院'
+const cepIcon = '07-工程物理学院'
+const copIcon = '08-药学院'
+const icocIcon = '09-集成电路与光电芯片学院'
+const futureIcon = '10-未来技术学院'
+const designIcon = '11-创意设计学院'
+const businessIcon = '12-商学院'
+const sflIcon = '13-外国语学院'
+const musicIcon = '14-音乐学院'
+const procurementIcon = 'chineseyuanrenminbisign.bank.building.fill'
 
 const props = defineProps({
   campusAccess: { type: Object, default: () => ({ state: 'disconnected', label: '尚未连接', detail: '', connected: false }) },

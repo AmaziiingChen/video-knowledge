@@ -5,7 +5,6 @@ from services.clipboard_settings import load_clipboard_watcher_settings
 from services.clipboard_watcher import clipboard_watcher
 from services.folder_import_settings import load_folder_import_watcher_settings
 from services.folder_import_watcher import folder_import_watcher
-from services.telegram_settings import load_telegram_settings
 from services.telegram_watcher import telegram_watcher
 
 
@@ -27,10 +26,6 @@ def restore_enabled_watchers() -> None:
             capture_mode=clipboard["capture_mode"],
             skip_current_clipboard=True,
         )
-
-    telegram = load_telegram_settings()
-    if telegram.get("watch_enabled") is True:
-        telegram_watcher.start()
 
     folder_import = load_folder_import_watcher_settings()
     if folder_import["enabled"]:

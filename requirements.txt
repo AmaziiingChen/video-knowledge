@@ -4,12 +4,11 @@ pydantic-settings==2.12.0
 httpx==0.28.1
 requests==2.33.1
 curl-cffi>=0.7.0
-# Local XHS collector runtime (the signing code is bundled under backend/vendor).
 PyExecJS>=1.5.1
 loguru>=0.7.3
 retry>=0.9.2
 faster-whisper==1.2.1
-# MLX only runs on Apple Silicon. Windows uses faster-whisper instead.
+# MLX only runs on Apple Silicon; it is the preferred local runtime there.
 mlx-whisper==0.4.3; sys_platform == "darwin" and platform_machine == "arm64"
 openai==2.45.0
 playwright==1.61.0

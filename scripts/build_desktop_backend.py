@@ -22,18 +22,11 @@ def host_target() -> str:
     system = platform.system()
     if system == "Darwin":
         return "macos"
-    if system == "Windows":
-        return "windows"
-    raise SystemExit(f"不支持在 {system} 上构建桌面后端；请在 macOS 或 Windows 上执行")
+    raise SystemExit(f"KnowledgeHub 当前仅支持在 macOS 上构建；当前主机是 {system}")
 
 
 def build_native_tools(target: str) -> list[Path]:
     """Build ScreenCaptureKit and Vision helpers while the build SDK exists."""
-    if target != "macos":
-        # Windows v1 intentionally excludes the macOS native mini-program
-        # collector and Vision OCR helper. The cloud Paddle OCR path remains
-        # available through the Python backend.
-        return []
     compiler = shutil.which("clang") or "/usr/bin/clang"
     if not Path(compiler).exists() and shutil.which(compiler) is None:
         raise SystemExit("未找到 clang，无法构建 macOS 小程序采集组件")
@@ -62,17 +55,21 @@ def build_native_tools(target: str) -> list[Path]:
     return outputs
 
 
-def build_backend(target: str) -> None:
+def build_backend(target: str, *, bundle_local_asr_model: bool = False) -> None:
     native_tools = build_native_tools(target)
     native_arguments = []
     for helper in native_tools:
         native_arguments.extend(("--add-binary", f"{helper}{os.pathsep}native_tools"))
 
-    data_arguments: list[str] = []
-    if target == "macos":
-        data_arguments.extend(("--add-data", f"{ROOT / 'backend' / 'native'}{os.pathsep}native"))
-    data_arguments.extend(("--add-data", f"{ROOT / 'backend' / 'vendor' / 'Spider_XHS'}{os.pathsep}vendor/Spider_XHS"))
-
+    data_arguments: list[str] = ["--add-data", f"{ROOT / 'backend' / 'native'}{os.pathsep}native"]
+    if bundle_local_asr_model:
+        model_directory = ROOT / "data" / "models" / "mlx-whisper" / "small"
+        if not ((model_directory / "config.json").is_file() and any(model_directory.glob("*.npz"))):
+            raise SystemExit("无法预置本机语音模型：未找到 data/models/mlx-whisper/small 的完整模型文件")
+        data_arguments.extend((
+            "--add-data",
+            f"{model_directory}{os.pathsep}preloaded_models/mlx/small",
+        ))
     build_root = DESKTOP_DIR / "build" / target
     subprocess.run(
         [
@@ -94,12 +91,6 @@ def build_backend(target: str) -> None:
             str(build_root / "spec"),
             "--paths",
             str(ROOT / "backend"),
-            "--paths",
-            str(ROOT / "backend" / "vendor" / "Spider_XHS"),
-            "--hidden-import",
-            "apis.xhs_pc_apis",
-            "--hidden-import",
-            "xhs_utils.xhs_pc",
             *data_arguments,
             *native_arguments,
             str(BACKEND_ENTRY),
@@ -110,9 +101,10 @@ def build_backend(target: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="构建 KnowledgeHub 桌面后端")
-    parser.add_argument("--target", choices=("macos", "windows"), default=host_target())
+    parser.add_argument("--target", choices=("macos",), default=host_target())
+    parser.add_argument("--bundle-local-asr-model", action="store_true", help="将当前 small MLX 语音模型预置到本机 macOS 包")
     arguments = parser.parse_args()
     host = host_target()
     if arguments.target != host:
         raise SystemExit(f"{arguments.target} 安装包必须在对应平台构建；当前主机是 {host}")
-    build_backend(arguments.target)
+    build_backend(arguments.target, bundle_local_asr_model=arguments.bundle_local_asr_model)

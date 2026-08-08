@@ -64,11 +64,11 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import publicationManifest from 'virtual:knowledgehub-published-reports'
 
 const themeToggle = ref(null)
 const isNight = ref(false)
-const publishedReports = computed(() => (publicationManifest.reports || [])
+const publicationManifest = ref({ reports: [] })
+const publishedReports = computed(() => (publicationManifest.value.reports || [])
   .filter((report) => report?.status === 'published' && report?.publicUrl && report?.publishedAt)
   .sort((left, right) => String(right.publishedAt).localeCompare(String(left.publishedAt))))
 const reportTypes = computed(() => new Set(publishedReports.value.map((report) => report.type || 'other')))
@@ -80,7 +80,21 @@ onMounted(() => {
     isNight.value = false
   }
   applyTheme()
+  void loadPublicationManifest()
 })
+
+async function loadPublicationManifest() {
+  try {
+    const response = await window.fetch('./published-reports.json', { cache: 'no-store' })
+    if (!response.ok) return
+    const manifest = await response.json()
+    if (manifest && typeof manifest === 'object' && Array.isArray(manifest.reports)) {
+      publicationManifest.value = { reports: manifest.reports }
+    }
+  } catch {
+    // A local preview or an incomplete static upload can legitimately have no archive yet.
+  }
+}
 
 function reportLabel(type) {
   return { daily: '日报', weekly: '周报', special: '专题' }[type] || '简报'

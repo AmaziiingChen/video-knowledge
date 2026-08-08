@@ -34,6 +34,7 @@ from services.article_preview import (
     build_local_html_source_preview,
 )
 from services.xiaohongshu_ingest import render_xiaohongshu_description_html
+from services.xiaohongshu_cache import xiaohongshu_cache_dir
 from services.campus_sources import is_campus_attachment_blacklisted, render_document_markdown_html
 from services.document_formatter import request_document_formatting
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
@@ -620,7 +621,12 @@ def get_article_preview(
         )
 
     if item.source_provider == "xiaohongshu" and item.content_type == "article" and item.source_url:
-        article_info = read_cache_meta(cache_dir_for_url(item.source_url)).get("article_info") or {}
+        # XHS share URLs carry short-lived xsec tokens.  The ingest pipeline
+        # therefore promotes each note to its stable note-id cache directory.
+        # Reading the legacy full-URL cache here can return an older OCR-only
+        # body while silently dropping xhs_gallery, which makes the frontend
+        # fall back to the generic article reader instead of image + text.
+        article_info = read_cache_meta(xiaohongshu_cache_dir(item.source_url)).get("article_info") or {}
         if not article_info:
             raise HTTPException(status_code=404, detail="小红书图文尚未采集完成")
         media_base_url = f"{str(request.base_url).rstrip('/')}/api/media"
@@ -1634,13 +1640,41 @@ async def restore_library_trash_entry(entry_type: str, entry_id: str):
             raise HTTPException(status_code=404, detail="回收站项目不存在")
         batch_id = row["trash_batch_id"]
         now = utc_now_iso()
+        restored_content_ids: list[str] = []
+        restored_folder_ids: list[str] = []
         if entry_type == "folder" and batch_id:
+            restored_folder_ids = [
+                str(item["id"])
+                for item in connection.execute(
+                    "SELECT id FROM library_folders WHERE trash_batch_id = ?",
+                    (batch_id,),
+                ).fetchall()
+            ]
+            restored_content_ids = [
+                str(item["id"])
+                for item in connection.execute(
+                    "SELECT id FROM content_items WHERE trash_batch_id = ?",
+                    (batch_id,),
+                ).fetchall()
+            ]
             connection.execute("UPDATE library_folders SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE trash_batch_id = ?", (now, batch_id))
             connection.execute("UPDATE content_items SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE trash_batch_id = ?", (now, batch_id))
         else:
+            if entry_type == "content":
+                restored_content_ids = [entry_id]
+            else:
+                restored_folder_ids = [entry_id]
             connection.execute(f"UPDATE {table} SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE id = ?", (now, entry_id))
         connection.commit()
-    return {"success": True}
+    return {
+        "success": True,
+        # The tree is progressively loaded, so a folder refresh alone cannot
+        # repopulate a restored file row. Return the exact durable records for
+        # the renderer to resolve and merge without reloading the whole
+        # library.
+        "restored_content_ids": restored_content_ids,
+        "restored_folder_ids": restored_folder_ids,
+    }
 
 
 @router.delete("/content/trash/{entry_type}/{entry_id}", response_model=dict)

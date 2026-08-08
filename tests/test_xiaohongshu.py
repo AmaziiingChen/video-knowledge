@@ -23,6 +23,8 @@ from services.telegram_watcher import TelegramWatcher
 from services.xiaohongshu_cache import xiaohongshu_cache_dir
 from services.xiaohongshu_links import XiaohongshuShareLinkError, resolve_xiaohongshu_share_url
 from config import settings
+from services import xiaohongshu_client
+from services.database import _migration_092_repair_placeholder_content_items
 
 
 def test_xiaohongshu_share_link_enters_the_manual_ingest_contract():
@@ -93,6 +95,59 @@ def test_xiaohongshu_provider_uses_note_id_for_deduplication_without_network():
     assert resolved.provider == "xiaohongshu"
     assert resolved.content_type == "article"
     assert resolved.canonical_source_id == "abc123"
+    assert resolved.title == "小红书图文 · abc123"
+
+
+def test_xiaohongshu_note_without_a_title_uses_its_description_before_a_generic_placeholder():
+    note = xiaohongshu_client._note_from_raw(
+        {
+            "id": "note-id-123456",
+            "note_card": {
+                "title": "   ",
+                "desc": "  这是一条没有标题、但有正文的小红书笔记。  ",
+            },
+        },
+        source_url="https://www.xiaohongshu.com/explore/note-id-123456?xsec_token=token",
+    )
+
+    assert note.title == "这是一条没有标题、但有正文的小红书笔记。"
+
+
+def test_placeholder_repair_keeps_legacy_rows_identifiable_and_routes_xhs_to_articles(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", Path(tmp_path))
+    initialize_database()
+    with connect() as connection:
+        connection.execute(
+            """INSERT INTO content_items (
+                id, content_type, source_provider, source_url, canonical_source_id,
+                title, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'inbox', ?, ?)""",
+            (
+                "legacy-xhs", "video", "xiaohongshu",
+                "https://www.xiaohongshu.com/explore/note-123?xsec_token=token",
+                "note-123", "无标题小红书笔记", "2026-08-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00",
+            ),
+        )
+        connection.execute(
+            """INSERT INTO content_items (
+                id, content_type, source_provider, source_url, canonical_source_id,
+                title, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'inbox', ?, ?)""",
+            (
+                "legacy-video", "video", "bilibili",
+                "https://www.bilibili.com/video/BV123", "BV123", "未命名视频",
+                "2026-08-01T00:00:00+00:00", "2026-08-01T00:00:00+00:00",
+            ),
+        )
+        _migration_092_repair_placeholder_content_items(connection)
+        rows = connection.execute(
+            "SELECT id, content_type, title FROM content_items WHERE id IN ('legacy-xhs', 'legacy-video') ORDER BY id"
+        ).fetchall()
+
+    assert [(row["id"], row["content_type"], row["title"]) for row in rows] == [
+        ("legacy-video", "video", "B站视频 · BV123"),
+        ("legacy-xhs", "article", "小红书图文 · note-123"),
+    ]
 
 
 def test_xiaohongshu_normalization_keeps_access_token_but_stabilizes_the_origin():
@@ -282,6 +337,33 @@ def test_existing_xiaohongshu_video_item_is_repaired_to_article(tmp_path, monkey
 
     assert repaired.duplicate is True
     assert repaired.item and repaired.item.content_type == "article"
+
+
+def test_retry_repairs_a_legacy_xiaohongshu_video_item_before_processing(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", Path(tmp_path))
+    initialize_database()
+    url = "https://www.xiaohongshu.com/explore/6a666e2b000000001c0108b4?xsec_token=token&xsec_source=pc_feed"
+    first = capture_link_to_inbox(url)
+    assert first.item is not None
+    with connect() as connection:
+        connection.execute("UPDATE content_items SET content_type='video' WHERE id=?", (first.item.id,))
+        connection.commit()
+    monkeypatch.setattr("services.xiaohongshu_ingest.capture_xiaohongshu_note", lambda _item_id: {})
+    monkeypatch.setattr(
+        "services.pipeline_runner.load_content_source_text",
+        lambda item_id: ContentSourceText(item_id, "图文", url, "可用于总结的图文正文", "article"),
+    )
+    monkeypatch.setattr(
+        "services.pipeline_runner.download_video",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("旧小红书图文不能进入下载器")),
+    )
+
+    response = run_pipeline_sync(content_item_id=first.item.id, processing_mode="transcript")
+
+    assert response.success is True
+    with connect() as connection:
+        row = connection.execute("SELECT content_type FROM content_items WHERE id=?", (first.item.id,)).fetchone()
+    assert row["content_type"] == "article"
 
 
 def test_duplicate_xiaohongshu_capture_refreshes_the_access_token(tmp_path, monkeypatch):

@@ -75,7 +75,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import PreviewFindBar from '../../workbench/PreviewFindBar.vue'
-import ellipsisIcon from '../../../assets/ellipsis.svg'
+const ellipsisIcon = 'ellipsis'
 import { clearPreviewTextHighlights, highlightPreviewText } from '../../utils/previewTextSearch'
 
 const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'

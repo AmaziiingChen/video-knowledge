@@ -4,8 +4,8 @@
       type="button"
       class="preview-find-trigger"
       :class="{ 'is-active': open }"
-      aria-label="在预览中查找"
-      title="在预览中查找"
+      :aria-label="searchLabel"
+      :title="searchLabel"
       :aria-expanded="open ? 'true' : 'false'"
       @click="$emit('open')"
     >
@@ -17,7 +17,7 @@
       v-if="open"
       class="preview-find-bar"
       role="search"
-      aria-label="在预览中查找"
+      :aria-label="searchLabel"
       @submit.prevent="$emit('next')"
     >
       <el-icon class="preview-find-icon"><Search /></el-icon>
@@ -28,8 +28,8 @@
         name="preview-find"
         autocomplete="off"
         spellcheck="false"
-        placeholder="在预览中查找"
-        aria-label="在预览中查找"
+        :placeholder="searchLabel"
+        :aria-label="searchLabel"
         @input="$emit('update:query', $event.target.value)"
         @keydown.enter.exact.prevent="$emit('next')"
         @keydown.shift.enter.prevent="$emit('previous')"
@@ -55,7 +55,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowDown, ArrowUp, Close, Search } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
-import magnifyingglassIcon from '../../assets/magnifyingglass.svg'
+const magnifyingglassIcon = 'magnifyingglass'
 
 const props = defineProps({
   available: { type: Boolean, default: false },
@@ -65,6 +65,7 @@ const props = defineProps({
   activeMatchIndex: { type: Number, default: -1 },
   truncated: { type: Boolean, default: false },
   focusRequest: { type: Number, default: 0 },
+  searchLabel: { type: String, default: '在预览中查找' },
 })
 
 defineEmits(['update:query', 'previous', 'next', 'open', 'close'])

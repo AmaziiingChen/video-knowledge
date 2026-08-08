@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+umask 077
 
 cd "$(dirname "$0")"
 
@@ -12,10 +13,12 @@ RUN_DIR="$ROOT_DIR/data/run"
 LOG_DIR="$ROOT_DIR/data/logs"
 BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
+BACKEND_TOKEN_FILE="$RUN_DIR/backend-instance-token"
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 BACKEND_URL="http://127.0.0.1:8000"
 FRONTEND_URL="http://127.0.0.1:5173"
+INSTANCE_TOKEN=""
 
 if [ -z "${PYTHON_BIN:-}" ]; then
     if command -v python >/dev/null 2>&1; then
@@ -42,6 +45,34 @@ read_pid_file() {
 url_ready() {
     local url="$1"
     curl -s "$url" >/dev/null 2>&1
+}
+
+read_instance_token() {
+    if [ -f "$BACKEND_TOKEN_FILE" ]; then
+        INSTANCE_TOKEN="$(tr -d '[:space:]' < "$BACKEND_TOKEN_FILE")"
+    fi
+}
+
+generate_instance_token() {
+    "$PYTHON_BIN" -c 'import secrets; print(secrets.token_urlsafe(32))'
+}
+
+write_instance_token() {
+    printf '%s\n' "$INSTANCE_TOKEN" > "$BACKEND_TOKEN_FILE"
+    chmod 600 "$BACKEND_TOKEN_FILE"
+}
+
+health_matches_instance_token() {
+    local base_url="$1"
+    [ -n "$INSTANCE_TOKEN" ] || return 1
+    curl -fsS -H "X-KnowledgeHub-Token: $INSTANCE_TOKEN" "$base_url/api/health" \
+        | KNOWLEDGEHUB_EXPECTED_TOKEN="$INSTANCE_TOKEN" "$PYTHON_BIN" -c '
+import json
+import os
+import sys
+payload = json.load(sys.stdin)
+raise SystemExit(0 if payload.get("instance_token") == os.environ["KNOWLEDGEHUB_EXPECTED_TOKEN"] else 1)
+'
 }
 
 port_in_use() {
@@ -71,7 +102,12 @@ wait_for_url() {
 
 ensure_backend() {
     if url_ready "$BACKEND_URL/api/health"; then
-        echo "[1/2] 后端已在运行，直接复用"
+        read_instance_token
+        if ! health_matches_instance_token "$BACKEND_URL"; then
+            echo "[1/2] 后端已在运行，但不属于当前安全会话。请先运行 ./stop.sh 后重试。"
+            exit 1
+        fi
+        echo "[1/2] 后端已在运行，安全复用"
         return 0
     fi
 
@@ -82,10 +118,12 @@ ensure_backend() {
     fi
 
     echo "[1/2] 启动后端..."
+    INSTANCE_TOKEN="$(generate_instance_token)"
+    write_instance_token
     : > "$BACKEND_LOG"
     (
         cd "$BACKEND_DIR"
-        exec nohup "$PYTHON_BIN" -m uvicorn main:app --host 127.0.0.1 --port 8000
+        exec env KNOWLEDGEHUB_INSTANCE_TOKEN="$INSTANCE_TOKEN" nohup "$PYTHON_BIN" -m uvicorn main:app --host 127.0.0.1 --port 8000
     ) >> "$BACKEND_LOG" 2>&1 &
     echo $! > "$BACKEND_PID_FILE"
 
@@ -94,7 +132,11 @@ ensure_backend() {
 
 ensure_frontend() {
     if url_ready "$FRONTEND_URL"; then
-        echo "[2/2] 前端已在运行，直接复用"
+        if ! health_matches_instance_token "$FRONTEND_URL"; then
+            echo "[2/2] 前端已在运行，但不属于当前安全会话。请先运行 ./stop.sh 后重试。"
+            exit 1
+        fi
+        echo "[2/2] 前端已在运行，安全复用"
         return 0
     fi
 
@@ -108,7 +150,7 @@ ensure_frontend() {
     : > "$FRONTEND_LOG"
     (
         cd "$FRONTEND_DIR"
-        exec nohup npm run dev -- --host 127.0.0.1
+        exec env KNOWLEDGEHUB_INSTANCE_TOKEN="$INSTANCE_TOKEN" nohup npm run dev -- --host 127.0.0.1
     ) >> "$FRONTEND_LOG" 2>&1 &
     echo $! > "$FRONTEND_PID_FILE"
 

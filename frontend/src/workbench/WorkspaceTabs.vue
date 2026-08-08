@@ -14,7 +14,16 @@
         :class="{ 'is-ready': activeSelectionReady }"
         :style="activeSelectionStyle"
         aria-hidden="true"
-      ></span>
+      >
+        <span class="workspace-tab-seam-mask is-left"></span>
+        <span class="workspace-tab-seam-mask is-right"></span>
+        <svg class="workspace-tab-seam-arc is-left" viewBox="0 0 6 6" fill="none" aria-hidden="true">
+          <path d="M6 0A6 6 0 0 1 0 6" />
+        </svg>
+        <svg class="workspace-tab-seam-arc is-right" viewBox="0 0 6 6" fill="none" aria-hidden="true">
+          <path d="M0 0A6 6 0 0 0 6 6" />
+        </svg>
+      </span>
       <div
         v-for="tab in tabs"
         :key="tab.id"
@@ -207,10 +216,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowDown, ArrowLeft, ArrowRight, Close, Search } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
-import arrowRightIcon from '../../assets/arrow.right.svg'
-import eraserIcon from '../../assets/eraser.svg'
-import finderIcon from '../../assets/finder.svg'
-import trashIcon from '../../assets/trash.svg'
+const arrowRightIcon = 'arrow.right'
+const eraserIcon = 'eraser'
+const finderIcon = 'finder'
+const trashIcon = 'trash'
 
 const props = defineProps({
   tabs: { type: Array, default: () => [] },
@@ -329,8 +338,8 @@ function syncActiveSelection() {
     return
   }
   activeSelectionStyle.value = {
-    width: `${Math.max(0, activeTab.offsetWidth - 6)}px`,
-    transform: `translate3d(${activeTab.offsetLeft + 3}px, 0, 0)`,
+    width: `${Math.max(0, activeTab.offsetWidth)}px`,
+    transform: `translate3d(${activeTab.offsetLeft}px, 0, 0)`,
   }
   activeSelectionReady.value = true
 }
@@ -495,20 +504,25 @@ function handleTablistKeydown(event) {
   position: relative;
   z-index: 8;
   grid-row: 1;
-  height: 36px;
+  height: 40px;
   min-width: 0;
-  min-height: 36px;
+  min-height: 40px;
   display: flex;
   overflow: hidden;
   background: transparent;
 }
 
+.workspace-tab-item,
+.workspace-tabs-controls {
+  -webkit-app-region: no-drag;
+}
+
 .workspace-tabs {
   position: relative;
   min-width: 0;
-  min-height: 36px;
+  min-height: 40px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   flex: 1 1 auto;
   overflow-x: auto;
   overflow-y: hidden;
@@ -518,14 +532,16 @@ function handleTablistKeydown(event) {
 .workspace-tabs::-webkit-scrollbar { display: none; }
 
 .workspace-tab-selection {
+  --workspace-tab-active-outline: var(--vk-border);
   position: absolute;
   top: 4px;
   left: 0;
-  z-index: 0;
-  height: 28px;
-  border: 1px solid color-mix(in srgb, var(--vk-border) 68%, var(--vk-bg-panel));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--vk-bg-panel) 82%, var(--vk-bg-hover));
+  z-index: 2;
+  height: 36px;
+  border: 1px solid var(--workspace-tab-active-outline);
+  border-bottom: 0;
+  border-radius: var(--vk-radius-control) var(--vk-radius-control) 0 0;
+  background: var(--vk-bg-center);
   box-shadow: none;
   opacity: 0;
   pointer-events: none;
@@ -539,12 +555,45 @@ function handleTablistKeydown(event) {
 
 .workspace-tab-selection.is-ready { opacity: 1; }
 
+.workspace-tab-seam-mask {
+  position: absolute;
+  bottom: 0;
+  z-index: 1;
+  width: 2px;
+  height: 6px;
+  background: var(--vk-bg-center);
+  pointer-events: none;
+}
+
+.workspace-tab-seam-mask.is-left { left: -1px; }
+.workspace-tab-seam-mask.is-right { right: -1px; }
+
+.workspace-tab-seam-arc {
+  position: absolute;
+  bottom: 0;
+  z-index: 2;
+  width: 6px;
+  height: 6px;
+  overflow: visible;
+  color: var(--workspace-tab-active-outline);
+  pointer-events: none;
+}
+
+.workspace-tab-seam-arc path {
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.workspace-tab-seam-arc.is-left { left: -6px; }
+.workspace-tab-seam-arc.is-right { right: -6px; }
+
 .workspace-tab-item {
   position: relative;
-  z-index: 1;
+  z-index: 3;
   max-width: 240px;
   min-width: 72px;
-  height: 28px;
+  height: 36px;
   flex: 0 1 180px;
 }
 
@@ -594,7 +643,7 @@ function handleTablistKeydown(event) {
 
 .workspace-tab.active,
 .workspace-tab:hover { color: var(--vk-text); }
-.workspace-tab.active { font-weight: var(--vk-weight-strong); }
+.workspace-tab.active { font-weight: var(--vk-weight-regular); }
 
 .workspace-tab:focus-visible {
   outline: none;
@@ -640,11 +689,11 @@ function handleTablistKeydown(event) {
 
 .workspace-tabs-controls {
   flex: 0 0 auto;
-  height: 36px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   padding: 0 4px 0 3px;
-  background: var(--vk-bg-center);
+  background: var(--vk-bg-quiet);
 }
 
 .workspace-tabs-control {

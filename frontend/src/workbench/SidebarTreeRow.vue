@@ -67,16 +67,16 @@
         <span class="sidebar-tree-row-label" :title="labelTitle || label">{{ label }}</span>
         <small v-if="meta !== null && meta !== undefined && meta !== ''" class="sidebar-tree-row-meta">{{ meta }}</small>
       </button>
-
       <span v-if="unread || (hasNewDescendants && !unreadCount && !highContrastUnreadCount)" class="sidebar-tree-row-unread" aria-hidden="true"></span>
       <button
         v-if="hasNewDescendants && unreadCount"
         class="sidebar-tree-row-unread-count"
         type="button"
-        :aria-label="`展开 ${unreadCount} 条新内容`"
-        :title="`展开 ${unreadCount} 条新内容`"
+        :aria-label="`展开 ${unreadCount} 条未读内容`"
+        :title="`展开 ${unreadCount} 条未读内容`"
         @click.stop="emit('expand-unread')"
       >{{ unreadCount }}</button>
+
       <span v-if="status" class="sidebar-tree-row-status">{{ status }}</span>
       <div v-if="$slots.actions" class="sidebar-tree-row-actions">
         <slot name="actions" />
@@ -259,25 +259,11 @@ const rowStyle = computed(() => ({
   padding-right: 22px;
 }
 
-.sidebar-tree-row.has-unread .sidebar-tree-row-main {
-  padding-right: 22px;
-}
-
-.sidebar-tree-row.has-unread.has-meta .sidebar-tree-row-main {
-  padding-right: 44px;
-}
-
-.sidebar-tree-row.has-new-descendants.has-meta .sidebar-tree-row-main {
-  padding-right: 44px;
-}
-
-.sidebar-tree-row.has-unread-count .sidebar-tree-row-main {
-  padding-right: 30px;
-}
-
-.sidebar-tree-row.has-unread-count.has-meta .sidebar-tree-row-main {
-  padding-right: 50px;
-}
+.sidebar-tree-row.has-unread .sidebar-tree-row-main { padding-right: 22px; }
+.sidebar-tree-row.has-unread.has-meta .sidebar-tree-row-main,
+.sidebar-tree-row.has-new-descendants.has-meta .sidebar-tree-row-main { padding-right: 44px; }
+.sidebar-tree-row.has-unread-count .sidebar-tree-row-main { padding-right: 30px; }
+.sidebar-tree-row.has-unread-count.has-meta .sidebar-tree-row-main { padding-right: 50px; }
 
 .sidebar-tree-row-disclosure,
 .sidebar-tree-row-icon {
@@ -307,9 +293,7 @@ const rowStyle = computed(() => ({
   white-space: nowrap;
 }
 
-.sidebar-tree-row.has-unread .sidebar-tree-row-label {
-  font-weight: var(--vk-weight-strong);
-}
+.sidebar-tree-row.has-unread .sidebar-tree-row-label { font-weight: var(--vk-weight-strong); }
 
 .sidebar-tree-row-meta {
   position: absolute;
@@ -320,17 +304,9 @@ const rowStyle = computed(() => ({
   font-weight: var(--vk-weight-regular);
 }
 
-.sidebar-tree-row.has-unread .sidebar-tree-row-meta {
-  right: 22px;
-}
-
-.sidebar-tree-row.has-new-descendants .sidebar-tree-row-meta {
-  right: 22px;
-}
-
-.sidebar-tree-row.has-unread-count .sidebar-tree-row-meta {
-  right: 30px;
-}
+.sidebar-tree-row.has-unread .sidebar-tree-row-meta,
+.sidebar-tree-row.has-new-descendants .sidebar-tree-row-meta { right: 22px; }
+.sidebar-tree-row.has-unread-count .sidebar-tree-row-meta { right: 30px; }
 
 .sidebar-tree-row-unread {
   position: absolute;
@@ -339,18 +315,15 @@ const rowStyle = computed(() => ({
   height: 6px;
   border-radius: 999px;
   background: var(--vk-accent-strong);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vk-bg-quiet) 88%, transparent);
   opacity: 1;
   transform: scale(1);
   transition: opacity 120ms var(--vk-ease-out), transform 120ms var(--vk-ease-out);
 }
-
 .sidebar-tree-row.active .sidebar-tree-row-unread,
 .sidebar-tree-row.selected .sidebar-tree-row-unread {
   background: currentColor;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--vk-selected-bg) 88%, transparent);
 }
-
 .sidebar-tree-row-unread-count {
   position: absolute;
   right: 5px;
@@ -360,7 +333,7 @@ const rowStyle = computed(() => ({
   padding: 0 4px;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--vk-accent) 13%, transparent);
+  background: color-mix(in srgb, var(--vk-accent) 16%, transparent);
   color: var(--vk-accent-strong);
   font: inherit;
   font-size: var(--vk-type-micro-size);
@@ -370,24 +343,16 @@ const rowStyle = computed(() => ({
   cursor: pointer;
   transition: opacity 120ms var(--vk-ease-out), transform 120ms var(--vk-ease-out), background-color 120ms var(--vk-ease-out);
 }
-
 .sidebar-tree-row-unread-count:hover,
-.sidebar-tree-row-unread-count:focus-visible {
-  outline: none;
-  background: color-mix(in srgb, var(--vk-accent) 22%, transparent);
-}
-
+.sidebar-tree-row-unread-count:focus-visible { outline: none; background: color-mix(in srgb, var(--vk-accent) 22%, transparent); }
 .sidebar-tree-row.high-contrast-unread-count .sidebar-tree-row-unread-count {
   min-width: 20px;
   background: var(--vk-accent-strong);
   color: var(--vk-bg-panel);
   font-weight: var(--vk-weight-display);
 }
-
 .sidebar-tree-row.high-contrast-unread-count .sidebar-tree-row-unread-count:hover,
-.sidebar-tree-row.high-contrast-unread-count .sidebar-tree-row-unread-count:focus-visible {
-  background: color-mix(in srgb, var(--vk-accent-strong) 88%, var(--vk-text));
-}
+.sidebar-tree-row.high-contrast-unread-count .sidebar-tree-row-unread-count:focus-visible { background: color-mix(in srgb, var(--vk-accent-strong) 88%, var(--vk-text)); }
 
 .sidebar-tree-row-status {
   position: absolute;
@@ -412,9 +377,7 @@ const rowStyle = computed(() => ({
   transform: translateY(-50%);
 }
 
-.sidebar-tree-row.has-unread-count .sidebar-tree-row-actions {
-  right: 30px;
-}
+.sidebar-tree-row.has-unread-count .sidebar-tree-row-actions { right: 30px; }
 
 @media (hover: hover) and (pointer: fine) {
   .sidebar-tree-row:hover .sidebar-tree-row-main {
@@ -433,11 +396,7 @@ const rowStyle = computed(() => ({
   .sidebar-tree-row.has-actions:hover .sidebar-tree-row-meta {
     opacity: 0;
   }
-
-  .sidebar-tree-row.has-actions:hover .sidebar-tree-row-unread {
-    opacity: 0;
-    transform: scale(0.6);
-  }
+  .sidebar-tree-row.has-actions:hover .sidebar-tree-row-unread { opacity: 0; transform: scale(0.6); }
 
 }
 
@@ -457,11 +416,7 @@ const rowStyle = computed(() => ({
 .sidebar-tree-row.has-actions:has(:focus-visible) .sidebar-tree-row-meta {
   opacity: 0;
 }
-
-.sidebar-tree-row.has-actions:has(:focus-visible) .sidebar-tree-row-unread {
-  opacity: 0;
-  transform: scale(0.6);
-}
+.sidebar-tree-row.has-actions:has(:focus-visible) .sidebar-tree-row-unread { opacity: 0; transform: scale(0.6); }
 
 :deep(.sidebar-tree-action) {
   display: inline-grid;
@@ -524,7 +479,7 @@ const rowStyle = computed(() => ({
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-tree-row,
+.sidebar-tree-row,
   .sidebar-tree-row-disclosure,
   .sidebar-tree-row-unread {
     transition: none;

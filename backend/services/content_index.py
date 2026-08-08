@@ -9,7 +9,7 @@ from config import settings
 from services.bilibili_url import bilibili_video_id_from_page_url, requested_page_number
 from services.cache import list_cache_entries, read_cache_meta
 from services.database import connect, initialize_database, utc_now_iso
-from services.repository import ContentItemRecord, ContentRepository, new_id
+from services.repository import ContentItemRecord, ContentRepository, new_id, stable_content_title
 
 DEFAULT_PROVIDER_FOLDERS = {
     "douyin": "抖音",
@@ -22,12 +22,13 @@ DEFAULT_PROVIDER_FOLDERS = {
 }
 MANUAL_COLLECTION_FOLDER_NAME = "待整理收藏"
 MANUAL_WECHAT_FOLDER_NAME = "手动收藏"
+WECHAT_PUBLIC_ALBUMS_FOLDER_NAME = "微信公众号合集"
 EXTERNAL_MARKDOWN_FOLDER_NAME = "外部导入"
 _PRECREATED_CAMPUS_SOURCE_FOLDERS = ("采购与招投标管理中心",)
 
 _CONTENT_INDEX_READY_LOCK = RLock()
 _CONTENT_INDEX_READY_ROOTS: set[str] = set()
-_CONTENT_INDEX_READY_VERSION = "4"
+_CONTENT_INDEX_READY_VERSION = "5"
 _CONTENT_INDEX_READY_MARKER = "content_index_ready.version"
 
 
@@ -60,6 +61,7 @@ def ensure_content_index_ready() -> None:
         migrate_manual_collection_items()
         backfill_campus_source_folders()
         backfill_wechat_subscription_folders()
+        backfill_wechat_public_album_folders()
         repair_rss_source_folders()
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(_CONTENT_INDEX_READY_VERSION + "\n", encoding="utf-8")
@@ -78,7 +80,13 @@ def ensure_content_item_for_media(
 ) -> ContentItemRecord | None:
     provider = source_provider or (video_info or {}).get("platform") or "unknown"
     canonical_id = _canonical_source_id(source_url=source_url, video_info=video_info)
-    item_title = title or (video_info or {}).get("title") or canonical_id or "未命名内容"
+    item_title = stable_content_title(
+        title or (video_info or {}).get("title"),
+        source_provider=provider,
+        content_type=content_type,
+        canonical_source_id=canonical_id,
+        source_url=source_url,
+    )
     duration = _duration_seconds(video_info)
 
     initialize_database()
@@ -194,6 +202,56 @@ def ensure_manual_wechat_folder(connection: sqlite3.Connection) -> str:
         name=MANUAL_WECHAT_FOLDER_NAME,
         parent_folder_id=root_folder_id,
     )
+
+
+def ensure_wechat_public_album_folder(
+    connection: sqlite3.Connection,
+    source_id: str,
+    album_title: str,
+) -> str:
+    """Return a stable ``微信公众号 → 微信公众号合集 → 合集`` folder."""
+    root_folder_id = ensure_default_provider_folder(connection, "wechat")
+    if not root_folder_id:
+        raise ValueError("未能创建微信公众号根文件夹")
+    albums_folder_id = ensure_managed_folder(
+        connection,
+        source_type="wechat_public_album_root",
+        source_key="root",
+        name=WECHAT_PUBLIC_ALBUMS_FOLDER_NAME,
+        parent_folder_id=root_folder_id,
+    )
+    name = " ".join(str(album_title or "").split())[:160] or "未命名合集"
+    return ensure_managed_folder(
+        connection,
+        source_type="wechat_public_album",
+        source_key=str(source_id),
+        name=name,
+        parent_folder_id=albums_folder_id,
+    )
+
+
+def assign_wechat_public_album_items(
+    connection: sqlite3.Connection,
+    source_id: str,
+    folder_id: str,
+) -> int:
+    """Place every article already linked to one public album in its folder."""
+    cursor = connection.execute(
+        """
+        UPDATE content_items
+        SET library_folder_id = ?, updated_at = ?
+        WHERE id IN (
+            SELECT candidate.content_item_id
+            FROM wechat_discovery_candidates AS candidate
+            JOIN wechat_discovery_runs AS run ON run.id = candidate.run_id
+            WHERE run.source_id = ? AND candidate.content_item_id IS NOT NULL
+        )
+          AND deleted_at IS NULL
+          AND (library_folder_id IS NULL OR library_folder_id <> ?)
+        """,
+        (folder_id, utc_now_iso(), source_id, folder_id),
+    )
+    return cursor.rowcount or 0
 
 
 def migrate_manual_collection_items() -> int:
@@ -369,6 +427,18 @@ def _update_content_item(
     status: str,
     library_folder_id: str | None = None,
 ) -> None:
+    current = connection.execute(
+        "SELECT source_provider, content_type, canonical_source_id, source_url FROM content_items WHERE id=?",
+        (item_id,),
+    ).fetchone()
+    if current:
+        title = stable_content_title(
+            title,
+            source_provider=str(current["source_provider"]),
+            content_type=str(current["content_type"]),
+            canonical_source_id=current["canonical_source_id"],
+            source_url=current["source_url"],
+        )
     connection.execute(
         """
         UPDATE content_items
@@ -904,6 +974,34 @@ def backfill_wechat_subscription_folders() -> int:
                 (folder_id, utc_now_iso(), row["content_item_id"], root_folder_id),
             )
             updated += cursor.rowcount or 0
+        connection.commit()
+    return updated
+
+
+def backfill_wechat_public_album_folders() -> int:
+    """Repair public-album articles imported before album folders existed."""
+    initialize_database()
+    updated = 0
+    with connect() as connection:
+        sources = connection.execute(
+            """
+            SELECT id, title
+            FROM wechat_public_sources
+            WHERE source_kind = 'album' AND title NOT IN ('', '公众号合集')
+            ORDER BY created_at, id
+            """
+        ).fetchall()
+        for source in sources:
+            folder_id = ensure_wechat_public_album_folder(
+                connection,
+                str(source["id"]),
+                str(source["title"] or ""),
+            )
+            updated += assign_wechat_public_album_items(
+                connection,
+                str(source["id"]),
+                folder_id,
+            )
         connection.commit()
     return updated
 

@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+const backendOrigin = 'http://127.0.0.1:8000'
+const backendInstanceToken = String(process.env.KNOWLEDGEHUB_INSTANCE_TOKEN || '').trim()
+
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
@@ -12,8 +15,20 @@ export default defineConfig({
     },
   })],
   server: {
-    host: '0.0.0.0',
+    host: '127.0.0.1',
     port: 5173,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: backendOrigin,
+        changeOrigin: true,
+        configure(proxy) {
+          proxy.on('proxyReq', (request) => {
+            if (backendInstanceToken) request.setHeader('X-KnowledgeHub-Token', backendInstanceToken)
+          })
+        },
+      },
+    },
   },
   build: {
     rolldownOptions: {

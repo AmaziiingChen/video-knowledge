@@ -344,10 +344,10 @@ import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 import { promptTaskGroups, promptTemplateDisplayName } from '../config/promptInterface'
 import { requestDestructiveConfirmation } from '../composables/useDestructiveConfirm'
-import appendPageIcon from '../../assets/append.page.svg'
-import folderIcon from '../../assets/folder.svg'
-import highlighterIcon from '../../assets/highlighter.svg'
-import trashIcon from '../../assets/trash.svg'
+const appendPageIcon = 'append.page'
+const folderIcon = 'folder'
+const highlighterIcon = 'highlighter'
+const trashIcon = 'trash'
 
 const props = defineProps({
   taskOptions: { type: Array, default: () => [] },

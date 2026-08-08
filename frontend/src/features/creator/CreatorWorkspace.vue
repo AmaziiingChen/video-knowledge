@@ -2,7 +2,7 @@
   <section class="creator-workspace manager-surface" aria-label="创作者采集">
     <form class="creator-form" @submit.prevent="preview">
       <label class="creator-field creator-url-field">
-        <span>主页、合集或收藏夹链接</span>
+        <span>订阅链接</span>
         <div class="creator-url-row">
           <el-input
             v-model.trim="sourceUrl"
@@ -11,27 +11,50 @@
             autocomplete="url"
             spellcheck="false"
             clearable
-            placeholder="抖音主页/合集，或 B站 space 链接（含 favlist 收藏夹）"
+            placeholder="粘贴 B站、抖音链接，或小红书个人主页的收藏页链接"
           />
-          <el-button type="primary" native-type="submit" :loading="previewing" :disabled="syncingPreview || Boolean(syncingSourceId)">{{ previewing ? '正在读取' : '预览作品' }}</el-button>
+          <el-button type="primary" native-type="submit" :loading="previewing" :disabled="syncingPreview || Boolean(syncingSourceId)">{{ previewing ? '正在搜索' : '搜索' }}</el-button>
         </div>
       </label>
-      <el-checkbox v-model="allowPersonalSources" class="creator-personal-source-consent">
-        允许访问本人 B 站喜欢、收藏（仅使用本机登录态）
-      </el-checkbox>
-
       <div class="creator-form-options">
         <label class="creator-field">
-          <span>起始日期</span>
-          <el-date-picker
-            v-model="publishedAfter"
-            name="creator-published-after"
-            type="date"
-            clearable
-            placeholder="不限"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            aria-label="起始日期"
+          <span>发布日期</span>
+          <div class="creator-date-range" role="group" aria-label="采集发布日期范围">
+            <el-date-picker
+              v-model="sourceFrom"
+              name="creator-published-from"
+              type="date"
+              clearable
+              placeholder="开始日期"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              placement="bottom-start"
+              aria-label="采集开始日期"
+            />
+            <span aria-hidden="true">至</span>
+            <el-date-picker
+              v-model="sourceTo"
+              name="creator-published-to"
+              type="date"
+              clearable
+              placeholder="结束日期"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              placement="bottom-start"
+              aria-label="采集结束日期"
+            />
+          </div>
+        </label>
+        <label class="creator-field">
+          <span>首次导入数量</span>
+          <el-input-number
+            v-model="previewLimit"
+            name="creator-preview-limit"
+            :min="1"
+            :max="500"
+            :step="1"
+            :controls="false"
+            aria-label="首次导入数量"
           />
         </label>
         <label class="creator-field">
@@ -46,21 +69,15 @@
             <el-option v-for="option in processingOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
         </label>
-        <label class="creator-field">
-          <span>自动入队</span>
-          <el-select v-model="queueLimit" name="creator-queue-limit" :disabled="processingMode === 'metadata'" aria-label="每轮最多自动入队">
-            <el-option v-for="option in queueLimitOptions" :key="option.value" :label="option.label" :value="option.value" />
-          </el-select>
-        </label>
       </div>
-      <p class="creator-policy-note">新订阅默认只读取最新 1 条。B 站收藏夹请使用 <code>space.bilibili.com/.../favlist?fid=...</code>，并明确授权本人收藏访问。自动检查每 6 小时进行一次；新增视频会在后台按顺序处理，不会并发下载。</p>
+      <p class="creator-policy-note">首次订阅最多读取这里设置的数量；之后每次检查都会从最新作品向前读取，直到遇到本订阅已记录的作品为止。个人喜欢、收藏仅使用当前设备的本地登录态读取；小红书采集目前暂不开放。</p>
     </form>
 
     <section v-if="previewData" class="creator-preview" aria-labelledby="creator-preview-title">
       <header class="creator-preview-head">
         <div>
           <h2 id="creator-preview-title">{{ previewData.collection_name || previewData.creator_name }}</h2>
-          <span>{{ previewData.provider === 'douyin' ? '抖音' : 'B站' }} · {{ sourceKindLabel(previewData.source_kind) }}</span>
+          <span>{{ providerLabel(previewData.provider) }} · {{ sourceKindLabel(previewData.source_kind) }}</span>
           <p v-if="previewData.collection_name && previewData.creator_name" class="creator-preview-meta">创作者：{{ previewData.creator_name }}</p>
           <p v-if="previewData.creator_description" class="creator-preview-meta">{{ previewData.creator_description }}</p>
         </div>
@@ -99,12 +116,12 @@
 
       <div v-if="previewData.videos.length" class="creator-queue-estimate">
         <strong>本次计划</strong>
-        <span>已选 {{ selectedVideoIds.length }} 条 · 素材总时长 {{ selectedDurationLabel }} · 自动入队 {{ estimatedQueuedCount }} 条</span>
-        <span v-if="estimatedInboxCount">其余 {{ estimatedInboxCount }} 条进入收件箱</span>
+        <span>已选 {{ selectedVideoIds.length }} 条 · 素材总时长 {{ selectedDurationLabel }}</span>
+        <span>{{ processingMode === 'metadata' ? '将进入收件箱' : '将按顺序进入处理队列' }}</span>
         <span>当前处理队列 {{ activeTaskCount }} 条</span>
       </div>
 
-      <p v-if="!previewData.videos.length" class="creator-empty">没有取得符合条件的公开作品。</p>
+      <p v-if="!previewData.videos.length" class="creator-empty">没有取得符合当前筛选条件的候选作品。</p>
       <ol v-else class="creator-video-list">
         <li v-for="video in filteredVideos" :key="video.canonical_id" :class="{ 'is-selected': isVideoSelected(video.canonical_id) }">
           <el-checkbox
@@ -126,16 +143,16 @@
     </section>
 
     <section v-if="sources.length" class="creator-sources" aria-labelledby="creator-sources-title">
-      <header class="creator-sources-head"><h2 id="creator-sources-title">创作者订阅</h2></header>
+      <header class="creator-sources-head"><h2 id="creator-sources-title">已订阅来源</h2></header>
       <div class="creator-sources-table-scroll vk-scroll-area">
         <div class="creator-sources-table-head" role="row">
-          <span class="column-source">创作者</span><span class="column-activity">活动</span><span class="column-analysis">处理方式</span><span class="column-enabled">自动检查</span><span class="column-frequency">检查频率</span><span class="column-queue">自动入队</span><span class="column-actions">操作</span>
+          <span class="column-source">来源</span><span class="column-activity">活动</span><span class="column-analysis">处理方式</span><span class="column-enabled">自动检查</span><span class="column-frequency">检查频率</span><span class="column-actions">操作</span>
         </div>
         <article v-for="source in sources" :key="source.id" class="creator-source-row" role="row">
           <span class="creator-source-cell column-source">
             <button type="button" class="creator-source-main" :aria-label="`使用 ${source.creator_name || '未命名创作者'} 的设置`" @click="reuseSource(source)">
               <strong>{{ source.creator_name || '未命名创作者' }}</strong>
-              <small>{{ source.provider === 'douyin' ? '抖音' : 'B站' }} · {{ sourceKindLabel(source.source_kind) }}</small>
+              <small>{{ providerLabel(source.provider) }} · {{ sourceKindLabel(source.source_kind) }}</small>
             </button>
           </span>
           <span class="creator-source-activity column-activity">
@@ -161,11 +178,6 @@
               <el-option v-for="option in intervalOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </span>
-          <span class="creator-source-setting-cell column-queue">
-            <el-select :model-value="source.queue_limit || 10" size="small" :disabled="sourceBusy(source) || source.processing_mode === 'metadata'" :aria-label="`${source.creator_name || '创作者'}的自动入队数量`" @update:model-value="updateSource(source, { queue_limit: Number($event) })">
-              <el-option v-for="option in queueLimitOptions" :key="option.value" :label="option.label" :value="option.value" />
-            </el-select>
-          </span>
           <span class="creator-source-actions column-actions">
             <el-button text size="small" :loading="syncingSourceId === source.id" :disabled="!source.enabled || previewing || syncingPreview || Boolean(syncingSourceId)" @click="syncSource(source)">检查</el-button>
             <el-dropdown trigger="click" placement="bottom-end" @command="handleSourceAction($event, source)">
@@ -174,8 +186,8 @@
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="backfill" :disabled="sourceBusy(source)">回溯更多</el-dropdown-item>
-                  <el-dropdown-item command="remove" divided :disabled="sourceBusy(source)" class="creator-source-remove-menu-item">取消订阅</el-dropdown-item>
+                  <el-dropdown-item command="retry" :disabled="sourceBusy(source)">重试失败项</el-dropdown-item>
+                  <el-dropdown-item divided command="remove" :disabled="sourceBusy(source)" class="creator-source-remove-menu-item">取消订阅</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -197,12 +209,12 @@ import { enqueueSourceSyncTask, observeSourceSyncTask } from '../../utils/source
 const emit = defineEmits(['library-changed', 'processing-started'])
 const API = 'http://127.0.0.1:8000/api'
 const sourceUrl = ref('')
-const allowPersonalSources = ref(false)
-const publishedAfter = ref('')
+const allowPersonalSources = ref(true)
+const sourceFrom = ref('')
+const sourceTo = ref('')
 const syncIntervalMinutes = ref(360)
 const processingMode = ref('full')
-const queueLimit = ref(1)
-const previewLimit = ref(1)
+const previewLimit = ref(50)
 const previewData = ref(null)
 const sources = ref([])
 const previewing = ref(false)
@@ -225,10 +237,6 @@ const processingOptions = [
   { value: 'full', label: '完整分析（下载、字幕、AI 总结）', shortLabel: '完整分析' },
   { value: 'transcript', label: '仅字幕（下载、转写，不总结）', shortLabel: '仅字幕' },
   { value: 'metadata', label: '仅元数据（进入收件箱）', shortLabel: '仅元数据' },
-]
-const queueLimitOptions = [
-  { value: 1, label: '1 条' }, { value: 3, label: '3 条' }, { value: 5, label: '5 条' },
-  { value: 10, label: '10 条' }, { value: 20, label: '20 条' }, { value: 50, label: '50 条' },
 ]
 const durationOptions = [
   { value: 'all', label: '全部时长' }, { value: 'short', label: '短视频（≤ 3 分钟）' }, { value: 'long', label: '长视频（＞ 3 分钟）' },
@@ -268,22 +276,19 @@ const selectedVideos = computed(() => {
   return (previewData.value?.videos || []).filter((video) => selected.has(video.canonical_id))
 })
 
-const estimatedQueuedCount = computed(() => processingMode.value === 'metadata'
-  ? 0
-  : Math.min(selectedVideoIds.value.length, queueLimit.value))
-const estimatedInboxCount = computed(() => selectedVideoIds.value.length - estimatedQueuedCount.value)
 const selectedDurationLabel = computed(() => {
   const seconds = selectedVideos.value.reduce((total, video) => total + Math.max(0, Number(video.duration_seconds || 0)), 0)
   return seconds ? formatDuration(seconds) : '时长待采集'
 })
-const primaryActionLabel = computed(() => {
-  if (processingMode.value === 'metadata') return '保存并订阅'
-  return processingMode.value === 'transcript' ? '加入字幕队列' : '加入分析队列'
-})
-const previewModeLabel = computed(() => previewLimit.value === 1 ? '最新作品' : `回溯候选（最多 ${previewLimit.value} 条）`)
+const primaryActionLabel = computed(() => '订阅')
+const previewModeLabel = computed(() => `首次最多读取 ${previewLimit.value} 条`)
 
 function sourceKindLabel(kind) {
   return ({ profile: '主页作品', profile_compilations: '主页合集', collection: '合集', series: '系列', channel_series: '频道系列', channel_collection: '频道合集', favorites: '收藏夹', likes: '喜欢' })[kind] || '作品来源'
+}
+
+function providerLabel(provider) {
+  return ({ douyin: '抖音', bilibili: 'B站', xiaohongshu: '小红书' })[provider] || '内容来源'
 }
 
 function statsLabel(stats) {
@@ -296,15 +301,15 @@ function statsLabel(stats) {
 }
 
 function requestPayload({ includeSelection = false } = {}) {
-  if (!sourceUrl.value) throw new Error('请先粘贴创作者主页或合集链接')
+  if (!sourceUrl.value) throw new Error('请先粘贴订阅链接')
   return {
     source_url: sourceUrl.value,
     limit: previewLimit.value,
-    published_after: publishedAfter.value || null,
+    published_after: sourceFrom.value || null,
+    published_before: sourceTo.value || null,
     auto_process: processingMode.value !== 'metadata',
     sync_interval_minutes: syncIntervalMinutes.value,
     processing_mode: processingMode.value,
-    queue_limit: queueLimit.value,
     allow_personal_sources: allowPersonalSources.value,
     ...(includeSelection ? { selected_video_ids: [...selectedVideoIds.value] } : {}),
   }
@@ -327,15 +332,8 @@ async function preview() {
   }
 }
 
-async function backfillSource(source) {
-  reuseSource(source)
-  previewLimit.value = 20
-  publishedAfter.value = ''
-  await preview()
-}
-
 function handleSourceAction(command, source) {
-  if (command === 'backfill') return backfillSource(source)
+  if (command === 'retry') return syncSource(source, { retryFailedItems: true })
   if (command === 'remove') return removeSource(source)
 }
 
@@ -348,7 +346,7 @@ async function sync() {
       source_url: sourceUrl.value,
       payload: requestPayload({ includeSelection: true }),
     })
-    ElMessage.success('已开始同步创作者内容')
+    ElMessage.success('已开始订阅并同步来源')
     observeSourceSyncTask(task.task_id, {
       onSucceeded: async (result) => {
         ElMessage.success(`同步完成：新增 ${result.created_count || 0} 条；入队 ${result.queued_count || 0} 条，收件箱 ${result.inbox_count || 0} 条`)
@@ -410,15 +408,16 @@ async function loadSources() {
 
 function reuseSource(source) {
   sourceUrl.value = source.source_url
-  allowPersonalSources.value = ['favorites', 'likes'].includes(source.source_kind)
+  allowPersonalSources.value = true
   syncIntervalMinutes.value = source.sync_interval_minutes || 360
   processingMode.value = source.processing_mode || (source.auto_process ? 'full' : 'metadata')
-  queueLimit.value = source.queue_limit || 1
-  previewLimit.value = 1
+  previewLimit.value = 50
+  sourceFrom.value = ''
+  sourceTo.value = ''
   previewData.value = null
 }
 
-async function syncSource(source) {
+async function syncSource(source, { retryFailedItems = false } = {}) {
   try {
     syncingSourceId.value = source.id
     const task = await enqueueSourceSyncTask({
@@ -426,9 +425,9 @@ async function syncSource(source) {
       source_title: source.creator_name || '创作者同步',
       source_url: source.source_url,
       source_id: source.id,
-      retry_existing_items: true,
+      retry_existing_items: retryFailedItems,
     })
-    ElMessage.success('已开始检查创作者更新')
+    ElMessage.success(retryFailedItems ? '已开始检查更新并重试失败项' : '已开始检查创作者更新')
     observeSourceSyncTask(task.task_id, {
       onSucceeded: async (result) => {
         ElMessage.success(`同步完成：新增 ${result.created_count || 0} 条，跳过 ${result.duplicate_count || 0} 条已有作品`)
@@ -510,11 +509,13 @@ onMounted(loadSources)
 .creator-policy-note { margin: 0; padding: 9px 11px; color: var(--vk-muted); background: color-mix(in srgb, var(--vk-bg-hover) 42%, transparent); border-left: 2px solid var(--vk-accent); font-size: var(--vk-type-meta-size); line-height: 1.55; }
 .creator-field { display: grid; min-width: 0; gap: var(--vk-space-sm); color: var(--vk-muted); font-size: var(--vk-type-label-size); font-weight: var(--vk-weight-medium); line-height: var(--vk-leading-label); }
 .creator-url-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--vk-space-control); }
-.creator-personal-source-consent { width: fit-content; max-width: 100%; color: var(--vk-muted); font-size: var(--vk-type-meta-size); line-height: var(--vk-leading-label); }
-.creator-personal-source-consent :deep(.el-checkbox__label) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.creator-form-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--vk-space-cluster); }
+.creator-form-options { display: grid; grid-template-columns: minmax(230px, 1.35fr) minmax(120px, .65fr) repeat(2, minmax(130px, .8fr)); gap: var(--vk-space-cluster); }
+.creator-date-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--vk-space-xs); min-width: 0; }
+.creator-date-range > span { color: var(--vk-muted); font-size: var(--vk-type-label-size); }
 .creator-workspace :deep(.el-input), .creator-workspace :deep(.el-select), .creator-workspace :deep(.el-date-editor) { width: 100%; }
+.creator-workspace :deep(.el-input-number) { width: 100%; }
 .creator-workspace :deep(.el-input__wrapper), .creator-workspace :deep(.el-select__wrapper) { min-height: var(--vk-control-height-default); border-radius: var(--vk-radius-input); }
+.creator-workspace :deep(.el-input-number .el-input__wrapper) { min-height: var(--vk-control-height-default); border: 1px solid var(--vk-border); border-radius: var(--vk-radius-input); box-shadow: none; }
 .creator-workspace :deep(.el-date-editor.el-input), .creator-workspace :deep(.el-date-editor--daterange) { min-height: var(--vk-control-height-default); border-radius: var(--vk-radius-input); }
 .creator-workspace :deep(.el-button) { border-radius: var(--vk-radius-control); transition: background-color var(--vk-motion-fast) var(--vk-ease-out), border-color var(--vk-motion-fast) var(--vk-ease-out), color var(--vk-motion-fast) var(--vk-ease-out), transform var(--vk-motion-fast) var(--vk-ease-out); }
 .creator-workspace :deep(.el-button:active:not(.is-disabled)) { transform: scale(.985); }
@@ -547,7 +548,7 @@ onMounted(loadSources)
 .creator-video-list strong { overflow: hidden; color: var(--vk-text); font-size: var(--vk-type-body-size); font-weight: var(--vk-weight-strong); text-overflow: ellipsis; white-space: nowrap; }
 .creator-sources-table-scroll { container-type: inline-size; min-width: 0; overflow: auto; scrollbar-gutter: stable; overscroll-behavior: contain; }
 .creator-sources-table-head,
-.creator-source-row { display: grid; grid-template-columns: minmax(156px, 1.05fr) minmax(116px, .65fr) minmax(104px, .56fr) minmax(74px, .38fr) 112px 112px minmax(144px, .72fr); column-gap: var(--vk-space-cluster); width: 100%; min-width: 980px; padding: 0 18px; transition: grid-template-columns var(--vk-motion-standard) var(--vk-ease-out); }
+.creator-source-row { display: grid; grid-template-columns: minmax(156px, 1.12fr) minmax(116px, .7fr) minmax(104px, .62fr) minmax(74px, .42fr) 112px minmax(112px, .68fr); column-gap: var(--vk-space-cluster); width: 100%; min-width: 830px; padding: 0 18px; transition: grid-template-columns var(--vk-motion-standard) var(--vk-ease-out); }
 .creator-sources-table-head { position: sticky; top: 0; z-index: 1; min-height: 40px; background: color-mix(in srgb, var(--vk-bg-hover) 34%, var(--vk-bg-panel)); color: var(--vk-muted); font-size: var(--vk-type-meta-size); font-weight: 650; letter-spacing: var(--vk-tracking-meta); }
 .creator-sources-table-head > span { display: flex; align-items: center; justify-content: center; min-width: 0; text-align: center; white-space: nowrap; }
 .creator-source-row { min-height: 64px; border-top: 1px solid var(--vk-border); transition: background-color var(--vk-motion-fast) var(--vk-ease-out); }
@@ -573,6 +574,8 @@ onMounted(loadSources)
 :global(.creator-source-error-tooltip.el-popper) { max-width: min(380px, calc(100vw - 32px)); padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--vk-border) 78%, transparent); border-radius: var(--vk-radius-surface); background: color-mix(in srgb, var(--vk-bg-panel) 94%, transparent); box-shadow: 0 14px 30px color-mix(in srgb, var(--vk-text) 13%, transparent), 0 1px 4px color-mix(in srgb, var(--vk-text) 8%, transparent); backdrop-filter: blur(18px) saturate(1.08); }
 .creator-source-setting-cell { display: flex; align-items: center; justify-content: center; min-width: 0; }
 .creator-source-setting-cell :deep(.el-select) { width: 112px; }
+.creator-source-setting-cell :deep(.el-input-number) { width: 70px; }
+.creator-source-setting-cell :deep(.el-input-number .el-input__wrapper) { min-height: 30px; }
 .creator-source-setting-cell :deep(.el-select__wrapper) { min-height: 30px; border-radius: var(--vk-radius-input); }
 .creator-source-actions { display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: var(--vk-space-xs); min-width: 0; white-space: nowrap; }
 .creator-source-actions :deep(.el-button) { margin-left: 0; }

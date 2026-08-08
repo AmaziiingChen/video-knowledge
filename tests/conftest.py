@@ -54,5 +54,8 @@ def isolate_runtime_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "campus_embedding_api_base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     monkeypatch.setattr(settings, "paddle_ocr_access_token", "")
     monkeypatch.setattr(settings, "miniprogram_forum_capture_enabled", False)
+    # Production launchers always inject a per-session local API token.
+    # TestClient calls deliberately exercise routers without a browser shell.
+    monkeypatch.setenv("KNOWLEDGEHUB_ALLOW_UNAUTHENTICATED_LOCAL_API", "1")
     yield
     _reset_global_task_manager()

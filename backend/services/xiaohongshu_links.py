@@ -10,7 +10,12 @@ import requests
 from services.network_policy import direct_requests_session
 
 
-_SHORT_HOSTS = frozenset({"xhslink.com", "www.xhslink.com"})
+_SHORT_HOSTS = frozenset({
+    "xhslink.com",
+    "www.xhslink.com",
+    "xhslink.cn",
+    "www.xhslink.cn",
+})
 _NOTE_HOSTS = frozenset({"xiaohongshu.com", "www.xiaohongshu.com"})
 _ALLOWED_REDIRECT_HOSTS = _SHORT_HOSTS | _NOTE_HOSTS
 _MAX_REDIRECTS = 5

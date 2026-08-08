@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 import uuid
 from collections.abc import Callable
+from threading import BoundedSemaphore
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -43,7 +44,7 @@ from services.markdown_sync import replace_content_summary_and_sync, save_markdo
 from services.search_index import upsert_search_document
 from services.source_context import source_context_is_fresh
 from services.source_context_store import save_source_context
-from services.summarizer import generate_article_markdown, generate_markdown, summarize
+from services.summarizer import generate_article_markdown, generate_markdown, summarize, summarize_stream
 from services.subtitles import SUBTITLE_EXTENSIONS, fetch_bilibili_subtitle, parse_subtitle_text
 from services.transcriber import ASR_BACKENDS, extract_audio_with_details, transcribe_with_details
 from services.url_parser import parse_share_text, redact_sensitive_url
@@ -64,6 +65,14 @@ PROGRESS_WEIGHTS = {
     "summarize": 20,
     "save": 4,
 }
+# A desktop can keep one network transfer moving while the previous file is
+# transcribed, but competing yt-dlp/browser downloads make both less reliable
+# and saturate the local network. Every pipeline path shares this one slot.
+_media_download_semaphore = BoundedSemaphore(1)
+# One opened assistant panel is cheap enough to repaint at roughly 40 fps.
+# This is a transport coalescing limit, not a typewriter effect: every
+# snapshot still contains exactly the text the model has returned so far.
+SUMMARY_PUBLISH_INTERVAL_SECONDS = 0.025
 
 
 class PipelineRequest(BaseModel):
@@ -391,6 +400,7 @@ def run_pipeline_sync(
     preview_download_future: Future | None = None
     preview_download_started_at: float | None = None
     source_context: dict[str, object] = {}
+    last_summary_publish_at = 0.0
 
     def publish() -> None:
         if on_update:
@@ -465,19 +475,29 @@ def run_pipeline_sync(
         the same milestone twice when the adapter returns.
         """
         published_counts: dict[str, int] = {}
+        waiting_for_download_slot = False
+
+        while not _media_download_semaphore.acquire(timeout=0.12):
+            check_cancel()
+            if not waiting_for_download_slot:
+                waiting_for_download_slot = True
+                add_log("download", "等待上一条视频下载完成…")
 
         def publish_download_log(message: str) -> None:
             published_counts[message] = published_counts.get(message, 0) + 1
             add_log("download", message, _level_from_message(message))
 
-        download_result = download_video(
-            url,
-            platform,
-            output_dir,
-            progress_callback=set_download_transfer,
-            cancel_check=cancel_check,
-            log_callback=publish_download_log,
-        )
+        try:
+            download_result = download_video(
+                url,
+                platform,
+                output_dir,
+                progress_callback=set_download_transfer,
+                cancel_check=cancel_check,
+                log_callback=publish_download_log,
+            )
+        finally:
+            _media_download_semaphore.release()
         for line in download_result.logs:
             remaining = published_counts.get(line, 0)
             if remaining:
@@ -623,6 +643,17 @@ def run_pipeline_sync(
 
         return append_call
 
+    def publish_summary_delta(title: str, partial_summary: str) -> None:
+        """Persist streamed summary text without turning every token into I/O."""
+        nonlocal last_summary_publish_at
+        response.display_title = title or response.display_title
+        response.summary = partial_summary
+        now = time.perf_counter()
+        if now - last_summary_publish_at < SUMMARY_PUBLISH_INTERVAL_SECONDS:
+            return
+        last_summary_publish_at = now
+        publish()
+
     try:
         if asr_options["backend"] not in ASR_BACKENDS:
             add_log("config", f"不支持的语音识别后端: {asr_options['backend']}", "error")
@@ -662,6 +693,18 @@ def run_pipeline_sync(
                     existing_item = ContentRepository(connection).get_content_item(content_item_id)
                 except LookupError:
                     existing_item = None
+                # Early XHS versions stored image notes as videos.  Repair
+                # the durable type at the processing boundary too, so a
+                # retry of an existing sidebar row enters the image-note
+                # collector instead of the media downloader.
+                if (
+                    existing_item
+                    and existing_item.source_provider == "xiaohongshu"
+                    and existing_item.content_type != "article"
+                ):
+                    existing_item = ContentRepository(connection).update_content_type(existing_item.id, "article")
+                    connection.commit()
+                    add_log("parse", "已修复旧小红书图文类型，正在按图文采集…")
             if existing_item and existing_item.content_type == "article" and existing_item.source_provider == "xiaohongshu":
                 add_log("parse", "正在读取小红书图文与图片…")
                 try:
@@ -1440,7 +1483,7 @@ def run_pipeline_sync(
             or source_title
         )
         try:
-            ai_title, summary = summarize(
+            ai_title, summary = summarize_stream(
                 transcript,
                 content_title,
                 model=ai_model,
@@ -1450,6 +1493,7 @@ def run_pipeline_sync(
                 ai_call_callback=remember_ai_call("summary"),
                 transcript_segments=transcript_segments if not is_article else None,
                 source_context=source_context,
+                on_delta=publish_summary_delta,
             )
         except Exception as exc:
             response.timings["summarize"] = _elapsed(summarize_start)

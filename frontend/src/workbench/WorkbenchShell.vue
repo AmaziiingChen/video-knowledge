@@ -1,5 +1,6 @@
 <template>
-  <div class="knowledge-shell">
+  <div class="knowledge-shell" :class="{ 'has-integrated-chrome': integratedChrome }">
+    <div v-if="integratedChrome" class="workspace-activity-header" aria-hidden="true"></div>
     <ActivityBar
       :active-view="activeView"
       :items="ribbonItems"
@@ -8,6 +9,12 @@
     />
 
     <div ref="workspaceFrame" class="workspace-frame">
+      <div
+        v-if="integratedChrome && !isSinglePaneWorkspaceView(activeView)"
+        class="workspace-global-header-actions"
+      >
+        <slot name="global-header-actions" />
+      </div>
       <div v-if="isSinglePaneWorkspaceView(activeView)" class="workspace-single-pane">
         <slot name="editor" />
       </div>
@@ -20,6 +27,8 @@
             'primary-pane-collapsed': !showPrimaryPane,
             'context-pane-collapsed': !showContextPane,
           }"
+          @transitionend="handlePaneTransitionEnd"
+          @transitioncancel="handlePaneTransitionEnd"
           @resized="handleResized"
           @pointerdown.capture="beginSplitterDrag"
           @keydown.capture="handleSplitterKeydown"
@@ -29,18 +38,35 @@
             :min-size="showPrimaryPane ? snapMinSize : 0"
             :max-size="showPrimaryPane ? 45 : 0"
           >
-            <aside
-              class="primary-sidebar-shell"
-              :class="{ 'primary-sidebar-hidden': !showPrimaryPane }"
-              aria-label="左侧栏"
-              :aria-hidden="!showPrimaryPane"
-            >
-              <slot name="primary" />
-            </aside>
+            <div class="workspace-pane-column workspace-primary-pane">
+              <header class="workspace-pane-header workspace-primary-header">
+                <slot name="primary-header" />
+              </header>
+              <aside
+                class="primary-sidebar-shell"
+                :class="{ 'primary-sidebar-hidden': !showPrimaryPane }"
+                aria-label="左侧栏"
+                :aria-hidden="!showPrimaryPane"
+              >
+                <slot name="primary" />
+              </aside>
+            </div>
           </pane>
 
           <pane :size="editorPaneSize" :min-size="showContextPane ? editorMinSize : 50">
-            <slot name="editor" />
+            <div class="workspace-pane-column workspace-editor-pane">
+              <header class="workspace-pane-header workspace-editor-header">
+                <slot name="editor-header" />
+                <span
+                  v-if="integratedChrome && !showContextPane"
+                  class="workspace-editor-header-action-region"
+                  aria-hidden="true"
+                ></span>
+              </header>
+              <div class="workspace-pane-body">
+                <slot name="editor" />
+              </div>
+            </div>
           </pane>
 
           <pane
@@ -48,16 +74,35 @@
             :min-size="showContextPane ? snapMinSize : 0"
             :max-size="showContextPane ? 65 : 0"
           >
-            <aside
-              class="context-sidebar"
-              :class="{ 'context-sidebar-hidden': !showContextPane }"
-              aria-label="AI 助手"
-              :aria-hidden="!showContextPane"
-            >
-              <slot name="context" />
-            </aside>
+            <div class="workspace-pane-column workspace-context-pane">
+              <header class="workspace-pane-header workspace-context-header">
+                <slot name="context-header" />
+                <span
+                  v-if="integratedChrome"
+                  class="workspace-context-header-action-region"
+                  aria-hidden="true"
+                ></span>
+              </header>
+              <aside
+                class="context-sidebar"
+                :class="{ 'context-sidebar-hidden': !showContextPane }"
+                aria-label="AI 助手"
+                :aria-hidden="!showContextPane"
+              >
+                <slot name="context" />
+              </aside>
+            </div>
           </pane>
         </splitpanes>
+        <span
+          v-if="primaryToggleMotion"
+          class="primary-toggle-motion"
+          :class="{ 'is-moving': primaryToggleMotion.isMoving }"
+          :style="primaryToggleMotionStyle"
+          aria-hidden="true"
+        >
+          <PanelToggleIcon side="left" :collapsed="primaryToggleMotion.collapsed" />
+        </span>
         <div
           v-if="!showPrimaryPane"
           class="collapsed-pane-handle left"
@@ -98,6 +143,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import ActivityBar from './ActivityBar.vue'
+import PanelToggleIcon from '../components/PanelToggleIcon.vue'
 import {
   COLLAPSED_PANE_REVEAL_DISTANCE,
   resolvePaneDragTransition,
@@ -129,6 +175,14 @@ const props = defineProps({
   showContextPane: {
     type: Boolean,
     required: true
+  },
+  primaryPaneTransitioning: {
+    type: Boolean,
+    default: false
+  },
+  integratedChrome: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -138,7 +192,8 @@ const emit = defineEmits([
   'resized',
   'snap-collapse',
   'snap-open',
-  'pane-drag-resize'
+  'pane-drag-resize',
+  'pane-visibility-transition-end'
 ])
 
 const workspaceFrame = ref(null)
@@ -146,11 +201,21 @@ const paneWidth = ref(1200)
 const pointerResizing = ref(false)
 const paneSnapAnimating = ref(false)
 const collapsedPaneReveal = ref({ side: '', progress: 0 })
+const primaryToggleMotion = ref(null)
+const primaryToggleMotionStyle = computed(() => {
+  const motion = primaryToggleMotion.value
+  if (!motion) return {}
+  return {
+    '--primary-toggle-motion-x': `${motion.x}px`,
+    '--primary-toggle-motion-y': `${motion.y}px`,
+  }
+})
 const MIN_PANE_WIDTH = 200
 let splitterDrag = null
 let collapsedPaneDrag = null
 let splitterResizeFrame = 0
 let paneSnapAnimationTimer = 0
+let primaryToggleMotionFrame = 0
 
 const snapMinSize = computed(() => paneSizePercent(24))
 const editorMinSize = computed(() => paneSizePercent(320))
@@ -166,6 +231,7 @@ onBeforeUnmount(() => {
   stopSplitterDrag()
   stopCollapsedPaneDrag()
   stopPaneSnapAnimation()
+  stopPrimaryToggleMotion()
 })
 
 function paneSizePercent(width) {
@@ -394,6 +460,57 @@ function handleResized(payload) {
   void nextTick(syncSplitterAccessibility)
 }
 
+function handlePaneTransitionEnd(event) {
+  if (!props.primaryPaneTransitioning || event.propertyName !== 'width') return
+  const panes = workspaceFrame.value?.querySelectorAll?.('.workspace-panes > .splitpanes__pane') || []
+  if (event.target !== panes[0]) return
+  emit('pane-visibility-transition-end', { side: 'primary' })
+  void nextTick(stopPrimaryToggleMotion)
+}
+
+function beginPrimaryToggleMotion(originRect, opening) {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || !workspaceFrame.value) return
+  const frameRect = workspaceFrame.value.getBoundingClientRect()
+  const primaryWidth = (workspaceFrame.value.clientWidth * Number(props.workspaceLayout.primary || 0)) / 100
+  const destinationX = opening
+    ? Math.max(0, primaryWidth - 36)
+    : 36
+
+  if (primaryToggleMotionFrame) window.cancelAnimationFrame(primaryToggleMotionFrame)
+  primaryToggleMotion.value = {
+    x: originRect.left - frameRect.left,
+    y: originRect.top - frameRect.top,
+    collapsed: opening,
+    isMoving: false,
+  }
+  void nextTick(() => {
+    if (!primaryToggleMotion.value || !workspaceFrame.value) return
+    // Commit the captured position before applying the destination. Without
+    // this layout read, Chromium can coalesce both writes into one paint and
+    // skip the transform transition entirely.
+    workspaceFrame.value.querySelector('.primary-toggle-motion')?.getBoundingClientRect()
+    primaryToggleMotionFrame = window.requestAnimationFrame(() => {
+      primaryToggleMotionFrame = 0
+      if (!primaryToggleMotion.value) return
+      primaryToggleMotion.value = {
+        ...primaryToggleMotion.value,
+        x: destinationX,
+        y: 6,
+        collapsed: !opening,
+        isMoving: true,
+      }
+    })
+  })
+}
+
+function stopPrimaryToggleMotion() {
+  if (primaryToggleMotionFrame) {
+    window.cancelAnimationFrame(primaryToggleMotionFrame)
+    primaryToggleMotionFrame = 0
+  }
+  primaryToggleMotion.value = null
+}
+
 watch(
   () => [
     props.workspaceLayout.primary,
@@ -403,6 +520,17 @@ watch(
   ],
   () => void nextTick(syncSplitterAccessibility),
 )
+
+watch(
+  () => props.primaryPaneTransitioning,
+  (transitioning) => {
+    if (!transitioning || !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    stopPrimaryToggleMotion()
+    void nextTick(() => emit('pane-visibility-transition-end', { side: 'primary' }))
+  },
+)
+
+defineExpose({ beginPrimaryToggleMotion })
 
 function beginCollapsedPaneDrag(event, side) {
   event.preventDefault()
@@ -487,6 +615,7 @@ function unlockTextSelection() {
 .knowledge-shell {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   width: 100%;
   height: 100%;
@@ -499,8 +628,27 @@ function unlockTextSelection() {
   box-shadow: none;
 }
 
+.knowledge-shell.has-integrated-chrome {
+  grid-template-rows: 40px minmax(0, 1fr);
+}
+
+.workspace-activity-header {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  border-bottom: 1px solid var(--vk-border);
+  background: var(--vk-bg-quiet);
+  -webkit-app-region: drag;
+}
+
+.knowledge-shell.has-integrated-chrome :deep(.workspace-ribbon) {
+  grid-column: 1;
+  grid-row: 2;
+}
+
 .workspace-frame {
   position: relative;
+  --workspace-global-actions-width: 204px;
   --panel-motion: var(--vk-motion-panel) var(--vk-ease-drawer);
   --panel-fade: var(--vk-motion-standard) var(--vk-ease-out);
   min-width: 0;
@@ -510,6 +658,57 @@ function unlockTextSelection() {
   padding: 0;
   overflow: hidden;
   background: var(--vk-bg-center);
+}
+
+.knowledge-shell.has-integrated-chrome .workspace-frame {
+  grid-column: 2;
+  grid-row: 1 / 3;
+}
+
+.workspace-global-header-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 10;
+  width: min(var(--workspace-global-actions-width), 100%);
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-global-header-actions :deep(button),
+.workspace-global-header-actions :deep(a),
+.workspace-global-header-actions :deep(input),
+.workspace-global-header-actions :deep(.el-tooltip__trigger) {
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.primary-toggle-motion {
+  position: absolute;
+  z-index: 12;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--vk-accent-strong);
+  pointer-events: none;
+  transform: translate3d(var(--primary-toggle-motion-x), var(--primary-toggle-motion-y), 0);
+}
+
+.primary-toggle-motion.is-moving {
+  will-change: transform;
+  transition: transform var(--panel-motion);
+}
+
+.primary-toggle-motion > :deep(.panel-toggle-icon) {
+  transform: translateY(1px);
 }
 
 .collapsed-pane-handle {
@@ -594,6 +793,75 @@ function unlockTextSelection() {
   background: var(--vk-bg-center);
 }
 
+.workspace-pane-column {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.workspace-pane-header {
+  min-width: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--vk-border);
+  background: var(--vk-bg-center);
+  -webkit-app-region: drag;
+}
+
+.workspace-pane-header :deep(button),
+.workspace-pane-header :deep(input),
+.workspace-pane-header :deep(.el-tooltip__trigger) {
+  -webkit-app-region: no-drag;
+}
+
+.workspace-primary-header,
+.workspace-editor-header,
+.workspace-context-header {
+  background: var(--vk-bg-quiet);
+}
+
+.workspace-context-header {
+  position: relative;
+}
+
+.workspace-context-header-action-region {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(var(--workspace-global-actions-width), 100%);
+  height: 100%;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
+/* Electron resolves app-region hit testing from the rendered header tree, not
+   visual z-index alone. When the context pane is collapsed, the editor header
+   reaches the global action cluster, so it needs the same non-draggable shield
+   that the context header normally provides. The visible actions remain above
+   this inert region and continue receiving pointer input. */
+.workspace-editor-header-action-region {
+  position: absolute;
+  z-index: 9;
+  top: 0;
+  right: 0;
+  width: min(var(--workspace-global-actions-width), 100%);
+  height: 100%;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-pane-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .workspace-single-pane {
   width: 100%;
   height: 100%;
@@ -642,31 +910,20 @@ function unlockTextSelection() {
 .workspace-panes :deep(.splitpanes__splitter) {
   position: relative;
   z-index: 4;
-  width: 8px;
-  min-width: 8px;
+  /* A splitter participates in the flex layout.  Keeping an 8px hit target
+     here left a visible blank column on high-density displays, so readers and
+     media previews never reached their neighbouring panes.  Make the layout
+     boundary itself one physical CSS pixel; the cursor still communicates the
+     resize affordance without turning the divider into a gutter. */
+  width: 1px;
+  min-width: 1px;
+  max-width: 1px;
+  flex-basis: 1px;
+  margin: 0 !important;
   border: 0;
+  background: transparent !important;
   cursor: col-resize;
   touch-action: none;
-}
-
-/* Keep the 8px resize target visually transparent: each half continues the
-   surface beside it, while the actual divider remains exactly on the boundary.
-   A uniform centre background here made the preview appear to bleed into both
-   sidebars by several pixels. */
-.workspace-panes :deep(.splitpanes__splitter:nth-child(2)) {
-  background: linear-gradient(
-    to right,
-    var(--vk-bg-quiet) 0 50%,
-    var(--vk-bg-center) 50% 100%
-  );
-}
-
-.workspace-panes :deep(.splitpanes__splitter:nth-child(4)) {
-  background: linear-gradient(
-    to right,
-    var(--vk-bg-center) 0 50%,
-    var(--vk-bg-quiet) 50% 100%
-  );
 }
 
 /* The collapsed handles above the frame provide the drag target. A hidden
@@ -687,15 +944,29 @@ function unlockTextSelection() {
 .workspace-panes :deep(.splitpanes__splitter::before) {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
+  inset: 0;
   background: var(--vk-border);
-  transform: translateX(-50%);
+  transform: none;
   transition:
     background-color var(--vk-motion-standard) ease,
     transform var(--vk-motion-standard) ease;
+}
+
+/* Keep an invisible 15px resize hit area without reserving it in the flex
+   layout. Splitpanes receives pointer events from this pseudo-element as the
+   splitter itself, while the visible workbench boundary remains one pixel. */
+.workspace-panes :deep(.splitpanes__splitter::after) {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -7px;
+  width: 15px;
+  height: auto !important;
+  margin: 0 !important;
+  background: transparent !important;
+  transform: none !important;
+  cursor: col-resize;
 }
 
 .workspace-panes :deep(.splitpanes__splitter.is-active-splitter::before) {
@@ -801,6 +1072,24 @@ function unlockTextSelection() {
     display: grid;
     grid-template-columns: 1fr !important;
     min-height: auto;
+  }
+
+  .knowledge-shell.has-integrated-chrome {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .workspace-activity-header {
+    display: none;
+  }
+
+  .knowledge-shell.has-integrated-chrome :deep(.workspace-ribbon) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .knowledge-shell.has-integrated-chrome .workspace-frame {
+    grid-column: 1;
+    grid-row: 2;
   }
 }
 </style>

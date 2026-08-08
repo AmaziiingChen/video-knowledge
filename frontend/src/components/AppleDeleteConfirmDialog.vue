@@ -28,7 +28,7 @@
 <script setup>
 import { destructiveConfirmation, settleDestructiveConfirmation } from '../composables/useDestructiveConfirm'
 import SvgMaskIcon from './SvgMaskIcon.vue'
-import trashIcon from '../../assets/trash.svg'
+const trashIcon = 'trash'
 
 function handleVisibility(visible) {
   if (!visible) settleDestructiveConfirmation(false)

@@ -3,21 +3,7 @@
     <div
       v-if="activeView === 'library'"
       class="workbench-editor-host"
-      :class="{ 'no-editor-tabs': !workspaceTabs.length }"
     >
-      <WorkspaceTabs
-        v-if="workspaceTabs.length"
-        :tabs="workspaceTabs"
-        :active-tab-id="activeWorkspaceTab?.id || ''"
-        allow-reveal
-        allow-delete
-        @activate="$emit('activate-workspace-tab', $event)"
-        @close="$emit('close-workspace-tab', $event)"
-        @close-tabs="$emit('close-workspace-tabs', $event)"
-        @reveal-tab="$emit('reveal-workspace-tab', $event)"
-        @delete-tab="$emit('delete-workspace-tab', $event)"
-      />
-
           <section
             class="content-workspace tab-content-workspace"
             :class="{
@@ -37,7 +23,7 @@
               class="content-hero"
               tabindex="-1"
               :class="{
-                'media-transcript-layout': hasTranscriptTimeline(activeContentTab.id),
+                'media-transcript-layout': hasMediaTranscriptWorkspace(activeContentTab.id),
                 'xhs-image-text-layout': hasXhsImageTextLayout(activeContentTab.id),
                 'is-resizing-media': mediaTranscriptResizing,
                 'is-resizing-xhs': xhsImageTextResizing,
@@ -206,48 +192,65 @@
                 <article
                   v-else-if="hasXhsImageTextLayout(activeContentTab.id)"
                   class="xhs-image-reader"
+                  :aria-busy="shouldShowXhsImageCapturePreview(activeContentTab.id)"
                   aria-label="小红书图文图片"
                 >
-                  <div
-                    ref="xhsGalleryTrack"
-                    class="xhs-gallery-track"
-                    tabindex="0"
-                    aria-label="小红书笔记图片，可左右滚动或使用左右方向键切换"
-                    @keydown="handleXhsGalleryKeydown"
-                    @scroll.passive="syncXhsGalleryPosition"
-                  >
-                    <figure
-                      v-for="image in articlePreviewForTab(activeContentTab.id).gallery"
-                      :key="image.index"
-                      class="xhs-gallery-slide"
-                    >
-                      <img :src="image.url" :alt="`笔记图片 ${image.index}`" loading="lazy" />
-                    </figure>
+                  <div v-if="shouldShowXhsImageCapturePreview(activeContentTab.id)" class="xhs-capture-image-loading" role="status">
+                    <div class="xhs-capture-image-stream" aria-hidden="true">
+                      <span class="xhs-capture-image-sheet is-back"></span>
+                      <span class="xhs-capture-image-sheet is-middle"></span>
+                      <span class="xhs-capture-image-sheet is-front"></span>
+                    </div>
+                    <div class="xhs-capture-loading-copy">
+                      <span class="xhs-capture-loading-pulse" aria-hidden="true"></span>
+                      <div>
+                        <strong>正在获取笔记图片</strong>
+                        <small>图片到达后会立即显示</small>
+                      </div>
+                    </div>
                   </div>
-                  <template v-if="xhsGalleryImageCount(activeContentTab.id) > 1">
-                    <button
-                      class="xhs-gallery-arrow is-previous"
-                      type="button"
-                      title="上一张图片"
-                      aria-label="上一张图片"
-                      :disabled="!canNavigateXhsGallery(activeContentTab.id, -1)"
-                      @click.stop="scrollXhsGallery(-1)"
+                  <template v-else>
+                    <div
+                      ref="xhsGalleryTrack"
+                      class="xhs-gallery-track"
+                      tabindex="0"
+                      aria-label="小红书笔记图片，可左右滚动或使用左右方向键切换"
+                      @keydown="handleXhsGalleryKeydown"
+                      @scroll.passive="syncXhsGalleryPosition"
                     >
-                      <el-icon><ArrowLeft /></el-icon>
-                    </button>
-                    <button
-                      class="xhs-gallery-arrow is-next"
-                      type="button"
-                      title="下一张图片"
-                      aria-label="下一张图片"
-                      :disabled="!canNavigateXhsGallery(activeContentTab.id, 1)"
-                      @click.stop="scrollXhsGallery(1)"
-                    >
-                      <el-icon><ArrowRight /></el-icon>
-                    </button>
-                    <span class="xhs-gallery-count" aria-live="polite">
-                      {{ xhsGalleryIndex + 1 }} / {{ xhsGalleryImageCount(activeContentTab.id) }}
-                    </span>
+                      <figure
+                        v-for="image in articlePreviewForTab(activeContentTab.id).gallery"
+                        :key="image.index"
+                        class="xhs-gallery-slide"
+                      >
+                        <img :src="image.url" :alt="`笔记图片 ${image.index}`" loading="lazy" />
+                      </figure>
+                    </div>
+                    <template v-if="xhsGalleryImageCount(activeContentTab.id) > 1">
+                      <button
+                        class="xhs-gallery-arrow is-previous"
+                        type="button"
+                        title="上一张图片"
+                        aria-label="上一张图片"
+                        :disabled="!canNavigateXhsGallery(activeContentTab.id, -1)"
+                        @click.stop="scrollXhsGallery(-1)"
+                      >
+                        <el-icon><ArrowLeft /></el-icon>
+                      </button>
+                      <button
+                        class="xhs-gallery-arrow is-next"
+                        type="button"
+                        title="下一张图片"
+                        aria-label="下一张图片"
+                        :disabled="!canNavigateXhsGallery(activeContentTab.id, 1)"
+                        @click.stop="scrollXhsGallery(1)"
+                      >
+                        <el-icon><ArrowRight /></el-icon>
+                      </button>
+                      <span class="xhs-gallery-count" aria-live="polite">
+                        {{ xhsGalleryIndex + 1 }} / {{ xhsGalleryImageCount(activeContentTab.id) }}
+                      </span>
+                    </template>
                   </template>
                 </article>
                 <template v-else-if="isArticleTab(activeContentTab.id)">
@@ -360,19 +363,23 @@
                   </div>
                   <div
                     v-if="contentForTab(activeContentTab.id)?.status === 'processing'"
-                    class="media-processing-state"
+                    class="media-preview-loader"
+                    role="status"
                     aria-live="polite"
+                    aria-label="正在加载视频预览"
                   >
-                    <span class="media-processing-spinner" aria-hidden="true"></span>
-                    <strong>正在处理视频</strong>
-                    <small>{{ processingStageDescription(activeContentTab.id) }}</small>
-                    <ol class="media-processing-stages" aria-label="视频处理阶段">
-                      <li v-for="stage in processingStages(activeContentTab.id)" :key="stage.key" :class="`is-${stage.status}`">
-                        <span aria-hidden="true"></span>{{ stage.label }}
-                      </li>
-                    </ol>
+                    <span class="media-preview-spinner" aria-hidden="true"></span>
                   </div>
                 </template>
+                <div
+                  v-else-if="contentForTab(activeContentTab.id)?.status === 'processing' && ['video', 'audio'].includes(contentForTab(activeContentTab.id)?.content_type)"
+                  class="media-preview-loader is-empty"
+                  role="status"
+                  aria-live="polite"
+                  aria-label="正在加载媒体预览"
+                >
+                  <span class="media-preview-spinner" aria-hidden="true"></span>
+                </div>
                 <div v-else class="media-placeholder">
                   <SvgMaskIcon :src="movieClapperIcon" :size="40" />
                   <span v-if="contentForTab(activeContentTab.id)?.content_type === 'video'">
@@ -413,6 +420,7 @@
                     :active-match-index="previewFindActiveIndex"
                     :truncated="previewFindTruncated"
                     :focus-request="previewFindFocusRequest"
+                    :search-label="isWechatArticleTab(activeContentTab.id) ? '在原文中查找' : '在预览中查找'"
                     @update:query="updatePreviewFindQuery"
                     @previous="navigatePreviewFind(-1)"
                     @next="navigatePreviewFind(1)"
@@ -588,32 +596,40 @@
                 ></div>
                 <section v-if="hasXhsImageTextLayout(activeContentTab.id)" class="xhs-text-reader" aria-label="小红书笔记正文">
                   <div class="xhs-text-reader-inner">
-                    <h2>{{ articlePreviewForTab(activeContentTab.id)?.title || contentForTab(activeContentTab.id)?.title || activeContentTab.title }}</h2>
-                    <iframe
-                      v-if="articlePreviewForTab(activeContentTab.id)?.html"
-                      ref="activeArticlePreviewFrame"
-                      class="article-preview-frame xhs-article-preview-frame"
-                      :srcdoc="articlePreviewHtml(activeContentTab.id)"
-                      sandbox="allow-same-origin"
-                      referrerpolicy="no-referrer"
-                      title="小红书笔记正文"
-                      @load="handleArticlePreviewFrameReady"
-                    ></iframe>
-                    <div
-                      v-else-if="shouldShowArticlePreviewLoader(articlePreviewForTab(activeContentTab.id))"
-                      class="campus-article-loading"
-                    >
-                      <span></span><span></span><span></span>
-                      <p>{{ articlePreviewForTab(activeContentTab.id)?.loading_label || '正在读取小红书笔记正文…' }}</p>
-                    </div>
-                    <div v-else-if="articlePreviewForTab(activeContentTab.id)?.loading" class="article-preview-silent-loading" aria-busy="true"></div>
-                    <div v-else class="article-preview-body">
-                      {{ articleTextForTab(activeContentTab.id) || articlePreviewForTab(activeContentTab.id)?.error || '正文已保存，选择右侧总结继续追问。' }}
-                    </div>
+                    <AiSkeletonStream
+                      v-if="shouldShowXhsTextCapturePreview(activeContentTab.id)"
+                      class="xhs-capture-text-loading"
+                      label="正在读取作者文字"
+                      aria-label="小红书作者文字正在读取"
+                    />
+                    <template v-else>
+                      <h2>{{ articlePreviewForTab(activeContentTab.id)?.title || contentForTab(activeContentTab.id)?.title || activeContentTab.title }}</h2>
+                      <iframe
+                        v-if="articlePreviewForTab(activeContentTab.id)?.html"
+                        ref="activeArticlePreviewFrame"
+                        class="article-preview-frame xhs-article-preview-frame"
+                        :srcdoc="articlePreviewHtml(activeContentTab.id)"
+                        sandbox="allow-same-origin"
+                        referrerpolicy="no-referrer"
+                        title="小红书笔记正文"
+                        @load="handleArticlePreviewFrameReady"
+                      ></iframe>
+                      <div
+                        v-else-if="shouldShowArticlePreviewLoader(articlePreviewForTab(activeContentTab.id))"
+                        class="campus-article-loading"
+                      >
+                        <span></span><span></span><span></span>
+                        <p>{{ articlePreviewForTab(activeContentTab.id)?.loading_label || '正在读取小红书笔记正文…' }}</p>
+                      </div>
+                      <div v-else-if="articlePreviewForTab(activeContentTab.id)?.loading" class="article-preview-silent-loading" aria-busy="true"></div>
+                      <div v-else class="article-preview-body">
+                        {{ articleTextForTab(activeContentTab.id) || articlePreviewForTab(activeContentTab.id)?.error || '正文已保存，选择右侧总结继续追问。' }}
+                      </div>
+                    </template>
                   </div>
                 </section>
               <div
-                v-if="hasTranscriptTimeline(activeContentTab.id)"
+                v-if="hasMediaTranscriptWorkspace(activeContentTab.id)"
                 class="media-transcript-splitter"
                 role="separator"
                 tabindex="0"
@@ -626,37 +642,61 @@
                 @keydown="handleMediaTranscriptKeydown"
               ></div>
               <section
-                v-if="hasTranscriptTimeline(activeContentTab.id)"
+                v-if="hasMediaTranscriptWorkspace(activeContentTab.id)"
                 class="transcript-timeline"
+                :class="{ 'is-generating': shouldShowTranscriptGeneration(activeContentTab.id) }"
+                :aria-busy="shouldShowTranscriptGeneration(activeContentTab.id)"
                 @wheel.passive="pauseTranscriptAutoFollow"
                 @touchstart.passive="pauseTranscriptAutoFollow"
               >
-                <button
-                  v-if="!transcriptAutoFollow"
-                  class="transcript-follow-button"
-                  type="button"
-                  title="回到当前进度"
-                  aria-label="回到当前进度"
-                  @click="resumeTranscriptAutoFollow"
+                <div
+                  v-if="shouldShowTranscriptGeneration(activeContentTab.id)"
+                  class="transcript-generation"
+                  role="status"
+                  aria-live="polite"
                 >
-                  <el-icon><Aim /></el-icon>
-                </button>
-                <button
-                  v-for="segment in timelineSegmentsForTab(activeContentTab.id)"
-                  :key="segment.position"
-                  :ref="(el) => setTimelineSegmentRef(activeContentTab.id, segment, el)"
-                  class="timeline-segment"
-                  type="button"
-                  :class="{
-                    approximate: segment.approximate,
-                    'is-active': isTimelineSegmentActive(activeContentTab.id, segment)
-                  }"
-                  :data-start-seconds="segment.start_seconds"
-                  @click="handleTimelineSegmentClick(activeContentTab.id, segment.start_seconds)"
-                >
-                  <span class="timeline-time">{{ formatTimelineTime(segment.start_seconds) }}</span>
-                  <span class="timeline-text">{{ segment.text }}</span>
-                </button>
+                  <div class="transcript-generation-heading">
+                    <span class="transcript-generation-pulse" aria-hidden="true"></span>
+                    <div>
+                      <strong>{{ transcriptGenerationLabel(activeContentTab.id) }}</strong>
+                      <small>{{ transcriptGenerationDescription(activeContentTab.id) }}</small>
+                    </div>
+                  </div>
+                  <div class="transcript-generation-lines" aria-hidden="true">
+                    <div class="transcript-generation-line is-wide"><span>··:··</span><i></i></div>
+                    <div class="transcript-generation-line is-medium"><span>··:··</span><i></i></div>
+                    <div class="transcript-generation-line is-long"><span>··:··</span><i></i></div>
+                    <div class="transcript-generation-line is-short"><span>··:··</span><i></i></div>
+                  </div>
+                </div>
+                <template v-else>
+                  <button
+                    v-if="!transcriptAutoFollow"
+                    class="transcript-follow-button"
+                    type="button"
+                    title="回到当前进度"
+                    aria-label="回到当前进度"
+                    @click="resumeTranscriptAutoFollow"
+                  >
+                    <el-icon><Aim /></el-icon>
+                  </button>
+                  <button
+                    v-for="segment in timelineSegmentsForTab(activeContentTab.id)"
+                    :key="segment.position"
+                    :ref="(el) => setTimelineSegmentRef(activeContentTab.id, segment, el)"
+                    class="timeline-segment"
+                    type="button"
+                    :class="{
+                      approximate: segment.approximate,
+                      'is-active': isTimelineSegmentActive(activeContentTab.id, segment)
+                    }"
+                    :data-start-seconds="segment.start_seconds"
+                    @click="handleTimelineSegmentClick(activeContentTab.id, segment.start_seconds)"
+                  >
+                    <span class="timeline-time">{{ formatTimelineTime(segment.start_seconds) }}</span>
+                    <span class="timeline-text">{{ segment.text }}</span>
+                  </button>
+                </template>
               </section>
             </div>
             <div v-else key="empty-content" class="content-hero">
@@ -732,15 +772,6 @@
     @keydown.meta.s.prevent="saveCurrentPrompt"
     @keydown.ctrl.s.prevent="saveCurrentPrompt"
   >
-    <WorkspaceTabs
-      v-if="promptWorkspaceTabs.length"
-      :tabs="promptWorkspaceTabs"
-      :active-tab-id="activePromptTabId"
-      @activate="$emit('activate-prompt-tab', $event)"
-      @close="$emit('close-prompt-tab', $event)"
-      @close-tabs="$emit('close-prompt-tabs', $event)"
-    />
-
     <div v-if="activePromptTabId" v-loading="promptWorkspaceLoading" class="prompt-editor-main">
       <div class="prompt-function-bar">
         <div class="prompt-usage" aria-label="提示词使用说明">
@@ -826,13 +857,14 @@ import {
 } from '@element-plus/icons-vue'
 import { promptTaskContracts, promptTemplateDisplayName } from '../config/promptInterface'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
+import AiSkeletonStream from '../components/AiSkeletonStream.vue'
 import { useMarkdownFootnoteNavigation } from '../composables/useMarkdownFootnoteNavigation'
-import movieClapperIcon from '../../assets/movieclapper.svg'
-import appendPageIcon from '../../assets/append.page.svg'
-import questionPageIcon from '../../assets/questionmark.text.page.svg'
-import playFillIcon from '../../assets/play.fill.svg'
-import pauseFillIcon from '../../assets/pause.fill.svg'
-import ellipsisIcon from '../../assets/ellipsis.svg'
+const movieClapperIcon = 'movieclapper'
+const appendPageIcon = 'append.page'
+const questionPageIcon = 'questionmark.text.page'
+const playFillIcon = 'play.fill'
+const pauseFillIcon = 'pause.fill'
+const ellipsisIcon = 'ellipsis'
 import { clearPreviewTextHighlights, highlightPreviewText } from '../utils/previewTextSearch'
 import {
   readableCharacterCount,
@@ -863,7 +895,6 @@ import {
 import PreviewFindBar from './PreviewFindBar.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
-import WorkspaceTabs from './WorkspaceTabs.vue'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
 const ArtAudioPlayer = defineAsyncComponent(() => import('./ArtAudioPlayer.vue'))
@@ -994,6 +1025,7 @@ let previewFindMatches = []
 let previewFindRefreshFrame = 0
 let previewFindRestoreFocus = null
 let localHtmlRemoteFindRequestId = null
+const wechatRemoteFindRequestIds = new Map()
 let removeDesktopPreviewFindListener = null
 let articlePreviewSelectionDocument = null
 let selectedTextPointerIsDown = false
@@ -1017,6 +1049,7 @@ const {
 })
 const wechatRemoteWebviews = new Map()
 const wechatRemoteLoadTimers = new Map()
+const wechatRemoteFindListeners = new Map()
 function wechatRemoteScrollbarCss() {
   const muted = getComputedStyle(document.documentElement).getPropertyValue('--vk-muted').trim()
   return `
@@ -1156,29 +1189,6 @@ const activeContentTab = computed(() => {
   }
 })
 
-function processingStages(tabId) {
-  const task = props.resultForTab(tabId) || {}
-  const progress = task.progress || {}
-  const complete = (key, fallback) => Boolean(fallback || Number(progress[key] || 0) >= 100)
-  const active = (keys) => keys.includes(task.step)
-  return [
-    { key: 'download', label: '视频预览', status: complete('download', task.video_path) ? 'done' : active(['download', 'info', 'parse']) ? 'active' : 'pending' },
-    { key: 'transcript', label: '字幕 / 转写', status: complete('transcribe', task.transcript) ? 'done' : active(['extract_audio', 'transcribe']) ? 'active' : 'pending' },
-    { key: 'summary', label: 'AI 总结', status: complete('summarize', task.summary) ? 'done' : active(['summarize', 'save']) ? 'active' : 'pending' },
-  ]
-}
-
-function processingStageDescription(tabId) {
-  const task = props.resultForTab(tabId) || {}
-  if (task.step === 'download') return task.download_transfer?.detail || '正在下载视频预览…'
-  if (task.step === 'extract_audio') return '视频已下载，正在提取音频…'
-  if (task.step === 'transcribe') return task.transcript ? '字幕已就绪，正在整理转写…' : '正在获取字幕或进行转写…'
-  if (task.step === 'summarize') return '字幕已就绪，正在生成 AI 总结…'
-  if (task.step === 'save') return '正在保存字幕与总结…'
-  if (task.status === 'queued') return '已加入后台队列，等待前序视频完成…'
-  return '正在准备下载、字幕和总结。'
-}
-
 const activeWechatContent = computed(() => {
   const tab = activeContentTab.value
   if (!tab || !isWechatArticleTab(tab.id)) return null
@@ -1259,6 +1269,28 @@ const wechatRemoteActionLabel = computed(() => {
   return '在软件内打开原文'
 })
 
+function ensureWechatRemotePageOpen() {
+  const content = activeWechatContent.value
+  if (!content || !canOpenWechatRemotePage.value || wechatRemotePages[content.id]) return
+  // The remote page is the primary reader for WeChat articles. It can render
+  // while the backend is still normalizing and indexing its local snapshot;
+  // a failed remote load naturally falls back to the local cache below.
+  wechatRemotePages[content.id] = {
+    contentItemId: content.id,
+    sourceUrl: content.source_url,
+    status: 'loading',
+    visible: true,
+    loadAttempt: 0,
+  }
+  scheduleWechatRemoteLoadTimeout(content.id)
+}
+
+watch(
+  () => [activeWechatContent.value?.id || '', activeWechatContent.value?.source_url || ''],
+  () => ensureWechatRemotePageOpen(),
+  { immediate: true },
+)
+
 watch(
   () => activeContentTab.value?.id || '',
   () => {
@@ -1289,7 +1321,8 @@ watch(
       if (openContentIds.has(contentItemId)) continue
       clearWechatRemoteLoadTimer(contentItemId)
       delete wechatRemotePages[contentItemId]
-      wechatRemoteWebviews.delete(contentItemId)
+      setWechatRemoteWebview(contentItemId, null)
+      wechatRemoteFindRequestIds.delete(contentItemId)
       delete remoteReadingProgressByKey[`wechat:${contentItemId}`]
       delete remoteOutlines[`wechat:${contentItemId}`]
     }
@@ -1308,7 +1341,9 @@ watch(
   () => [
     activeContentTab.value?.id || '',
     currentPlaybackTime.value,
-    timelineSegmentsForTab(activeContentTab.value?.id).length
+    timelineSegmentsForTab(activeContentTab.value?.id)
+      .map((segment) => `${segment.position}:${segment.start_seconds}`)
+      .join('|')
   ],
   () => {
     activeTimelineKey.value = findActiveTimelineKey(activeContentTab.value?.id)
@@ -1327,7 +1362,7 @@ watch(activeTimelineKey, () => {
 }, { flush: 'post' })
 
 watch(previewFindQuery, () => {
-  if (isLocalHtmlRemoteVisible.value && previewFindOpen.value) return
+  if ((isWechatRemoteVisible.value || isLocalHtmlRemoteVisible.value) && previewFindOpen.value) return
   schedulePreviewFindRefresh()
 })
 
@@ -1352,7 +1387,9 @@ onBeforeUnmount(() => {
   contentHeroResizeObserver?.disconnect()
   contentHeroResizeObserver = null
   for (const contentItemId of wechatRemoteLoadTimers.keys()) clearWechatRemoteLoadTimer(contentItemId)
+  for (const contentItemId of wechatRemoteWebviews.keys()) setWechatRemoteWebview(contentItemId, null)
   wechatRemoteWebviews.clear()
+  wechatRemoteFindRequestIds.clear()
   if (transcriptScrollTimer) {
     clearTimeout(transcriptScrollTimer)
     transcriptScrollTimer = null
@@ -1547,7 +1584,41 @@ function isXiaohongshuArticleTab(tabId) {
 }
 
 function hasXhsImageTextLayout(tabId) {
+  return hasXhsGallery(tabId) || shouldShowXhsCapturePreview(tabId)
+}
+
+function hasXhsGallery(tabId) {
   return isXiaohongshuArticleTab(tabId) && Boolean(props.articlePreviewForTab(tabId)?.gallery?.length)
+}
+
+function shouldShowXhsCapturePreview(tabId) {
+  if (!isXiaohongshuArticleTab(tabId) || hasXhsGallery(tabId)) return false
+  const content = props.contentForTab(tabId)
+  const preview = props.articlePreviewForTab(tabId)
+  const task = props.resultForTab(tabId)
+  // A capture can materialise either source independently. Keep the dedicated
+  // image/text workspace visible while the durable task or its local preview
+  // request is active; a terminal failure still returns the normal article
+  // error instead of an indefinitely animated placeholder.
+  return content?.status === 'processing'
+    || ['queued', 'running', 'processing'].includes(task?.status)
+    || ['queued', 'running'].includes(preview?.formatting_status)
+    || Boolean(preview?.loading)
+}
+
+function shouldShowXhsImageCapturePreview(tabId) {
+  return shouldShowXhsCapturePreview(tabId) && !hasXhsGallery(tabId)
+}
+
+function shouldShowXhsTextCapturePreview(tabId) {
+  if (!isXiaohongshuArticleTab(tabId) || String(props.articlePreviewForTab(tabId)?.html || '').trim()) return false
+  const content = props.contentForTab(tabId)
+  const preview = props.articlePreviewForTab(tabId)
+  const task = props.resultForTab(tabId)
+  return content?.status === 'processing'
+    || ['queued', 'running', 'processing'].includes(task?.status)
+    || ['queued', 'running'].includes(preview?.formatting_status)
+    || Boolean(preview?.loading)
 }
 
 function xhsGalleryImageCount(tabId) {
@@ -1560,7 +1631,7 @@ function canNavigateXhsGallery(tabId, direction) {
 }
 
 function contentHeroLayoutStyle(tabId) {
-  if (hasTranscriptTimeline(tabId)) return { '--media-height': `${mediaTranscriptHeight.value}%` }
+  if (hasMediaTranscriptWorkspace(tabId)) return { '--media-height': `${mediaTranscriptHeight.value}%` }
   if (hasXhsImageTextLayout(tabId)) return { '--xhs-image-height': `${xhsImageTextHeight.value}%` }
   return null
 }
@@ -1655,8 +1726,18 @@ function scheduleWechatRemoteLoadTimeout(contentItemId) {
 }
 
 function setWechatRemoteWebview(contentItemId, webview) {
-  if (webview) wechatRemoteWebviews.set(contentItemId, webview)
-  else wechatRemoteWebviews.delete(contentItemId)
+  const previous = wechatRemoteWebviews.get(contentItemId)
+  const previousListener = wechatRemoteFindListeners.get(contentItemId)
+  if (previous && previousListener) previous.removeEventListener?.('found-in-page', previousListener)
+  wechatRemoteFindListeners.delete(contentItemId)
+  if (!webview) {
+    wechatRemoteWebviews.delete(contentItemId)
+    return
+  }
+  const listener = (event) => handleWechatRemoteFoundInPage(contentItemId, event)
+  webview.addEventListener?.('found-in-page', listener)
+  wechatRemoteFindListeners.set(contentItemId, listener)
+  wechatRemoteWebviews.set(contentItemId, webview)
 }
 
 function isWechatRemotePageVisible(page) {
@@ -1699,6 +1780,17 @@ async function handleWechatRemotePageLoaded(contentItemId, event) {
   if (wechatRemoteWebviews.get(contentItemId) !== webview) return
   clearWechatRemoteLoadTimer(contentItemId)
   page.status = 'ready'
+  if (previewFindOpen.value) schedulePreviewFindRefresh()
+}
+
+function handleWechatRemoteFoundInPage(contentItemId, event) {
+  const webview = wechatRemoteWebviews.get(contentItemId)
+  const result = event?.result
+  if (!result || !webview || !isWechatRemoteVisible.value) return
+  if (result.requestId !== wechatRemoteFindRequestIds.get(contentItemId)) return
+  previewFindMatchCount.value = Number(result.matches) || 0
+  previewFindActiveIndex.value = Math.max(-1, (Number(result.activeMatchOrdinal) || 0) - 1)
+  previewFindTruncated.value = false
 }
 
 function handleWechatRemoteConsoleMessage(contentItemId, event) {
@@ -2056,6 +2148,18 @@ function clearLocalHtmlRemoteFind({ clearSelection = false } = {}) {
   localHtmlRemoteFindRequestId = null
 }
 
+function clearWechatRemoteFind({ clearSelection = false } = {}) {
+  const contentItemId = activeWechatContent.value?.id
+  const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
+  if (!contentItemId || !webview?.stopFindInPage) return
+  try {
+    webview.stopFindInPage(clearSelection ? 'clearSelection' : 'keepSelection')
+  } catch {
+    // The original-page preview may have just been detached while tabs are switching.
+  }
+  wechatRemoteFindRequestIds.delete(contentItemId)
+}
+
 function refreshLocalHtmlRemoteFind() {
   const query = previewFindQuery.value.trim()
   const webview = activeLocalHtmlRemoteWebview.value
@@ -2069,11 +2173,33 @@ function refreshLocalHtmlRemoteFind() {
   try {
     localHtmlRemoteFindRequestId = webview.findInPage(query, {
       forward: true,
-      findNext: false,
+      findNext: true,
       matchCase: false,
     })
   } catch {
     localHtmlRemoteFindRequestId = null
+  }
+}
+
+function refreshWechatRemoteFind() {
+  const query = previewFindQuery.value.trim()
+  const contentItemId = activeWechatContent.value?.id
+  const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
+  previewFindMatchCount.value = 0
+  previewFindActiveIndex.value = -1
+  previewFindTruncated.value = false
+  if (!query || !contentItemId || !webview?.findInPage) {
+    clearWechatRemoteFind({ clearSelection: !query })
+    return
+  }
+  try {
+    wechatRemoteFindRequestIds.set(contentItemId, webview.findInPage(query, {
+      forward: true,
+      findNext: true,
+      matchCase: false,
+    }))
+  } catch {
+    wechatRemoteFindRequestIds.delete(contentItemId)
   }
 }
 
@@ -2083,12 +2209,19 @@ function updatePreviewFindQuery(query) {
   // from the input event so matching is live; Enter remains navigation only.
   if (previewFindOpen.value && isLocalHtmlRemoteVisible.value) {
     refreshLocalHtmlRemoteFind()
+  } else if (previewFindOpen.value && isWechatRemoteVisible.value) {
+    refreshWechatRemoteFind()
   }
 }
 
 function refreshPreviewFind() {
   previewFindRefreshFrame = 0
   if (!previewFindOpen.value) return
+  if (isWechatRemoteVisible.value) {
+    clearPreviewFindHighlights()
+    refreshWechatRemoteFind()
+    return
+  }
   if (isLocalHtmlRemoteVisible.value) {
     clearPreviewFindHighlights()
     refreshLocalHtmlRemoteFind()
@@ -2125,6 +2258,7 @@ function openPreviewFind() {
 function closePreviewFind() {
   previewFindOpen.value = false
   previewFindQuery.value = ''
+  clearWechatRemoteFind({ clearSelection: true })
   clearLocalHtmlRemoteFind({ clearSelection: true })
   clearPreviewFindHighlights()
   const target = previewFindRestoreFocus?.isConnected ? previewFindRestoreFocus : contentHero.value
@@ -2256,13 +2390,28 @@ function askAboutSelectedText() {
 
 function navigatePreviewFind(direction) {
   if (!previewFindQuery.value.trim()) return
+  if (isWechatRemoteVisible.value) {
+    const contentItemId = activeWechatContent.value?.id
+    const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
+    if (!contentItemId || !webview?.findInPage) return
+    try {
+      wechatRemoteFindRequestIds.set(contentItemId, webview.findInPage(previewFindQuery.value.trim(), {
+        forward: direction >= 0,
+        findNext: false,
+        matchCase: false,
+      }))
+    } catch {
+      wechatRemoteFindRequestIds.delete(contentItemId)
+    }
+    return
+  }
   if (isLocalHtmlRemoteVisible.value) {
     const webview = activeLocalHtmlRemoteWebview.value
     if (!webview?.findInPage) return
     try {
       localHtmlRemoteFindRequestId = webview.findInPage(previewFindQuery.value.trim(), {
         forward: direction >= 0,
-        findNext: true,
+        findNext: false,
         matchCase: false,
       })
     } catch {
@@ -2546,6 +2695,36 @@ function hasTranscriptTimeline(tabId) {
   // and reader metadata. That text is not timed media, so it must never turn
   // a Markdown/report reader into the timed-media transcript workspace.
   return (isVideoTab(tabId) || isAudioTab(tabId)) && timelineSegmentsForTab(tabId).length > 0
+}
+
+function shouldShowTranscriptGeneration(tabId) {
+  if (!isTimedMediaTab(tabId) || hasTranscriptTimeline(tabId)) return false
+  const task = props.resultForTab(tabId) || {}
+  const status = String(task.status || '').toLowerCase()
+  if (['queued', 'running', 'processing'].includes(status)) return true
+  return props.contentForTab(tabId)?.status === 'processing'
+}
+
+function hasMediaTranscriptWorkspace(tabId) {
+  return hasTranscriptTimeline(tabId) || shouldShowTranscriptGeneration(tabId)
+}
+
+function transcriptGenerationLabel(tabId) {
+  const step = String(props.resultForTab(tabId)?.step || '').toLowerCase()
+  if (['info', 'parse', 'subtitle', 'fetch_subtitle'].includes(step)) return '正在获取字幕'
+  if (step === 'download') return '正在准备字幕'
+  if (step === 'extract_audio') return '正在提取音频'
+  if (step === 'transcribe') return '正在转写音频'
+  if (['summarize', 'save'].includes(step)) return '正在整理字幕文本'
+  return '正在准备字幕'
+}
+
+function transcriptGenerationDescription(tabId) {
+  const step = String(props.resultForTab(tabId)?.step || '').toLowerCase()
+  if (step === 'download') return '下载与字幕获取会并行进行，首段文本就绪后会立即显示。'
+  if (step === 'extract_audio') return '音频准备完成后将立刻开始转写。'
+  if (step === 'transcribe') return '字幕会按片段出现，无需等待整段音频完成。'
+  return '首段文本就绪后会立即显示。'
 }
 
 function verticalContentBounds() {
@@ -2878,7 +3057,7 @@ function exportVideoSubtitles(tabId) {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: 36px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   margin: 0;
   padding-inline: 0;
   overflow: hidden;
@@ -2887,18 +3066,10 @@ function exportVideoSubtitles(tabId) {
   background: var(--vk-bg-center);
 }
 
-.workbench-editor-host.no-editor-tabs {
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.workbench-editor-host.no-editor-tabs .tab-content-workspace {
-  grid-row: 1;
-}
-
 .tab-content-workspace {
   position: relative;
   z-index: 0;
-  grid-row: 2;
+  grid-row: 1;
   min-height: 0;
   height: 100%;
   margin: 0;
@@ -3147,55 +3318,35 @@ function exportVideoSubtitles(tabId) {
   background: transparent;
 }
 
-.media-processing-state {
+.media-preview-loader {
   position: absolute;
   z-index: 3;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
   display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 8px;
-  align-items: center;
-  width: min(360px, calc(100% - 36px));
-  padding: 10px 12px;
-  color: var(--vk-on-media);
-  background: color-mix(in srgb, var(--vk-media-surface) 88%, transparent);
-  border: 1px solid var(--vk-media-border);
-  border-radius: 10px;
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--vk-media-surface) 22%, transparent);
-  backdrop-filter: blur(10px);
+  place-items: center;
+  pointer-events: none;
 }
 
-.media-processing-state strong {
-  font-size: 13px;
-  line-height: 18px;
+.media-preview-spinner {
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--vk-on-media) 38%, transparent);
+  border-top-color: var(--vk-on-media);
+  border-radius: 50%;
+  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--vk-media-surface) 54%, transparent));
+  animation: media-preview-spin 0.78s linear infinite;
 }
 
-.media-processing-state small {
-  grid-column: 2;
-  color: var(--vk-media-muted);
-  font-size: 12px;
-  line-height: 17px;
+.media-preview-loader.is-empty .media-preview-spinner {
+  border-color: color-mix(in srgb, var(--vk-muted) 38%, transparent);
+  border-top-color: var(--vk-muted);
+  filter: none;
 }
 
-.media-processing-stages {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin: 2px 0 0;
-  padding: 0;
-  color: var(--vk-media-subtle);
-  font-size: 11px;
-  line-height: 15px;
-  list-style: none;
+@keyframes media-preview-spin {
+  to { transform: rotate(360deg); }
 }
-
-.media-processing-stages li { display: inline-flex; align-items: center; gap: 4px; }
-.media-processing-stages li > span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.media-processing-stages .is-active { color: var(--vk-on-media); }
-.media-processing-stages .is-done { color: color-mix(in srgb, var(--vk-accent) 72%, var(--vk-on-media)); }
 
 .media-cache-expired {
   position: absolute;
@@ -3214,21 +3365,8 @@ function exportVideoSubtitles(tabId) {
   backdrop-filter: blur(10px);
 }
 
-.media-processing-spinner {
-  width: 15px;
-  height: 15px;
-  border: 2px solid var(--vk-media-spinner);
-  border-top-color: var(--vk-on-media);
-  border-radius: 50%;
-  animation: media-processing-spin 0.8s linear infinite;
-}
-
-@keyframes media-processing-spin {
-  to { transform: rotate(360deg); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .media-processing-spinner { animation: none; }
+  .media-preview-spinner { animation: none; }
 }
 
 .article-reader {
@@ -3830,6 +3968,103 @@ function exportVideoSubtitles(tabId) {
   background: var(--vk-bg-center);
 }
 
+.xhs-capture-image-loading {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--vk-space-panel) var(--vk-space-page);
+  gap: var(--vk-space-control);
+  box-sizing: border-box;
+}
+
+.xhs-capture-image-stream {
+  position: relative;
+  width: min(74%, 430px);
+  min-width: min(74%, 260px);
+  min-height: 0;
+  height: min(82%, 360px);
+  align-self: center;
+  justify-self: center;
+}
+
+.xhs-capture-image-sheet {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border: 1px solid color-mix(in srgb, var(--vk-border) 86%, transparent);
+  border-radius: var(--vk-radius-surface);
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, var(--vk-bg-quiet) 84%, var(--vk-bg-panel)) 12%,
+    color-mix(in srgb, var(--vk-bg-panel) 94%, #fff) 46%,
+    color-mix(in srgb, var(--vk-bg-quiet) 84%, var(--vk-bg-panel)) 78%
+  );
+  background-size: 220% 100%;
+  box-shadow: none;
+  animation: xhs-capture-shimmer 1.55s linear infinite;
+}
+
+.xhs-capture-image-sheet.is-back {
+  opacity: 0.38;
+  transform: translate(-12px, -10px) rotate(-2deg);
+  animation-delay: -0.52s;
+}
+
+.xhs-capture-image-sheet.is-middle {
+  opacity: 0.64;
+  transform: translate(10px, -5px) rotate(1.4deg);
+  animation-delay: -0.26s;
+}
+
+.xhs-capture-image-sheet.is-front {
+  position: relative;
+  opacity: 1;
+}
+
+.xhs-capture-loading-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--vk-space-sm);
+  min-width: 0;
+  color: var(--vk-muted);
+  font-size: var(--vk-type-label-size);
+  line-height: var(--vk-leading-label);
+  text-align: left;
+}
+
+.xhs-capture-loading-copy > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.xhs-capture-loading-copy strong {
+  color: var(--vk-text);
+  font-size: var(--vk-type-label-size);
+  font-weight: var(--vk-weight-medium);
+}
+
+.xhs-capture-loading-copy small {
+  overflow: hidden;
+  color: var(--vk-muted);
+  font-size: var(--vk-type-meta-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xhs-capture-loading-pulse {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--vk-accent);
+  animation: xhs-capture-pulse 1.5s var(--vk-ease-out) infinite;
+}
+
 .xhs-gallery-track {
   display: flex;
   width: 100%;
@@ -3999,6 +4234,27 @@ function exportVideoSubtitles(tabId) {
 .xhs-text-reader .article-preview-frame {
   min-height: 0;
   height: 100%;
+}
+
+.xhs-capture-text-loading {
+  align-self: flex-start;
+  box-sizing: border-box;
+  width: min(820px, 100%);
+  min-height: 0;
+  margin: 0 auto;
+  padding: 0 var(--vk-space-page) var(--vk-space-section);
+  --ai-skeleton-stream-width: 100%;
+  --ai-skeleton-stream-padding: 0;
+}
+
+@keyframes xhs-capture-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -120% 0; }
+}
+
+@keyframes xhs-capture-pulse {
+  0%, 100% { opacity: 0.48; transform: scale(0.84); }
+  50% { opacity: 1; transform: scale(1); }
 }
 
 .campus-article-loading {
@@ -4484,6 +4740,119 @@ function exportVideoSubtitles(tabId) {
   scrollbar-gutter: stable;
 }
 
+.transcript-timeline.is-generating {
+  overflow: hidden;
+}
+
+/* This is deliberately shaped like the real timed transcript rather than a
+   generic loading card. It gives the user a truthful, quiet indication that
+   text is arriving while leaving the video independently usable above. */
+.transcript-generation {
+  width: min(100%, 720px);
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  padding: 28px 24px;
+}
+
+.transcript-generation-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.transcript-generation-heading strong,
+.transcript-generation-heading small {
+  display: block;
+}
+
+.transcript-generation-heading strong {
+  color: var(--vk-text);
+  font-size: var(--vk-type-body-size);
+  font-weight: var(--vk-weight-medium);
+  line-height: 1.45;
+}
+
+.transcript-generation-heading small {
+  margin-top: 3px;
+  color: var(--vk-muted);
+  font-size: var(--vk-type-meta-size);
+  line-height: 1.5;
+}
+
+.transcript-generation-pulse {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--vk-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--vk-accent) 28%, transparent);
+  animation: transcript-generation-pulse 1.7s var(--vk-ease-out) infinite;
+}
+
+.transcript-generation-lines {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 580px);
+}
+
+.transcript-generation-line {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.transcript-generation-line > span {
+  color: color-mix(in srgb, var(--vk-muted) 72%, transparent);
+  font-family: var(--vk-font-mono);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.transcript-generation-line > i {
+  position: relative;
+  display: block;
+  width: 78%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--vk-border) 62%, var(--vk-bg-panel));
+}
+
+.transcript-generation-line > i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, #ffffff 56%, var(--vk-border)) 48%,
+    transparent 100%
+  );
+  transform: translateX(-110%);
+  animation: transcript-generation-shimmer 1.2s linear infinite;
+  will-change: transform;
+}
+
+.transcript-generation-line.is-wide > i { width: 92%; }
+.transcript-generation-line.is-medium > i { width: 64%; }
+.transcript-generation-line.is-long > i { width: 82%; }
+.transcript-generation-line.is-short > i { width: 43%; }
+.transcript-generation-line:nth-child(2) > i::after { animation-delay: 0.12s; }
+.transcript-generation-line:nth-child(3) > i::after { animation-delay: 0.24s; }
+.transcript-generation-line:nth-child(4) > i::after { animation-delay: 0.36s; }
+
+@keyframes transcript-generation-shimmer {
+  to { transform: translateX(110%); }
+}
+
+@keyframes transcript-generation-pulse {
+  55% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--vk-accent) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--vk-accent) 0%, transparent); }
+}
+
 .transcript-follow-button {
   position: sticky;
   top: 8px;
@@ -4729,7 +5098,7 @@ function exportVideoSubtitles(tabId) {
 
 .prompt-editor-surface {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -5257,6 +5626,19 @@ function exportVideoSubtitles(tabId) {
   .campus-article-loading span {
     animation: none;
     opacity: 0.72;
+  }
+
+  .transcript-generation-pulse,
+  .transcript-generation-line > i::after,
+  .xhs-capture-image-sheet,
+  .xhs-capture-loading-pulse {
+    animation: none;
+  }
+
+  .transcript-generation-pulse,
+  .xhs-capture-loading-pulse {
+    opacity: 0.72;
+    box-shadow: none;
   }
 
   :global(.content-action-pop-enter-active),

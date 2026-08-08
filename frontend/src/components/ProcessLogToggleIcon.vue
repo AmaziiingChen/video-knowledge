@@ -1,12 +1,13 @@
 <template>
   <span class="process-log-toggle-icon" :class="{ 'is-collapsed': collapsed }" aria-hidden="true">
-    <span class="process-log-toggle-icon-art" v-html="processLogSvg"></span>
+    <svg class="process-log-toggle-icon-art" viewBox="0 0 20 20" fill="none">
+      <rect x="1.5" y="2.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.5" />
+      <path class="process-log-toggle-icon-fill" d="M3 11h14v5H3z" fill="currentColor" />
+    </svg>
   </span>
 </template>
 
 <script setup>
-import processLogSvg from '../../assets/inset.filled.bottomhalf.rectangle.svg?raw'
-
 defineProps({
   collapsed: {
     type: Boolean,
@@ -25,30 +26,20 @@ defineProps({
   color: currentColor;
 }
 
-.process-log-toggle-icon-art :deep(svg) {
-  width: 19px;
-  height: 19px;
-  display: block;
-  overflow: visible;
-}
+.process-log-toggle-icon-art { overflow: visible; }
 
-.process-log-toggle-icon-art :deep(path) {
-  fill: currentColor !important;
-}
-
-/* The last path is the bottom-panel rectangle in the supplied SVG. */
-.process-log-toggle-icon-art :deep(path:last-of-type) {
+.process-log-toggle-icon-fill {
   transform-box: fill-box;
   transform-origin: center bottom;
   transition: transform var(--vk-motion-panel) var(--vk-ease-out);
 }
 
-.process-log-toggle-icon.is-collapsed .process-log-toggle-icon-art :deep(path:last-of-type) {
+.process-log-toggle-icon.is-collapsed .process-log-toggle-icon-fill {
   transform: scaleY(0.22);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .process-log-toggle-icon-art :deep(path:last-of-type) {
+  .process-log-toggle-icon-fill {
     transition: none;
   }
 }

@@ -109,7 +109,7 @@ import { ElMessage } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import ReportGroupMultiSelect from '../../components/ReportGroupMultiSelect.vue'
 import CollectionState from '../../components/CollectionState.vue'
-import rssHubIcon from '../../../assets/rsshub.svg'
+const rssHubIcon = 'rsshub'
 import { requestDestructiveConfirmation } from '../../composables/useDestructiveConfirm'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../../utils/sourceSyncTask'
 

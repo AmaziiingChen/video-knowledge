@@ -9,10 +9,12 @@ export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 export NO_PROXY="127.0.0.1,localhost"
 export no_proxy="127.0.0.1,localhost"
 
-# This Finder launcher starts Electron in development mode.  In that mode
-# electron/main.cjs launches uvicorn with its source reloader from the checkout's
-# backend directory, so backend source changes take effect without repackaging.
-# Do not run PyInstaller here:
+# This Finder launcher runs Electron against the checked-out backend, so saved
+# source changes are used on the next launch without rebuilding PyInstaller.
+# It intentionally does not enable uvicorn's live reloader: reloading a running
+# media/AI task can leave its old worker holding port 8000 during shutdown.
+# Developers who explicitly need hot reload can launch with
+# KNOWLEDGEHUB_SOURCE_RELOAD=1 in a terminal. Do not run PyInstaller here:
 # its 900MB+ dependency analysis does not participate in this runtime and is
 # reserved for the explicit desktop package commands.
 

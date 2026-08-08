@@ -303,28 +303,6 @@
   padding: 8px 0 0;
 }
 
-.settings-appearance-heading {
-  padding: 16px 18px 0;
-}
-
-.settings-appearance-heading h3,
-.settings-appearance-heading p {
-  margin: 0;
-}
-
-.settings-appearance-heading h3 {
-  color: var(--vk-text);
-  font-size: var(--vk-type-reading-size);
-  font-weight: var(--vk-weight-strong);
-}
-
-.settings-appearance-heading p {
-  margin-top: 4px;
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-  line-height: var(--vk-leading-body);
-}
-
 .settings-group-note {
   margin: 0;
   padding: 10px 18px 11px;
@@ -461,24 +439,6 @@
 .settings-openclaw-row {
   flex-wrap: wrap;
   align-items: flex-start;
-}
-
-.settings-openclaw-privacy-row {
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.settings-openclaw-retention {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-}
-
-.settings-openclaw-retention .el-select {
-  width: 120px;
 }
 
 .settings-openclaw-path {

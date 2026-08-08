@@ -19,7 +19,10 @@ XIAOHONGSHU_PATTERN = re.compile(
     r'https?://(?:www\.)?xiaohongshu\.com/(?:explore|discovery/item|search_result)/[^\s]+',
     re.IGNORECASE,
 )
-XIAOHONGSHU_SHORT_PATTERN = re.compile(r'https?://(?:www\.)?xhslink\.com/[^\s]+', re.IGNORECASE)
+# Xiaohongshu currently distributes share links from both xhslink.com and
+# xhslink.cn.  They enter the same safe resolver below; recognising only the
+# former meant common mobile share text was ignored before it could expand.
+XIAOHONGSHU_SHORT_PATTERN = re.compile(r'https?://(?:www\.)?xhslink\.(?:com|cn)/[^\s]+', re.IGNORECASE)
 
 def parse_share_text(text: str) -> Optional[ParsedURL]:
     text = text.strip()

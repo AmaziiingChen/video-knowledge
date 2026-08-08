@@ -1,46 +1,32 @@
-from fastapi import FastAPI
+import hmac
+import os
+import re
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import importlib.util
-import os
 
 from config import settings
-from routers import parse, download, transcribe, summarize, pipeline, cookie, tasks, uploads, qa, knowledge, clipboard, folder_import_watcher, prompts, inbox, search, content, content_analyses, markdown, media, telegram, ingest, obsidian, openclaw, openclaw_reports, agent_workspace, wechat_subscriptions, wechat_feed, wechat_content_filters, media_tools, llm_settings, paddle_ocr_settings, wechat_reports, wechat_publishing, campus_sources, runtime_components, miniprogram_forum, creator_sources, rss_sources, manual_collection, favorite_sources, source_sync_tasks, video_settings, update, telemetry, completion_notifications
-from services.database import connect, initialize_database
+from routers import parse, download, transcribe, summarize, pipeline, cookie, tasks, uploads, qa, knowledge, clipboard, folder_import_watcher, prompts, inbox, search, content, content_analyses, markdown, media, telegram, ingest, obsidian, openclaw, openclaw_reports, agent_workspace, wechat_subscriptions, wechat_discovery, wechat_feed, wechat_content_filters, media_tools, llm_settings, paddle_ocr_settings, wechat_reports, wechat_publishing, campus_sources, runtime_components, miniprogram_forum, creator_sources, rss_sources, manual_collection, favorite_sources, source_sync_tasks, video_settings, update, telemetry, completion_notifications
 from services.llm_provider import DEEPSEEK_MODEL_OPTIONS, deepseek_model_option_value
 from services.pipeline_runner import ASR_MODEL_STRATEGIES, WHISPER_MODELS
 from services.runtime_components import supported_asr_backends
-from services.task_manager import TaskPersistenceError, task_manager
-from services.obsidian_settings import apply_saved_obsidian_settings
-from services.llm_settings import apply_saved_llm_settings
-from services.paddle_ocr_settings import apply_saved_paddle_ocr_settings
-from services.paddle_ocr import resume_pending_ocr_jobs
-from services.knowledge_library import ensure_library_layout, recover_legacy_report_documents
-from services.content_index import ensure_content_index_ready
-from services.wechat_reports import repair_report_folder_bindings
-from services.prompt_file_store import sync_prompt_files
-from services.wechat_subscription import (
-    wechat_subscription_scheduler,
-    wechat_subscription_service,
-)
-from services.campus_source_scheduler import campus_source_scheduler
-from services.campus_digest_scheduler import campus_digest_scheduler
-from services.cache_retention import cache_retention_scheduler
-from services.miniprogram_forum_collector import miniprogram_forum_collector
-from services.forum_capture_repository import repair_forum_capture_document_types
-from services.miniprogram_forum_settings import miniprogram_forum_scheduler
-from services.search_index_scheduler import search_index_scheduler
-from services.creator_scheduler import creator_subscription_scheduler
-from services.favorite_scheduler import favorite_subscription_scheduler
-from services.rss_scheduler import rss_subscription_scheduler
-from services.openclaw_notifications import openclaw_notification_scheduler
-from services.openclaw_report_tasks import openclaw_report_task_manager
-from services.wechat_draft_tasks import wechat_draft_task_manager
-from services.report_group_scheduler import report_group_scheduler
-from services.watcher_restore import restore_enabled_watchers, stop_watchers
-from services import telemetry as telemetry_service
+from services.task_manager import TaskPersistenceError
+from services.application_lifecycle import start_application, stop_application
 
-app = FastAPI(title="KnowledgeHub Pipeline", version="1.0.0")
+
+@asynccontextmanager
+async def application_lifespan(_app: FastAPI):
+    await start_application()
+    try:
+        yield
+    finally:
+        await stop_application()
+
+
+app = FastAPI(title="KnowledgeHub Pipeline", version="0.1.0", lifespan=application_lifespan)
 
 
 @app.exception_handler(TaskPersistenceError)
@@ -58,6 +44,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _is_allowed_local_origin(request: Request) -> bool:
+    """Accept only the desktop shell or loopback source UI as browser callers."""
+    origin = request.headers.get("origin", "").rstrip("/")
+    if not origin:
+        # Non-browser callers still need the private instance token below.
+        return True
+    allowed_origins = {value.rstrip("/") for value in settings.allowed_origins}
+    return origin in allowed_origins or bool(re.fullmatch(settings.allowed_origin_regex, origin))
+
+
+def _allows_unauthenticated_test_api() -> bool:
+    return os.environ.get("KNOWLEDGEHUB_ALLOW_UNAUTHENTICATED_LOCAL_API", "").strip().lower() in {"1", "true", "yes"}
+
+
+@app.middleware("http")
+async def require_desktop_instance_token(request: Request, call_next):
+    """Bind every local API write to the launching desktop or source-session token."""
+    expected_token = os.environ.get("KNOWLEDGEHUB_INSTANCE_TOKEN", "").strip()
+    if request.url.path.startswith("/api/") and request.method.upper() in _MUTATING_METHODS:
+        if not _is_allowed_local_origin(request):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "本机 API 仅接受 KnowledgeHub 页面发起的写入请求"},
+            )
+        if not expected_token and not _allows_unauthenticated_test_api():
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "本机 API 尚未配置实例访问令牌"},
+            )
+        received_token = request.headers.get("x-knowledgehub-token", "")
+        if expected_token and not hmac.compare_digest(received_token, expected_token):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "本机 API 请求未获桌面应用授权"},
+            )
+    return await call_next(request)
 
 app.include_router(parse.router, prefix="/api", tags=["parse"])
 app.include_router(download.router, prefix="/api", tags=["download"])
@@ -85,6 +112,7 @@ app.include_router(openclaw.router, prefix="/api", tags=["openclaw"])
 app.include_router(openclaw_reports.router, prefix="/api", tags=["openclaw-reports"])
 app.include_router(agent_workspace.router, prefix="/api", tags=["agent-workspace"])
 app.include_router(wechat_subscriptions.router, prefix="/api", tags=["wechat-subscriptions"])
+app.include_router(wechat_discovery.router, prefix="/api", tags=["wechat-discovery"])
 app.include_router(wechat_feed.router, prefix="/api", tags=["wechat-feed"])
 app.include_router(wechat_content_filters.router, prefix="/api", tags=["wechat-content-filters"])
 app.include_router(media_tools.router, prefix="/api", tags=["media-tools"])
@@ -105,93 +133,23 @@ app.include_router(update.router, prefix="/api", tags=["updates"])
 app.include_router(telemetry.router, prefix="/api", tags=["telemetry"])
 app.include_router(completion_notifications.router, prefix="/api", tags=["completion-notifications"])
 
-@app.on_event("startup")
-async def startup():
-    telemetry_service.record("app_started")
-    ensure_library_layout()
-    try:
-        apply_saved_obsidian_settings()
-    except ValueError:
-        # A disconnected or permission-restricted vault must not prevent the
-        # local application (and its settings screen) from starting.
-        settings.obsidian_vault = settings.data_dir / "obsidian"
-        settings.obsidian_vault.mkdir(parents=True, exist_ok=True)
-    apply_saved_llm_settings()
-    apply_saved_paddle_ocr_settings()
-    initialize_database()
-    # Provider job IDs are durable; resume their low-frequency polls only
-    # after the local database is ready, never on the first-render path.
-    resume_pending_ocr_jobs()
-    # Complete one-time legacy folder/index repair before the health endpoint
-    # admits the desktop renderer.  Otherwise its first tree request pays for
-    # this work and appears empty despite the window being ready.
-    ensure_content_index_ready()
-    # Older reports were stored under data/drafts.  Reconnect any preserved
-    # legacy report files with the Markdown-first document index on startup.
-    recover_legacy_report_documents()
-    repair_report_folder_bindings()
-    repair_forum_capture_document_types()
-    with connect() as connection:
-        sync_prompt_files(connection)
-        connection.commit()
-    miniprogram_forum_collector.recover_stale_runs()
-    interrupted_initial_syncs = wechat_subscription_service.recover_interrupted_initial_syncs()
-    if settings.miniprogram_forum_capture_enabled:
-        miniprogram_forum_scheduler.start()
-    task_manager.recover_from_database()
-    openclaw_report_task_manager.recover_from_database()
-    wechat_draft_task_manager.recover_from_database()
-    openclaw_notification_scheduler.start()
-    # Restore only listeners explicitly enabled by the user.  Clipboard
-    # restoration primes the current clipboard first, so reopening the app
-    # never requeues the link that happened to be copied at shutdown.
-    restore_enabled_watchers()
-    campus_source_scheduler.start()
-    wechat_subscription_scheduler.start()
-    for subscription_id in interrupted_initial_syncs:
-        try:
-            subscription = wechat_subscription_service.get_subscription(subscription_id)
-            task_manager.create_source_sync(
-                {"kind": "wechat_subscription", "subscription_id": subscription_id, "mode": "latest", "max_items": 10},
-                source_title=f"恢复首次检查：{subscription['mp_name']}",
-                execution_mode="background",
-            )
-        except Exception:
-            continue
-    creator_subscription_scheduler.start()
-    favorite_subscription_scheduler.start()
-    rss_subscription_scheduler.start()
-    report_group_scheduler.start()
-    campus_digest_scheduler.start()
-    cache_retention_scheduler.start()
-    # Search only observes local Markdown already in the library.  It neither
-    # fetches source pages nor schedules OCR/model work.
-    search_index_scheduler.start()
-@app.on_event("shutdown")
-async def shutdown():
-    telemetry_service.flush()
-    stop_watchers()
-    openclaw_notification_scheduler.stop()
-    openclaw_report_task_manager.shutdown()
-    wechat_draft_task_manager.shutdown()
-    search_index_scheduler.stop()
-    miniprogram_forum_scheduler.stop()
-    cache_retention_scheduler.stop()
-    campus_digest_scheduler.stop()
-    campus_source_scheduler.stop()
-    wechat_subscription_scheduler.stop()
-    creator_subscription_scheduler.stop()
-    favorite_subscription_scheduler.stop()
-    rss_subscription_scheduler.stop()
-    report_group_scheduler.stop()
-
 @app.get("/api/health")
-async def health():
+async def health(request: Request):
+    expected_token = os.environ.get("KNOWLEDGEHUB_INSTANCE_TOKEN", "").strip()
+    supplied_token = request.headers.get("x-knowledgehub-token", "")
+    # Do not disclose the launch capability to an arbitrary loopback client.
+    # The Electron parent already owns it and supplies it when checking that
+    # port 8000 belongs to this exact backend process.
+    instance_token = (
+        expected_token
+        if expected_token and hmac.compare_digest(supplied_token, expected_token)
+        else ""
+    )
     return {
         "status": "ok",
         "service": "knowledgehub-backend",
         "version": settings.app_version,
-        "instance_token": os.environ.get("KNOWLEDGEHUB_INSTANCE_TOKEN", ""),
+        "instance_token": instance_token,
     }
 
 @app.get("/api/config")

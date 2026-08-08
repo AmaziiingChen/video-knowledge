@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from fastapi.responses import StreamingResponse
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -47,6 +48,9 @@ class TaskResponse(BaseModel):
     video_path: str | None = None
     transcript: str | None = None
     summary: str | None = None
+    # Kept in the lightweight queue response so the client can request one
+    # active task's full detail only when streamed text has actually changed.
+    summary_length: int = 0
     obsidian_path: str | None = None
     markdown_draft_path: str | None = None
     whisper_model: str | None = None
@@ -64,6 +68,11 @@ class TaskResponse(BaseModel):
     error_info: PipelineErrorInfo | None = None
     step: str | None = None
     details_included: bool = True
+
+
+class CancelActiveTasksResponse(BaseModel):
+    cancelled_count: int
+    tasks: list[TaskResponse]
 
 
 class SourceContextStatusResponse(BaseModel):
@@ -107,6 +116,7 @@ def _to_response(record: TaskRecord, *, include_heavy_payload: bool = True) -> T
         # task poll serialize megabytes of old task data.
         transcript=result.transcript if result and include_heavy_payload else None,
         summary=result.summary if result and include_heavy_payload else None,
+        summary_length=len(result.summary or "") if result else 0,
         obsidian_path=result.obsidian_path if result else None,
         markdown_draft_path=result.markdown_draft_path if result else None,
         whisper_model=result.whisper_model if result else record.whisper_model,
@@ -454,12 +464,51 @@ async def get_task(task_id: str):
     return _to_response(record)
 
 
+@router.get("/tasks/{task_id}/events")
+def stream_task_updates(task_id: str):
+    """Stream live in-memory snapshots for the opened task detail.
+
+    The regular task endpoints stay durable polling APIs for the dock and
+    history.  This narrow SSE channel avoids making an LLM's token stream wait
+    for SQLite writes and repeated full-detail requests.
+    """
+    if task_manager.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    def event_stream():
+        for record in task_manager.subscribe_updates(task_id):
+            if record is None:
+                yield ": keepalive\n\n"
+                continue
+            payload = _to_response(record).model_dump(mode="json")
+            yield f"event: task\ndata: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/tasks/{task_id}/cancel", response_model=TaskResponse)
 async def cancel_task(task_id: str):
     record = task_manager.cancel(task_id)
     if not record:
         raise HTTPException(status_code=404, detail="任务不存在")
     return _to_response(record)
+
+
+@router.post("/tasks/cancel-active", response_model=CancelActiveTasksResponse)
+async def cancel_active_tasks():
+    records = task_manager.cancel_active()
+    return CancelActiveTasksResponse(
+        cancelled_count=len(records),
+        tasks=[_to_response(record, include_heavy_payload=False) for record in records],
+    )
 
 
 @router.post("/tasks/{task_id}/pause", response_model=TaskResponse)

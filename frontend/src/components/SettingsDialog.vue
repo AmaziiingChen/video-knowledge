@@ -47,20 +47,18 @@
             <div v-for="model in selectedRuntimeModels" :key="`${model.backend}:${model.model}`" class="settings-row">
               <div class="settings-row-copy">
                 <h3>{{ model.model }}</h3>
-                <p>{{ model.backend === 'mlx' ? 'Apple Silicon 优化模型' : 'Faster-Whisper 模型' }} · {{ model.available ? `已占用 ${formatBytes(model.installed_bytes)}` : `下载约 ${formatBytes(model.estimated_bytes)}` }}</p>
+                <p>{{ model.backend === 'mlx' ? 'Apple Silicon 优化模型' : 'Faster-Whisper 模型' }} · {{ model.available ? `已占用 ${formatBytes(model.installed_bytes)}` : model.bundled ? `随应用附带，安装约 ${formatBytes(model.estimated_bytes)}` : `下载约 ${formatBytes(model.estimated_bytes)}` }}</p>
                 <details v-if="modelFailureDetail(model)" class="settings-inline-details">
                   <summary>查看下载失败详情</summary>
                   <p>{{ modelFailureDetail(model) }}</p>
                 </details>
               </div>
-              <div class="settings-row-control settings-row-actions"><span class="settings-status" :class="model.available ? 'is-valid' : 'is-warning'">{{ componentStatusText(model, '已准备', '未下载') }}</span><el-button size="small" :loading="model.state === 'downloading'" :disabled="model.available" @click="emit('download-asr-model', model)">{{ model.available ? '已可用' : '下载模型' }}</el-button></div>
+              <div class="settings-row-control settings-row-actions"><span class="settings-status" :class="model.available ? 'is-valid' : 'is-warning'">{{ componentStatusText(model, '已准备', model.bundled ? '可安装' : '未下载') }}</span><el-button size="small" :loading="model.state === 'downloading'" :disabled="model.available" @click="emit('download-asr-model', model)">{{ model.available ? '已可用' : model.bundled ? '安装模型' : '下载模型' }}</el-button></div>
             </div>
             <div v-if="!selectedRuntimeModels.length" class="settings-empty-state">正在读取当前模型的准备状态。</div>
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-head">模型存储</div>
-            <p class="settings-group-note">仅列出已下载的模型。移除不会影响已保存的转写和总结；需要时可重新下载。</p>
             <div v-for="model in installedRuntimeModels" :key="`storage:${model.backend}:${model.model}`" class="settings-row">
               <div class="settings-row-copy">
                 <h3>{{ model.model }}</h3>
@@ -77,10 +75,6 @@
 
         <section v-show="settingsSection === 'appearance'" class="settings-page settings-appearance-page" aria-label="外观">
           <div class="settings-group">
-            <div class="settings-appearance-heading">
-              <h3>主题</h3>
-              <p>每套主题会同时应用到工作台、文章、导入文档和报告，不需要另外搭配。</p>
-            </div>
             <div class="settings-row">
               <div class="settings-theme-grid">
                 <button v-for="option in themeOptions" :key="option.value" type="button" class="settings-theme-card" :class="{ 'is-selected': selectedTheme === option.value }" :aria-pressed="selectedTheme === option.value" @click="selectedTheme = option.value">
@@ -107,71 +101,9 @@
           </div>
         </section>
 
-        <section v-show="settingsSection === 'local'" class="settings-page settings-form-page settings-local-transcription-page" aria-labelledby="settings-transcription-title">
-          <div class="settings-group">
-            <div id="settings-transcription-title" class="settings-group-head">转写与模型策略</div>
-            <div class="settings-row">
-              <div class="settings-row-copy">
-                <h3>识别后端</h3>
-                <p>自动模式使用当前系统的原生实现，不会下载另一种兼容后端。</p>
-              </div>
-              <div class="settings-row-control settings-row-control-wide">
-                <el-segmented v-model="selectedAsrBackend" :options="asrBackendOptions" aria-label="识别后端" block />
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy">
-                <h3>模型策略</h3>
-                <p>智能模式会按视频时长选择模型；手动模式固定使用一个模型。</p>
-              </div>
-              <div class="settings-row-control settings-row-control-wide">
-                <el-segmented v-model="asrModelStrategy" :options="asrStrategyOptions" aria-label="语音识别模型策略" block />
-              </div>
-            </div>
-            <template v-if="asrModelStrategy === 'smart'">
-              <div class="settings-row">
-                <div class="settings-row-copy">
-                  <h3>短视频模型</h3>
-                  <p>用于短时内容，优先保证处理速度。</p>
-                </div>
-                <div class="settings-row-control">
-                  <el-select v-model="asrShortVideoModel" aria-label="短视频语音识别模型" filterable>
-                    <el-option v-for="option in modelProfileOptions" :key="option.model" :label="`${option.label} · ${option.model}`" :value="option.model" />
-                  </el-select>
-                </div>
-              </div>
-              <div class="settings-row">
-                <div class="settings-row-copy">
-                  <h3>长视频模型</h3>
-                  <p>用于长时内容，优先保证转写质量。</p>
-                </div>
-                <div class="settings-row-control">
-                  <el-select v-model="asrLongVideoModel" aria-label="长视频语音识别模型" filterable>
-                    <el-option v-for="option in modelProfileOptions" :key="option.model" :label="`${option.label} · ${option.model}`" :value="option.model" />
-                  </el-select>
-                </div>
-              </div>
-            </template>
-            <div v-else class="settings-row">
-              <div class="settings-row-copy">
-                <h3>默认模型</h3>
-                <p>所有视频使用同一个语音识别模型。</p>
-              </div>
-              <div class="settings-row-control">
-                <el-select v-model="selectedModel" aria-label="默认语音识别模型" filterable>
-                  <el-option v-for="option in modelProfileOptions" :key="option.model" :label="`${option.label} · ${option.model}`" :value="option.model" />
-                </el-select>
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy">
-                <h3>语音活动检测</h3>
-                <p>跳过静音片段，减少无效转写。</p>
-              </div>
-              <div class="settings-row-control settings-switch-control">
-                <el-switch v-model="asrVadFilter" aria-label="语音活动检测" />
-              </div>
-            </div>
+        <section v-show="settingsSection === 'local'" class="settings-page settings-form-page" aria-label="本机处理">
+          <div class="settings-group settings-group-note-only">
+            <p class="settings-group-note">音视频转写会自动使用本机原生识别与 small 模型，无需单独调整。</p>
           </div>
         </section>
 
@@ -312,7 +244,6 @@
 
         <section v-show="settingsSection === 'storage'" class="settings-page settings-form-page" aria-label="存储">
           <div class="settings-group">
-            <div class="settings-group-head">写入与缓存</div>
             <div class="settings-row">
               <div class="settings-row-copy">
                 <h3>自动写入 Markdown</h3>
@@ -364,13 +295,6 @@
                 <el-button round @click="emit('choose-export-folder')">选择文件夹</el-button>
               </div>
             </div>
-            <div class="settings-row">
-              <div class="settings-row-copy">
-                <h3>图片预览缓存</h3>
-                <p>文章图片会压缩为本地预览图，保证打开速度；Markdown 仅保留图片 OCR 文本与原始链接，不复制图片附件。</p>
-              </div>
-              <div class="settings-row-control"><span class="settings-status is-valid">自动管理</span></div>
-            </div>
           </div>
         </section>
 
@@ -416,77 +340,6 @@
                   <span class="settings-status" :class="item.stateClass">{{ item.label }}</span>
                   <span class="settings-openclaw-path-detail">{{ item.detail }}</span>
                 </span>
-              </div>
-            </div>
-            <div class="settings-row settings-openclaw-privacy-row">
-              <div class="settings-row-copy">
-                <h3>完整微信对话镜像</h3>
-                <p>默认关闭。开启后，OpenClaw 可将可见的微信消息副本保存在本机 KnowledgeHub；会话键与联系人标识不会原样保存。</p>
-              </div>
-              <div class="settings-row-control settings-row-actions">
-                <span class="settings-status" :class="openclawTranscriptMirrorEnabled ? 'is-warning' : 'is-valid'">{{ openclawTranscriptMirrorEnabled ? `本机保留 ${openclawTranscriptRetentionDays} 天` : '不保存正文' }}</span>
-                <el-switch
-                  :model-value="openclawTranscriptMirrorEnabled"
-                  aria-label="完整微信对话镜像"
-                  @change="emit('save-openclaw-conversation-settings', { transcript_mirror_enabled: $event, transcript_retention_days: openclawTranscriptRetentionDays })"
-                />
-              </div>
-              <div v-if="openclawTranscriptMirrorEnabled" class="settings-openclaw-retention">
-                <span>保留期</span>
-                <el-select
-                  :model-value="openclawTranscriptRetentionDays"
-                  aria-label="完整微信对话保留期"
-                  @change="emit('save-openclaw-conversation-settings', { transcript_mirror_enabled: true, transcript_retention_days: $event })"
-                >
-                  <el-option :value="7" label="7 天" />
-                  <el-option :value="30" label="30 天" />
-                  <el-option :value="90" label="90 天" />
-                  <el-option :value="365" label="365 天" />
-                </el-select>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-group">
-            <div class="settings-group-head">Telegram</div>
-            <div class="settings-row settings-row-multiline">
-              <div class="settings-row-copy">
-                <h3>Bot Token</h3>
-                <p>从 BotFather 获取；仅用于本机 Telegram 监听。</p>
-              </div>
-              <div class="settings-row-control settings-input-control">
-                <el-input v-model="telegramBotToken" type="password" name="telegram-bot-token" autocomplete="off" spellcheck="false" aria-label="Telegram Bot Token" show-password placeholder="从 BotFather 获取的 token…" @change="emit('save-telegram')" />
-              </div>
-            </div>
-            <div class="settings-row settings-row-multiline">
-              <div class="settings-row-copy">
-                <h3>允许的用户 ID</h3>
-                <p>多个 ID 使用逗号、空格或分号分隔。</p>
-              </div>
-              <div class="settings-row-control settings-input-control">
-                <el-input v-model="telegramAllowedUserIds" name="telegram-allowed-user-ids" autocomplete="off" inputmode="numeric" spellcheck="false" aria-label="允许的 Telegram 用户 ID" placeholder="例如：12345678, 87654321…" @change="emit('save-telegram')" />
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy">
-                <h3>处理结果回复</h3>
-                <p>任务完成后，通过 Telegram Bot 返回处理结果。</p>
-              </div>
-              <div class="settings-row-control settings-switch-control">
-                <el-switch v-model="telegramReplyEnabled" aria-label="Telegram 处理结果回复" @change="emit('save-telegram')" />
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row-copy">
-                <h3>监听状态</h3>
-                <p>连接测试仅验证 Bot 可用性；监听会持续读取新消息。</p>
-              </div>
-              <div class="settings-row-control settings-row-actions">
-                <span class="settings-status" :class="telegramWatching ? 'is-active' : 'is-idle'">{{ telegramStatusText }}</span>
-                <el-button size="small" text :loading="telegramScanning" @click="emit('test-telegram')">测试</el-button>
-                <el-button size="small" :loading="telegramScanning" @click="emit('toggle-telegram', !telegramWatching)">
-                  {{ telegramWatching ? '停止监听' : '开始监听' }}
-                </el-button>
               </div>
             </div>
           </div>
@@ -623,7 +476,7 @@
             <div class="settings-platform-credential">
               <div class="settings-row-copy">
                 <h3>小红书登录凭据</h3>
-                <p>{{ xiaohongshuCookieConfigured ? '已保存，可用于读取主动导入的图文和“我的收藏”。' : '在应用内登录后自动保存，不需要复制浏览器 Cookie。' }}</p>
+                <p>{{ xiaohongshuCookieConfigured ? '已保存，可用于读取主动导入的图文。' : '在应用内登录后自动保存，不需要复制浏览器 Cookie。' }}</p>
               </div>
               <div class="settings-platform-credential-meta">
                 <span class="settings-status" :class="`is-${xiaohongshuCookieState}`">{{ xiaohongshuCookieStatusText }}</span>
@@ -638,55 +491,6 @@
                 </div>
               </div>
               <details class="settings-manual-credential"><summary>手动粘贴 Cookie（备用）</summary><div class="settings-platform-credential-input"><div class="settings-input-group"><span class="settings-input-group-addon">Cookie</span><el-input class="settings-cookie-input" v-model="xiaohongshuCookieInput" type="password" name="xiaohongshu-cookie" autocomplete="off" spellcheck="false" aria-label="小红书 Cookie" :placeholder="credentialPlaceholder(xiaohongshuCookieConfigured, 'Cookie')" /><el-button class="settings-input-group-action" type="primary" :loading="savingXiaohongshuCookie" :disabled="!xiaohongshuCookieInput.trim()" @click="saveXiaohongshuCookie">保存</el-button></div></div></details>
-            </div>
-            <div class="settings-favorites-panel">
-              <div class="settings-favorites-head">
-                <div>
-                  <h3>个人收藏同步</h3>
-                  <p>首次读取最新 5 条，之后只保存新收藏。新收藏默认进入完整分析；可改为仅入库。自动检查每 6 小时运行一次；它不会常驻网页，桌面应用退出后会停止。视频处理始终按顺序在后台进行，不会并发下载。</p>
-                </div>
-                <el-button size="small" :loading="favoriteSourcesLoading" @click="loadFavoriteSources">刷新状态</el-button>
-              </div>
-              <div class="settings-favorites-add">
-                <div class="settings-favorite-add-copy"><strong>抖音“我的收藏”</strong><span>使用当前抖音 Cookie，不采集喜欢内容。</span></div>
-                <el-button size="small" type="primary" round :loading="enablingDouyinFavorites" @click="enableDouyinFavorites">{{ douyinFavoriteSource ? '立即同步' : '启用并同步' }}</el-button>
-              </div>
-              <div class="settings-favorites-add settings-bilibili-favorite-add">
-                <div class="settings-favorite-add-copy"><strong>B站收藏夹</strong><span>可添加任意 <code>favlist?fid=…</code> 链接；每个收藏夹独立同步。</span></div>
-                <div class="settings-favorite-url-control">
-                  <div class="settings-input-group"><span class="settings-input-group-addon">URL</span><el-input v-model.trim="bilibiliFavoriteUrl" name="bilibili-favorite-url" autocomplete="url" spellcheck="false" clearable placeholder="https://space.bilibili.com/…/favlist?fid=…" /><el-button class="settings-input-group-action" type="primary" :loading="addingBilibiliFavorite" :disabled="!bilibiliFavoriteUrl" @click="addBilibiliFavorite">添加并同步</el-button></div>
-                </div>
-                <div class="settings-favorite-add-option">
-                  <el-switch v-model="bilibiliFavoriteAutoAnalyze" size="small" aria-label="B站收藏夹自动完整分析" />
-                  <span>新收藏自动完整分析</span>
-                </div>
-              </div>
-              <div class="settings-favorites-add">
-                <div class="settings-favorite-add-copy"><strong>小红书“我的收藏”</strong><span>每次最多检查 5 篇新图文，图片文字识别和总结会进入现有后台队列。</span></div>
-                <div class="settings-favorite-source-actions">
-                  <el-switch v-if="xiaohongshuFavoriteSource" :model-value="xiaohongshuFavoriteSource.enabled" size="small" :disabled="syncingXiaohongshuFavorites" aria-label="暂停或启用小红书个人收藏" @update:model-value="updateXiaohongshuFavorite({ enabled: $event })" />
-                  <el-switch v-if="xiaohongshuFavoriteSource" :model-value="xiaohongshuFavoriteSource.auto_analyze" size="small" :disabled="syncingXiaohongshuFavorites" aria-label="小红书新收藏自动完整分析" @update:model-value="updateXiaohongshuFavorite({ auto_analyze: $event })" />
-                  <el-button size="small" type="primary" round :loading="syncingXiaohongshuFavorites" :disabled="!xiaohongshuCookieConfigured || xiaohongshuFavoriteSource?.enabled === false" @click="syncXiaohongshuFavorites">{{ xiaohongshuFavoriteSource ? '立即同步' : '启用并同步' }}</el-button>
-                </div>
-              </div>
-              <div v-if="favoriteSources.length" class="settings-favorite-list" aria-label="已启用的个人收藏">
-                <div v-for="source in favoriteSources" :key="source.id" class="settings-favorite-source">
-                  <div class="settings-favorite-source-copy">
-                    <strong>{{ source.title }}</strong>
-                    <span :class="favoriteStatusClass(source)">{{ favoriteStatusText(source) }}</span>
-                    <small v-if="source.last_error" :title="source.last_error">{{ source.last_error }}</small>
-                  </div>
-                  <div class="settings-favorite-source-actions">
-                    <el-switch :model-value="source.enabled" size="small" :disabled="favoriteBusyId === source.id" :aria-label="`${source.enabled ? '暂停' : '启用'} ${source.title}`" @update:model-value="updateFavorite(source, { enabled: $event })" />
-                    <el-switch :model-value="source.auto_analyze" size="small" :disabled="favoriteBusyId === source.id" :aria-label="`${source.title}新收藏自动完整分析`" @update:model-value="updateFavorite(source, { auto_analyze: $event })" />
-                    <span class="settings-favorite-analysis-label">{{ source.auto_analyze ? '完整分析' : '仅入库' }}</span>
-                    <el-button text size="small" :loading="favoriteBusyId === source.id" :disabled="!source.enabled" @click="syncFavorite(source)">同步</el-button>
-                    <el-button text size="small" :loading="favoriteBusyId === source.id" @click="processPendingFavorite(source)">处理已有</el-button>
-                    <el-button text size="small" type="danger" :disabled="favoriteBusyId === source.id" @click="deleteFavorite(source)">移除</el-button>
-                  </div>
-                </div>
-              </div>
-              <p v-else class="settings-favorites-empty">尚未启用个人收藏同步。</p>
             </div>
           </div>
         </section>
@@ -703,27 +507,19 @@ import { IconX } from '@tabler/icons-vue'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import SvgMaskIcon from './SvgMaskIcon.vue'
-import appleIntelligenceIcon from '../../assets/apple.intelligence.svg'
-import keyIcon from '../../assets/key.svg'
-import keyCircleIcon from '../../assets/key.circle.svg'
-import linkIcon from '../../assets/link.svg'
-import globeIcon from '../../assets/globe.svg'
-import eyeIcon from '../../assets/eye.svg'
-import eyeSlashIcon from '../../assets/eye.slash.svg'
-import paintPaletteIcon from '../../assets/paintpalette.svg'
-import wechatIcon from '../../assets/wechat.svg'
+const appleIntelligenceIcon = 'apple.intelligence'
+const keyIcon = 'key'
+const keyCircleIcon = 'key.circle'
+const linkIcon = 'link'
+const globeIcon = 'globe'
+const eyeIcon = 'eye'
+const eyeSlashIcon = 'eye.slash'
+const paintPaletteIcon = 'paintpalette'
+const wechatIcon = 'wechat'
 import { requestDestructiveConfirmation } from '../composables/useDestructiveConfirm'
 
 const modelValue = defineModel({ type: Boolean, default: false })
 const selectedTheme = defineModel('selectedTheme', { type: String, default: '' })
-const selectedAsrBackend = defineModel('selectedAsrBackend', { type: String, default: '' })
-const asrModelStrategy = defineModel('asrModelStrategy', { type: String, default: 'smart' })
-const asrShortVideoModel = defineModel('asrShortVideoModel', { type: String, default: '' })
-const asrLongVideoModel = defineModel('asrLongVideoModel', { type: String, default: '' })
-const selectedModel = defineModel('selectedModel', { type: String, default: '' })
-const asrBeamSize = defineModel('asrBeamSize', { type: Number, default: 1 })
-const asrVadFilter = defineModel('asrVadFilter', { type: Boolean, default: true })
-const asrFallbackEnabled = defineModel('asrFallbackEnabled', { type: Boolean, default: true })
 const selectedAiModel = defineModel('selectedAiModel', { type: String, default: '' })
 const deepseekApiKey = defineModel('deepseekApiKey', { type: String, default: '' })
 const deepseekBaseUrl = defineModel('deepseekBaseUrl', { type: String, default: 'https://api.deepseek.com' })
@@ -751,9 +547,6 @@ const douyinVideoQuality = defineModel('douyinVideoQuality', { type: String, def
 const obsidianVaultPath = defineModel('obsidianVaultPath', { type: String, default: '' })
 const markdownExportPath = defineModel('markdownExportPath', { type: String, default: '' })
 const obsidianAutoWrite = defineModel('obsidianAutoWrite', { type: Boolean, default: false })
-const telegramBotToken = defineModel('telegramBotToken', { type: String, default: '' })
-const telegramAllowedUserIds = defineModel('telegramAllowedUserIds', { type: String, default: '' })
-const telegramReplyEnabled = defineModel('telegramReplyEnabled', { type: Boolean, default: true })
 const cookieInput = defineModel('cookieInput', { type: String, default: '' })
 const bilibiliCookieInput = defineModel('bilibiliCookieInput', { type: String, default: '' })
 const ffmpegPath = defineModel('ffmpegPath', { type: String, default: '' })
@@ -776,8 +569,6 @@ const {
   initialSection,
   themeOptions,
   selectedThemeOption,
-  availableAsrBackends,
-  modelProfileOptions,
   availableAiModels,
   clipboardWatching,
   clipboardScanning,
@@ -786,11 +577,6 @@ const {
   openclawStatusText,
   openclawConnectionItems,
   openclawStatusTone,
-  openclawTranscriptMirrorEnabled,
-  openclawTranscriptRetentionDays,
-  telegramWatching,
-  telegramScanning,
-  telegramStatusText,
   wechatAccounts,
   wechatSubscriptions,
   wechatLoading,
@@ -841,8 +627,6 @@ const {
   initialSection: { type: String, default: 'overview' },
   themeOptions: { type: Array, default: () => [] },
   selectedThemeOption: { type: Object, required: true },
-  availableAsrBackends: { type: Array, default: () => [] },
-  modelProfileOptions: { type: Array, default: () => [] },
   availableAiModels: { type: Array, default: () => [] },
   clipboardWatching: Boolean,
   clipboardScanning: Boolean,
@@ -854,11 +638,6 @@ const {
   openclawStatusText: { type: String, default: '' },
   openclawConnectionItems: { type: Array, default: () => [] },
   openclawStatusTone: { type: String, default: 'is-warning' },
-  openclawTranscriptMirrorEnabled: Boolean,
-  openclawTranscriptRetentionDays: { type: Number, default: 30 },
-  telegramWatching: Boolean,
-  telegramScanning: Boolean,
-  telegramStatusText: { type: String, default: '' },
   wechatAccounts: { type: Array, default: () => [] },
   wechatSubscriptions: { type: Array, default: () => [] },
   wechatLoading: Boolean,
@@ -943,10 +722,6 @@ const emit = defineEmits([
   'choose-folder-import',
   'toggle-folder-import',
   'start-openclaw',
-  'save-openclaw-conversation-settings',
-  'save-telegram',
-  'test-telegram',
-  'toggle-telegram',
   'load-wechat',
   'start-wechat-qr',
   'reauthorize-account',
@@ -1093,15 +868,8 @@ const settingsNavigationGroups = computed(() => [
 const settingsNavigation = computed(() => settingsNavigationGroups.value.flatMap((group) => group.items))
 
 const selectedRuntimeModels = computed(() => {
-  const names = asrModelStrategy.value === 'manual'
-    ? [selectedModel.value]
-    : [asrShortVideoModel.value, asrLongVideoModel.value]
-  const backend = selectedAsrBackend.value === 'auto'
-    ? (runtimeComponents.preferred_asr_backend || 'mlx')
-    : selectedAsrBackend.value
-  return [...new Set(names.filter(Boolean))].map((modelName) => (
-    (runtimeComponents.models || []).find((item) => item.model === modelName && item.backend === backend)
-  )).filter(Boolean)
+  const backend = runtimeComponents.preferred_asr_backend || 'mlx'
+  return (runtimeComponents.models || []).filter((item) => item.model === 'small' && item.backend === backend)
 })
 
 const runtimeBackendName = computed(() => (
@@ -1270,7 +1038,13 @@ async function saveXiaohongshuCookie() {
     }
     xiaohongshuCookieInput.value = ''
     await loadXiaohongshuCookieStatus(true)
-    ElMessage.success(xiaohongshuCookieState.value === 'valid' ? '小红书 Cookie 已保存并验证可用' : '小红书 Cookie 已保存，等待平台确认')
+    if (xiaohongshuCookieState.value === 'valid') {
+      ElMessage.success('小红书 Cookie 已保存并验证可用')
+    } else if (xiaohongshuCookieState.value === 'invalid') {
+      ElMessage.error(`小红书 Cookie 未通过验证：${xiaohongshuCookieStatusText.value}`)
+    } else {
+      ElMessage.info('小红书 Cookie 已保存，等待平台确认')
+    }
   } catch (error) {
     ElMessage.error(favoriteErrorMessage(error, '小红书 Cookie 保存失败'))
   } finally {
@@ -1290,6 +1064,8 @@ async function connectXiaohongshuAuth() {
     await loadXiaohongshuCookieStatus(true)
     if (status?.state === 'valid' || xiaohongshuCookieState.value === 'valid') {
       ElMessage.success('小红书登录态已连接并验证可用')
+    } else if (status?.state === 'invalid' || xiaohongshuCookieState.value === 'invalid') {
+      ElMessage.error(xiaohongshuCookieStatusText.value || '小红书登录态未通过平台验证，请重新登录')
     } else if (status?.configured || xiaohongshuCookieConfigured.value) {
       ElMessage.info('小红书登录态已保存，正在等待平台验证')
     } else {
@@ -1516,22 +1292,10 @@ async function deleteFavorite(source) {
 
 watch(modelValue, (opened) => {
   if (opened) {
-    loadFavoriteSources()
     loadXiaohongshuCookieStatus()
-    loadXiaohongshuFavoriteSource()
     loadTelemetryStatus()
   }
 })
-
-const asrBackendOptions = computed(() => {
-  const labels = { auto: '自动', mlx: 'MLX', faster_whisper: 'Faster-Whisper' }
-  return availableAsrBackends.map((value) => ({ label: labels[value] || value, value }))
-})
-
-const asrStrategyOptions = [
-  { label: '智能', value: 'smart' },
-  { label: '手动', value: 'manual' }
-]
 
 watch(modelValue, (isOpen) => {
   if (isOpen) settingsSection.value = settingsNavigation.value.some((item) => item.value === initialSection)

@@ -12,6 +12,10 @@
         </div>
       </div>
       <div v-if="!batchMode" class="wechat-manager-head-actions">
+        <el-button type="primary" @click="publicDiscoveryOpen = true">
+          <el-icon><Plus /></el-icon>
+          公开导入
+        </el-button>
         <el-button
           :disabled="!subscriptions.length || bulkSyncActive || !collectableAccounts.length"
           :title="bulkSyncActive ? bulkSyncProgressTitle : (!collectableAccounts.length && rateLimitedAccounts.length ? '微信正在频控冷却，恢复后才能检查' : '逐个检查所有已启用公众号，并自动补齐上次检查后的新文章')"
@@ -20,9 +24,9 @@
           <el-icon><Refresh /></el-icon>
           {{ bulkSyncButtonLabel }}
         </el-button>
-        <el-button type="primary" @click="openSubscriptionDialog">
+        <el-button @click="openSubscriptionDialog">
           <el-icon><Plus /></el-icon>
-          新增订阅
+          新增授权订阅
         </el-button>
         <el-dropdown trigger="click" placement="bottom-end" @command="handleHeaderCommand">
           <button type="button" class="wechat-manager-head-more" aria-label="更多公众号管理操作">
@@ -448,6 +452,10 @@
       :max-items="1000"
       @confirm="confirmHistorySync"
     />
+    <WechatPublicDiscoveryDialog
+      v-model="publicDiscoveryOpen"
+      @library-changed="emit('library-changed')"
+    />
   </section>
 </template>
 
@@ -459,6 +467,7 @@ import BatchSelectionToolbar from '../../components/BatchSelectionToolbar.vue'
 import HistorySyncDialog from '../../components/HistorySyncDialog.vue'
 import ReportGroupMultiSelect from '../../components/ReportGroupMultiSelect.vue'
 import CollectionState from '../../components/CollectionState.vue'
+import WechatPublicDiscoveryDialog from './WechatPublicDiscoveryDialog.vue'
 import { requestDestructiveConfirmation } from '../../composables/useDestructiveConfirm'
 import {
   discoveryRecommendations,
@@ -494,6 +503,7 @@ const emit = defineEmits([
   'bulk-update-subscriptions',
   'delete-subscription',
   'copy-rss',
+  'library-changed',
   'clear-search-results',
   'update:selectedAccountId',
   'update:searchQuery'
@@ -516,6 +526,7 @@ const selectedSubscriptionIds = ref([])
 const bulkGroupPickerOpen = ref(false)
 const historyDialog = reactive({ open: false, subscriptionId: '', sourceLabel: '' })
 const historyRunningSubscriptionId = ref('')
+const publicDiscoveryOpen = ref(false)
 
 const groupsById = computed(() => new Map(props.reportGroups.map((group) => [String(group.id), group.name])))
 const activeAccounts = computed(() => props.accounts.filter((account) => account.status === 'active'))

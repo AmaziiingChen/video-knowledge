@@ -8,6 +8,7 @@ export PATH="/opt/miniconda3/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 RUN_DIR="$(pwd)/data/run"
 BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
+BACKEND_TOKEN_FILE="$RUN_DIR/backend-instance-token"
 
 terminate_tree() {
     local pid="$1"
@@ -69,5 +70,6 @@ stop_pid_file() {
 
 stop_pid_file "前端" "$FRONTEND_PID_FILE"
 stop_pid_file "后端" "$BACKEND_PID_FILE"
+rm -f "$BACKEND_TOKEN_FILE"
 
 echo "完成"

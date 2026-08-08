@@ -13,6 +13,10 @@ venv/
 # Local secrets and runtime data
 backend/.env
 data/
+materials/
+# The XHS collector is deliberately kept out of the public source tree until
+# an independently verified upstream license is available.
+backend/vendor/Spider_XHS/
 .claude/settings.local.json
 
 # Frontend build/dependencies

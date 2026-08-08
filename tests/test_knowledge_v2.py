@@ -107,6 +107,31 @@ def test_v2_rebuild_indexes_only_selected_source_and_skips_unchanged(tmp_path):
     assert len(search_rows) == sum(row["chunk_kind"] == "child" for row in rows)
 
 
+def test_v2_source_set_listing_counts_documents_without_chunk_join_duplication(tmp_path):
+    initialize_database()
+    _add_source(
+        tmp_path,
+        source_name="LaTeX工作室",
+        title="第一篇",
+        markdown="# 第一篇\n\n第一篇有可切分的正文。",
+    )
+    _add_source(
+        tmp_path,
+        source_name="LaTeX工作室",
+        title="第二篇",
+        markdown="# 第二篇\n\n第二篇也有可切分的正文。",
+    )
+
+    rebuild_documents(source_documents(source_specs=[("wechat", "LaTeX工作室")]))
+    source_set = next(item for item in list_source_sets() if item["name"] == "LaTeX工作室")
+
+    assert source_set["document_count"] == 2
+    assert source_set["ready_document_count"] == 2
+    assert source_set["child_chunk_count"] >= 2
+    assert source_set["embedded_child_count"] == 0
+    assert not source_set["selectable"]
+
+
 def test_v2_retrieval_filters_scope_before_hybrid_ranking(tmp_path, monkeypatch):
     initialize_database()
     selected_id = _add_source(

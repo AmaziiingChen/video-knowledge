@@ -249,17 +249,32 @@ def _fetch_wechat_article_direct(
         if "timeout" in str(exc).lower() or "timed out" in str(exc).lower():
             raise ValueError("微信公众号正文抓取超时，请稍后重试，或确认链接能在浏览器中打开") from exc
         raise ValueError("微信公众号正文抓取失败，请检查网络连接或稍后重试") from exc
-    html = response.text or ""
-    _raise_for_wechat_intercept(html)
-    soup = BeautifulSoup(html, "lxml")
+    return parse_wechat_article_html(
+        url,
+        response.text or "",
+        content_item_id=content_item_id,
+        include_image_ocr=include_image_ocr,
+    )
+
+
+def parse_wechat_article_html(
+    url: str,
+    page_html: str,
+    *,
+    content_item_id: str | None = None,
+    include_image_ocr: bool = True,
+) -> ArticleFetchResult:
+    """Extract a WeChat article from an already-downloaded public page."""
+    _raise_for_wechat_intercept(page_html)
+    soup = BeautifulSoup(page_html, "lxml")
 
     title = _text(soup.select_one("h1.rich_media_title")) or _meta(soup, "og:title")
     author = _text(soup.select_one("#js_name")) or _meta(soup, "author")
-    published_at = _wechat_publish_time(html, soup)
+    published_at = _wechat_publish_time(page_html, soup)
 
     content = soup.select_one("div.rich_media_content#js_content") or soup.select_one("#js_content")
     if not content:
-        content, share_title, share_author = _wechat_share_page_content(html)
+        content, share_title, share_author = _wechat_share_page_content(page_html)
         title = title or share_title
         author = author or share_author
     if not content:

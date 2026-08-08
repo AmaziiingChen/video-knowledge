@@ -69,9 +69,20 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import rawTestReport from 'virtual:knowledgehub-test-report'
 import ReportOutlineRail from '../workbench/ReportOutlineRail.vue'
 import { renderMarkdown, stripReportMarkdownHeader } from '../utils/viewFormatters.js'
+
+const DEMO_REPORT_MARKDOWN = `# 知识简报示例
+
+## 公开报告说明
+
+这是一个不含个人资料、账号信息或原始内容的示例页面。实际公开报告仅在发布者主动导出并确认后生成。
+
+## 阅读建议
+
+- 使用“历史档案”查看已发布的报告。
+- 打印前请核对报告中的来源和引用范围。
+- 需要分享原始资料时，请先移除不应公开的个人信息。`
 
 const reader = ref(null)
 const reportContent = ref(null)
@@ -88,7 +99,7 @@ const reportData = ref({
   sourceCount: 118,
   citedSourceCount: 117,
   sectionCount: 9,
-  markdown: rawTestReport,
+  markdown: DEMO_REPORT_MARKDOWN,
 })
 const archiveHref = computed(() => (isHostedReport ? '../../archive.html' : './archive.html'))
 const reportMarkdown = computed(() => stripReportMarkdownHeader(reportData.value.markdown || ''))

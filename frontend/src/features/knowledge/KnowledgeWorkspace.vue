@@ -100,14 +100,15 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowUp } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
-import newChatIcon from '../../../assets/ellipsis.bubble.svg'
-import exportIcon from '../../../assets/arrow.down.document.svg'
-import sendIcon from '../../../assets/custom.paperplane.fill.svg'
+const newChatIcon = 'ellipsis.bubble'
+const exportIcon = 'arrow.down.document'
+const sendIcon = 'custom.paperplane.fill'
 import { useMarkdownFootnoteNavigation } from '../../composables/useMarkdownFootnoteNavigation'
 import { renderMarkdown } from '../../utils/viewFormatters'
+import { localApiAuthHeaders, localApiRequestUrl } from '../../utils/localApiAuth.js'
 import { createQaStreamRenderer } from '../assistant/qaStreamRenderer'
 import { knowledgeAnswerMarkdown } from './knowledgeAnswerMarkdown'
 
@@ -148,21 +149,6 @@ const {
   scrollRoot: conversationRoot,
   scopeKey: () => activeConversationId.value,
 })
-
-onMounted(async () => {
-  await load()
-})
-
-async function load() {
-  try {
-    const response = await fetch(`${API}/knowledge/v2/source-sets`)
-    if (!response.ok) throw Error('无法读取知识库状态')
-    const data = await response.json()
-  } catch (error) {
-    notice.value = { kind: 'error', text: error.message || '无法读取知识库状态' }
-  }
-}
-
 
 async function openConversation(conversationId) {
   if (asking.value || conversationId === activeConversationId.value) return
@@ -208,9 +194,9 @@ async function ask() {
   asking.value = true
   resumeConversationAutoFollow()
   try {
-    const response = await fetch(`${API}/knowledge/v2/query/stream`, {
+    const response = await fetch(localApiRequestUrl(`${API}/knowledge/v2/query/stream`), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         question: item.question,
         sources: selectedSources.value.slice(0, 1).map(({ provider, name }) => ({ provider, name })),

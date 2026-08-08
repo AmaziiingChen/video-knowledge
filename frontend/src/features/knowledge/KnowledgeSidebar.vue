@@ -39,7 +39,8 @@
             <p v-else-if="!sourceDocuments(source).length" class="knowledge-sidebar-empty">没有可展示的已索引文章。</p>
           </template>
         </template>
-        <p v-if="!readySourceSets.length" class="knowledge-sidebar-empty">还没有完成索引的知识集。</p>
+        <p v-if="isLoadingSourceSets" class="knowledge-sidebar-loading">正在读取可问答知识集…</p>
+        <p v-else-if="!readySourceSets.length" class="knowledge-sidebar-empty">还没有完成索引的知识集。</p>
       </template>
 
       <SidebarTreeRow kind="folder" label="对话记录" :meta="String(conversations.length)" :open="conversationsOpen" tone="strong" @activate="conversationsOpen = !conversationsOpen" />
@@ -54,7 +55,8 @@
           :active="activeConversationId === conversation.id"
           @activate="emit('open-conversation', conversation.id)"
         />
-        <p v-if="!conversations.length" class="knowledge-sidebar-empty">还没有保存的知识库对话。</p>
+        <p v-if="isLoadingConversations" class="knowledge-sidebar-loading">正在读取对话记录…</p>
+        <p v-else-if="!conversations.length" class="knowledge-sidebar-empty">还没有保存的知识库对话。</p>
       </template>
     </div>
   </aside>
@@ -66,29 +68,84 @@ import SidebarTreeRow from '../../workbench/SidebarTreeRow.vue'
 import { libraryContentIcon } from '../../utils/contentIcons'
 
 const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
+const SIDEBAR_CACHE_MAX_AGE_MS = 30_000
+
+// The sidebar is intentionally re-created with the knowledge workspace today.
+// Keep only the compact root metadata here, so returning to the workspace does
+// not blank the tree while its background revalidation runs.
+const sourceSetCache = { items: [], loadedAt: 0, request: null }
+const conversationCache = { items: [], loadedAt: 0, request: null }
+
 const props = defineProps({ activeConversationId: { type: String, default: '' }, selectedSources: { type: Array, default: () => [] } })
 const emit = defineEmits(['open-conversation', 'select-scope'])
-const sourceSets = ref([])
-const conversations = ref([])
+const sourceSets = ref([...sourceSetCache.items])
+const conversations = ref([...conversationCache.items])
 const setsOpen = ref(true)
 const conversationsOpen = ref(true)
 const expandedSourceIds = ref(new Set())
 const documentsBySource = ref({})
 const loadingSourceIds = ref(new Set())
+const isLoadingSourceSets = ref(!sourceSetCache.loadedAt)
+const isLoadingConversations = ref(!conversationCache.loadedAt)
 const selectedScope = computed(() => props.selectedSources[0] || null)
 const readySourceSets = computed(() => sourceSets.value.filter((source) => source.selectable))
 
-onMounted(refresh)
+onMounted(() => {
+  // Do not await: cached rows render immediately, while a first visit gets a
+  // truthful compact loading row instead of an empty-tree flash.
+  void refresh()
+})
 
-async function refresh() {
-  const [setsResponse, conversationsResponse] = await Promise.all([
-    fetch(`${API}/knowledge/v2/source-sets`),
-    fetch(`${API}/knowledge/conversations`),
-  ])
-  if (setsResponse.ok) sourceSets.value = (await setsResponse.json()).items || []
-  if (conversationsResponse.ok) {
-    conversations.value = ((await conversationsResponse.json()).items || []).filter((item) => item.scope?.version === 'v2')
+async function refresh({ force = false, sourceSets: includeSourceSets = true, conversations: includeConversations = true } = {}) {
+  const now = Date.now()
+  const requests = []
+  if (includeSourceSets && (force || !isFresh(sourceSetCache, now))) requests.push(refreshSourceSets())
+  if (includeConversations && (force || !isFresh(conversationCache, now))) requests.push(refreshConversations())
+  await Promise.all(requests)
+  applyCachedRows()
+}
+
+async function refreshConversations() {
+  if (!conversationCache.request) {
+    conversationCache.request = fetch(`${API}/knowledge/conversations`)
+      .then(async (response) => {
+        if (!response.ok) throw Error('无法读取知识库对话')
+        const payload = await response.json()
+        conversationCache.items = ((payload.items || []).filter((item) => item.scope?.version === 'v2'))
+        conversationCache.loadedAt = Date.now()
+      })
+      .catch(() => {})
+      .finally(() => { conversationCache.request = null })
   }
+  isLoadingConversations.value = !conversationCache.loadedAt
+  await conversationCache.request
+  isLoadingConversations.value = false
+}
+
+async function refreshSourceSets() {
+  if (!sourceSetCache.request) {
+    sourceSetCache.request = fetch(`${API}/knowledge/v2/source-sets`)
+      .then(async (response) => {
+        if (!response.ok) throw Error('无法读取知识集')
+        const payload = await response.json()
+        sourceSetCache.items = payload.items || []
+        sourceSetCache.loadedAt = Date.now()
+      })
+      .catch(() => {})
+      .finally(() => { sourceSetCache.request = null })
+  }
+  isLoadingSourceSets.value = !sourceSetCache.loadedAt
+  await sourceSetCache.request
+  isLoadingSourceSets.value = false
+}
+
+function isFresh(cache, now) {
+  return cache.loadedAt > 0 && now - cache.loadedAt < SIDEBAR_CACHE_MAX_AGE_MS
+}
+
+function applyCachedRows() {
+  sourceSets.value = [...sourceSetCache.items]
+  conversations.value = [...conversationCache.items]
 }
 
 function sourceMeta(source) {
@@ -212,7 +269,7 @@ function formatDocumentDate(value) {
   return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date)
 }
 
-defineExpose({ refresh })
+defineExpose({ refresh, refreshConversations: () => refresh({ force: true, sourceSets: false }) })
 </script>
 
 <style scoped>

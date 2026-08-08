@@ -41,7 +41,13 @@ def test_preview_douyin_profile_uses_bundled_browser_reader(monkeypatch):
 
     assert preview == expected
     assert calls == [
-        {"source_url": expected.source_url, "creator_key": "MS4wLjABAAATest", "limit": 20, "cutoff": None}
+        {
+            "source_url": expected.source_url,
+            "creator_key": "MS4wLjABAAATest",
+            "limit": 20,
+            "cutoff": None,
+            "known_item_ids": None,
+        }
     ]
 
 

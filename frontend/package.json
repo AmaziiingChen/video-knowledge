@@ -1,7 +1,7 @@
 {
-  "name": "frontend",
+  "name": "knowledgehub-desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -14,11 +14,9 @@
     "desktop": "npm run build && npm run desktop:launch",
     "desktop:launch": "bash ../scripts/prepare_electron_macos.sh && electron electron/main.cjs",
     "desktop:backend": "python ../scripts/build_desktop_backend.py --target macos",
-    "desktop:backend:mac": "python ../scripts/build_desktop_backend.py --target macos",
-    "desktop:backend:win": "python ../scripts/build_desktop_backend.py --target windows",
+    "desktop:backend:mac": "python ../scripts/build_desktop_backend.py --target macos --bundle-local-asr-model",
     "desktop:package": "npm run desktop:package:mac",
-    "desktop:package:mac": "npm run build && npm run desktop:backend:mac && electron-builder --mac dmg --arm64",
-    "desktop:package:win": "npm run build && npm run desktop:backend:win && electron-builder --win nsis --x64"
+    "desktop:package:mac": "npm run build && npm run desktop:backend:mac && electron-builder --mac dmg --arm64"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
@@ -35,7 +33,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.7",
-    "electron": "42.5.0",
+    "electron": "42.8.1",
     "electron-builder": "^26.15.3",
     "vite": "^8.1.1"
   },
@@ -60,22 +58,6 @@
         "dmg"
       ],
       "artifactName": "KnowledgeHub-${version}-${arch}.${ext}"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "KnowledgeHub-${version}-win-${arch}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true
     }
   }
 }

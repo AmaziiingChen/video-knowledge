@@ -42,6 +42,16 @@ let player = null
 let posterObjectUrl = ''
 let playerLoadVersion = 0
 
+function playbackSnapshot() {
+  const video = player?.template?.$video || player?.video
+  if (!video || !Number.isFinite(Number(player?.currentTime))) return null
+  return {
+    src: props.src,
+    currentTime: Math.max(0, Number(player.currentTime || 0)),
+    wasPlaying: !video.paused && !video.ended,
+  }
+}
+
 function buildPlugins() {
   if (!props.thumbnailVttUrl) return []
   return [
@@ -147,7 +157,7 @@ function backendUrl(value) {
   return new URL(url, props.src).href
 }
 
-async function createPlayer() {
+async function createPlayer(restorePlayback = null) {
   if (!containerRef.value || !props.src) return
   const loadVersion = ++playerLoadVersion
   destroyPlayer()
@@ -189,6 +199,14 @@ async function createPlayer() {
   })
   player.on('video:loadedmetadata', () => {
     playerState.value = 'ready'
+    if (restorePlayback?.src === props.src) {
+      const duration = Number(player.duration)
+      const target = Number.isFinite(duration) && duration > 0
+        ? Math.min(restorePlayback.currentTime, Math.max(0, duration - 0.05))
+        : restorePlayback.currentTime
+      player.currentTime = target
+      if (restorePlayback.wasPlaying) player.play?.().catch?.(() => {})
+    }
     emit('time-update', player?.currentTime || 0)
   })
   player.on('video:loadeddata', renderBackdrop)
@@ -251,19 +269,18 @@ function renderBackdrop() {
 }
 
 function destroyPlayer() {
-  const hadPlayer = Boolean(player)
   player?.destroy(true)
   player = null
   if (posterObjectUrl) {
     URL.revokeObjectURL(posterObjectUrl)
     posterObjectUrl = ''
   }
-  if (hadPlayer) emit('time-update', 0)
 }
 
 async function refreshPlayer() {
+  const restorePlayback = playbackSnapshot()
   await nextTick()
-  createPlayer()
+  createPlayer(restorePlayback)
 }
 
 function seek(seconds) {
@@ -284,7 +301,10 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.src, props.poster, props.thumbnailVttUrl],
+  // Thumbnail metadata arrives after the media is already playable. It is a
+  // hover enhancement, not a media-source change, so it must never reset a
+  // video that the reader is currently watching.
+  () => [props.src, props.poster],
   refreshPlayer
 )
 </script>

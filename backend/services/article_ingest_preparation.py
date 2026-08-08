@@ -7,7 +7,6 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 import logging
 from threading import Lock
-from time import monotonic, sleep
 
 from services.content_source_text import (
     load_content_source_text,
@@ -17,6 +16,7 @@ from services.cache import cache_dir_for_url, read_cache_meta
 from services.database import connect, initialize_database
 from services.paddle_ocr import is_paddle_ocr_configured
 from services.repository import ContentRepository
+from services.wechat_browser import next_wechat_public_request_in_seconds
 
 
 logger = logging.getLogger(__name__)
@@ -25,14 +25,11 @@ logger = logging.getLogger(__name__)
 # global image-level cap in paddle_ocr, so article-level workers can wait for it
 # without preventing unrelated webpages from entering the local cache.
 _WEB_CAPTURE_WORKERS = 8
-_WECHAT_CAPTURE_WORKERS = 2
+_WECHAT_CAPTURE_WORKERS = 1
 _OCR_WORKERS = 4
-_WECHAT_CAPTURE_INTERVAL_SECONDS = 0.4
 _web_capture_executor = ThreadPoolExecutor(max_workers=_WEB_CAPTURE_WORKERS, thread_name_prefix="article-web-capture")
 _wechat_capture_executor = ThreadPoolExecutor(max_workers=_WECHAT_CAPTURE_WORKERS, thread_name_prefix="article-wechat-capture")
 _ocr_executor = ThreadPoolExecutor(max_workers=_OCR_WORKERS, thread_name_prefix="article-ocr-enrich")
-_wechat_rate_lock = Lock()
-_next_wechat_capture_at = 0.0
 
 _pending_ids: set[str] = set()
 _web_capture_queued_ids: deque[str] = deque()
@@ -83,8 +80,6 @@ def _capture(content_item_id: str, *, is_wechat: bool) -> None:
         if not _preparation_is_still_required(content_item_id):
             _finish(content_item_id, succeeded=True)
             return
-        if is_wechat:
-            _wait_for_wechat_capture_window()
         load_content_source_text(content_item_id, include_image_ocr=False)
     except Exception:
         _finish(content_item_id, succeeded=False)
@@ -170,16 +165,6 @@ def _is_wechat_article(content_item_id: str) -> bool:
         # If its metadata disappears concurrently, the following capture will
         # report the ordinary per-item failure without blocking the queue.
         return False
-
-
-def _wait_for_wechat_capture_window() -> None:
-    global _next_wechat_capture_at
-    with _wechat_rate_lock:
-        now = monotonic()
-        wait_seconds = max(0.0, _next_wechat_capture_at - now)
-        _next_wechat_capture_at = max(now, _next_wechat_capture_at) + _WECHAT_CAPTURE_INTERVAL_SECONDS
-    if wait_seconds:
-        sleep(wait_seconds)
 
 
 def _discard(queue: deque[str], content_item_id: str) -> None:
@@ -334,13 +319,8 @@ def article_source_preparation_status() -> dict[str, int | str | float]:
             "ocr_queued_count": ocr_queued,
             "completed_count": _completed_count,
             "failed_count": _failed_count,
-            "next_wechat_slot_in_seconds": _next_wechat_slot_in_seconds(),
+            "next_wechat_slot_in_seconds": next_wechat_public_request_in_seconds(),
         }
-
-
-def _next_wechat_slot_in_seconds() -> float:
-    with _wechat_rate_lock:
-        return round(max(0.0, _next_wechat_capture_at - monotonic()), 1)
 
 
 def enqueue_pending_article_preparation(*, limit: int = 1000) -> int:

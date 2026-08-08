@@ -28,7 +28,10 @@
 .reports-schedule-toggle { width: var(--vk-control-height-compact); min-width: var(--vk-control-height-compact); padding: 0; color: var(--vk-muted); border-color: transparent; background: transparent; }
 .reports-schedule-toggle:hover,.reports-schedule-toggle:focus-visible { color: var(--vk-accent-strong); background: color-mix(in srgb, var(--vk-accent) 8%, var(--vk-bg-panel)); }
 .reports-schedule-toggle.is-enabled { color: var(--vk-accent-strong); background: color-mix(in srgb, var(--vk-accent) 12%, var(--vk-bg-panel)); }
-.reports-schedule-clock { display: block; width: 15px; height: 15px; background: currentColor; -webkit-mask: url('../../assets/clock.svg') center / contain no-repeat; mask: url('../../assets/clock.svg') center / contain no-repeat; }
+.reports-schedule-clock { display: block; box-sizing: border-box; width: 15px; height: 15px; border: 1.5px solid currentColor; border-radius: 50%; position: relative; }
+.reports-schedule-clock::before, .reports-schedule-clock::after { content: ''; position: absolute; display: block; width: 1.5px; background: currentColor; border-radius: 1px; transform-origin: center bottom; left: 5.5px; bottom: 6px; }
+.reports-schedule-clock::before { height: 4px; transform: rotate(-38deg); }
+.reports-schedule-clock::after { height: 3px; transform: rotate(58deg); }
 .reports-schedule-display { min-width: 108px; height: var(--vk-control-height-compact); padding: 0 10px; border: 1px solid var(--vk-border); border-radius: var(--vk-radius-control); background: var(--vk-bg-quiet); color: var(--vk-muted); font: inherit; font-size: var(--vk-type-meta-size); white-space: nowrap; cursor: pointer; }
 .reports-schedule-display:hover,.reports-schedule-display:focus-visible { color: var(--vk-text); border-color: color-mix(in srgb, var(--vk-accent) 38%, var(--vk-border)); background: color-mix(in srgb, var(--vk-accent) 7%, var(--vk-bg-panel)); outline: none; }
 .reports-schedule-display.is-enabled { color: var(--vk-accent-strong); border-color: color-mix(in srgb, var(--vk-accent) 42%, var(--vk-border)); background: color-mix(in srgb, var(--vk-accent) 10%, var(--vk-bg-panel)); }

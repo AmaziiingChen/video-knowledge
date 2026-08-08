@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('knowledgeHubDesktop', {
   revealPath: (path) => ipcRenderer.invoke('knowledgehub:reveal-path', path),
   openPath: (path) => ipcRenderer.invoke('knowledgehub:open-path', path),
   openExternal: (url) => ipcRenderer.invoke('knowledgehub:open-external', url),
+  backendAccessToken: () => ipcRenderer.invoke('knowledgehub:backend-access-token'),
   waitForBackend: () => ipcRenderer.invoke('knowledgehub:wait-for-backend'),
   setPendingNotifications: (items) => ipcRenderer.invoke('knowledgehub:set-pending-notifications', items),
   campusAuthStatus: () => ipcRenderer.invoke('knowledgehub:campus-auth-status'),

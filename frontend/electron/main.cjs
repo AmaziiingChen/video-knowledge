@@ -195,20 +195,33 @@ function registerLocalAppProtocol() {
   })
 }
 
-ipcMain.handle('knowledgehub:choose-directory', async () => {
+function isTrustedDesktopRenderer(event) {
+  if (!mainWindow || mainWindow.isDestroyed() || event?.sender !== mainWindow.webContents) return false
+  const frameUrl = String(event?.senderFrame?.url || event.sender.getURL() || '')
+  return frameUrl === APP_ORIGIN || frameUrl.startsWith(`${APP_ORIGIN}/`)
+}
+
+function trustedIpcHandler(handler) {
+  return (event, ...args) => {
+    if (!isTrustedDesktopRenderer(event)) throw new Error('未授权的桌面渲染进程')
+    return handler(...args)
+  }
+}
+
+ipcMain.handle('knowledgehub:choose-directory', trustedIpcHandler(async () => {
   const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] })
   return result.canceled ? '' : (result.filePaths[0] || '')
-})
+}))
 
-ipcMain.handle('knowledgehub:choose-executable', async (_event, toolName = '') => {
+ipcMain.handle('knowledgehub:choose-executable', trustedIpcHandler(async (toolName = '') => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: toolName ? `选择 ${toolName} 可执行文件` : '选择可执行文件',
     properties: ['openFile'],
   })
   return result.canceled ? '' : (result.filePaths[0] || '')
-})
+}))
 
-ipcMain.handle('knowledgehub:export-markdown', async (_event, payload = {}) => {
+ipcMain.handle('knowledgehub:export-markdown', trustedIpcHandler(async (payload = {}) => {
   const runtime = backendRuntime()
   const request = payload && typeof payload === 'object' ? payload : {}
   return exportMarkdownDocument({
@@ -216,25 +229,25 @@ ipcMain.handle('knowledgehub:export-markdown', async (_event, payload = {}) => {
     title: request.title,
     markdown: request.markdown,
   })
-})
+}))
 
-ipcMain.handle('knowledgehub:copy-text', (_event, value) => {
+ipcMain.handle('knowledgehub:copy-text', trustedIpcHandler((value) => {
   const text = typeof value === 'string' ? value : ''
   if (!text.trim()) throw new Error('没有可复制的内容')
   clipboard.writeText(text)
   return true
-})
+}))
 
-ipcMain.handle('knowledgehub:reveal-path', (_event, value) => {
+ipcMain.handle('knowledgehub:reveal-path', trustedIpcHandler((value) => {
   const requestedPath = typeof value === 'string' ? value.trim() : ''
   if (!requestedPath) throw new Error('没有可打开的位置')
   const targetPath = path.resolve(requestedPath)
   if (!fs.existsSync(targetPath)) throw new Error('文件或文件夹不存在')
   shell.showItemInFolder(targetPath)
   return true
-})
+}))
 
-ipcMain.handle('knowledgehub:open-path', async (_event, value) => {
+ipcMain.handle('knowledgehub:open-path', trustedIpcHandler(async (value) => {
   const requestedPath = typeof value === 'string' ? value.trim() : ''
   if (!requestedPath) throw new Error('没有可打开的文件')
   const targetPath = path.resolve(requestedPath)
@@ -242,14 +255,17 @@ ipcMain.handle('knowledgehub:open-path', async (_event, value) => {
   const error = await shell.openPath(targetPath)
   if (error) throw new Error(error)
   return true
-})
+}))
 
-ipcMain.handle('knowledgehub:open-external', async (_event, url = '') => openExternalUrl(url))
-ipcMain.handle('knowledgehub:wait-for-backend', () => {
+ipcMain.handle('knowledgehub:open-external', trustedIpcHandler(async (url = '') => openExternalUrl(url)))
+ipcMain.handle('knowledgehub:backend-access-token', trustedIpcHandler(() => {
+  return BACKEND_INSTANCE_TOKEN
+}))
+ipcMain.handle('knowledgehub:wait-for-backend', trustedIpcHandler(() => {
   if (backendReady) return true
   return new Promise((resolve) => backendReadyWaiters.push(resolve))
-})
-ipcMain.handle('knowledgehub:set-pending-notifications', (_event, items = []) => {
+}))
+ipcMain.handle('knowledgehub:set-pending-notifications', trustedIpcHandler((items = []) => {
   pendingNotifications = Array.isArray(items)
     ? items.slice(0, 100).map((item) => ({
       id: String(item?.id || ''), title: String(item?.title || '').slice(0, 240),
@@ -259,22 +275,22 @@ ipcMain.handle('knowledgehub:set-pending-notifications', (_event, items = []) =>
     : []
   updateNotificationTray()
   return true
-})
+}))
 
-ipcMain.handle('knowledgehub:campus-auth-status', async () => campusWebVpn.status())
+ipcMain.handle('knowledgehub:campus-auth-status', trustedIpcHandler(async () => campusWebVpn.status()))
 
-ipcMain.handle('knowledgehub:campus-connect', async () => campusWebVpn.connect(mainWindow))
+ipcMain.handle('knowledgehub:campus-connect', trustedIpcHandler(async () => campusWebVpn.connect(mainWindow)))
 
-ipcMain.handle('knowledgehub:campus-disconnect', async () => campusWebVpn.disconnect())
+ipcMain.handle('knowledgehub:campus-disconnect', trustedIpcHandler(async () => campusWebVpn.disconnect()))
 
-ipcMain.handle('knowledgehub:campus-sync-gwt', async (_event, request = 20) => campusWebVpn.sync(request))
-ipcMain.handle('knowledgehub:campus-download-attachment', async (_event, payload = {}) => {
+ipcMain.handle('knowledgehub:campus-sync-gwt', trustedIpcHandler(async (request = 20) => campusWebVpn.sync(request)))
+ipcMain.handle('knowledgehub:campus-download-attachment', trustedIpcHandler(async (payload = {}) => {
   const request = payload && typeof payload === 'object' ? payload : {}
   return campusWebVpn.downloadAttachment(request.url, request.name)
-})
+}))
 
-ipcMain.handle('knowledgehub:platform-auth-connect', async (_event, platform) => platformAuth.connect(platform, mainWindow))
-ipcMain.handle('knowledgehub:platform-auth-disconnect', async (_event, platform) => platformAuth.disconnect(platform))
+ipcMain.handle('knowledgehub:platform-auth-connect', trustedIpcHandler(async (platform) => platformAuth.connect(platform, mainWindow)))
+ipcMain.handle('knowledgehub:platform-auth-disconnect', trustedIpcHandler(async (platform) => platformAuth.disconnect(platform)))
 
 function waitForHealth(url, timeoutMs = 45000) {
   const started = Date.now()
@@ -298,7 +314,10 @@ function waitForHealth(url, timeoutMs = 45000) {
 
 function inspectBackendHealth(url) {
   return new Promise((resolve) => {
-    const request = http.get(url, { timeout: 1200 }, (response) => {
+    const request = http.get(url, {
+      timeout: 1200,
+      headers: { 'X-KnowledgeHub-Token': BACKEND_INSTANCE_TOKEN },
+    }, (response) => {
       let body = ''
       response.setEncoding('utf8')
       response.on('data', (chunk) => {
@@ -342,10 +361,20 @@ function pickPython() {
 function backendRuntime() {
   if (!app.isPackaged) {
     const dataDir = path.join(ROOT_DIR, 'data')
+    const args = ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000']
+    // The Finder launcher is used as a local, long-running application. A
+    // uvicorn reloader tears down its HTTP worker on every saved backend file,
+    // then waits for any active download/transcription/AI worker to finish.
+    // That leaves port 8000 occupied but unable to answer /api/health, so a
+    // second launch misleadingly reports a startup timeout. Keep this normal
+    // launcher stable; developers can explicitly opt in to hot reload.
+    if (process.env.KNOWLEDGEHUB_SOURCE_RELOAD === '1') {
+      args.push('--reload', '--reload-dir', path.join(ROOT_DIR, 'backend'))
+    }
     return {
       cwd: path.join(ROOT_DIR, 'backend'),
       command: pickPython(),
-      args: ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000', '--reload', '--reload-dir', path.join(ROOT_DIR, 'backend')],
+      args,
       dataDir,
       envFile: path.join(ROOT_DIR, 'backend', '.env'),
       logDir: path.join(dataDir, 'logs'),

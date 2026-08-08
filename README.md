@@ -1,8 +1,10 @@
 # Video Knowledge
 
-一个 macOS 优先、数据留在本机的内容分析与知识沉淀工作台。它处理 Bilibili、抖音、微信公众号文章和校园官网内容，将内容转成可检索的文本、AI 总结和 Markdown 草稿，并可同步到 Obsidian。
+一个仅面向 macOS（Apple Silicon）、数据留在本机的内容分析与知识沉淀工作台。它处理 Bilibili、抖音、微信公众号文章和校园官网内容，将内容转成可检索的文本、AI 总结和 Markdown 草稿，并可同步到 Obsidian。
 
-> 当前项目面向个人本机使用，尚未提供可分发的桌面安装包。
+> 当前公开版本仅支持 macOS；Windows 和 Linux 尚未进入支持范围。
+
+在提交 issue、发布 fork 或打包前，请先阅读 [隐私与数据处理](PRIVACY.md)、[安全策略](SECURITY.md)、[第三方声明](THIRD_PARTY_NOTICES.md) 和 [贡献指南](CONTRIBUTING.md)。本项目采用 [MIT License](LICENSE)。
 
 ## 能做什么
 
@@ -58,13 +60,13 @@ python -m pip install -r requirements.txt
 python -m playwright install chromium
 
 cd frontend
-npm install
+npm ci
 cd ..
 ```
 
 ### 2. 配置
 
-在 `backend/.env` 中至少配置一个可用的 DeepSeek Key：
+复制 [backend/.env.example](backend/.env.example) 为 `backend/.env` 后，至少配置一个可用的 DeepSeek Key：
 
 ```dotenv
 DEEPSEEK_API_KEY=你的_API_Key
@@ -105,7 +107,7 @@ MINIPROGRAM_FORUM_CAPTURE_ENABLED=false
 
 ```
 
-完整配置项及默认值见 [backend/config.py](/Users/chen/AmazingWork/Tools/video-knowledge/backend/config.py)。
+完整配置项及默认值见 [backend/config.py](backend/config.py)。
 
 抖音下载通常还需要 Cookie。可通过设置页配置，或将 Cookie 保存到 `data/douyin_cookies.txt`。Cookie 属于敏感信息，不应提交到版本控制。
 
@@ -142,7 +144,7 @@ macOS 也可直接双击：
 
 ### 补采平台互动与评论
 
-B站、抖音和小红书内容会在常规处理时保存可用的作者、发布时间、互动指标、话题与评论样本。对已有内容，可在内容页右上角的“内容操作”中选择“补采互动与评论”，任务会进入现有的本机持久化队列。
+B站和抖音内容会在常规处理时保存可用的作者、发布时间、互动指标、话题与评论样本。对已有内容，可在内容页右上角的“内容操作”中选择“补采互动与评论”，任务会进入现有的本机持久化队列。公开版暂不携带小红书采集组件，因为其原始第三方副本缺少可验证的授权文件；已保存的小红书资料仍可阅读。
 
 补采默认最多读取 3 页、保存 60 条评论，单条内容的硬上限为 120 条；平台提前结束时会记录完整性，否则明确标记为样本。总结、追问和自定义分析最多选取 24 条有代表性的评论，避免评论体量挤占正文。评论属于未经验证的辅助材料，不能覆盖视频正文或被当作模型指令。
 
@@ -215,7 +217,7 @@ B站、抖音和小红书内容会在常规处理时保存可用的作者、发�
 - 首次校外连接时，需要在登录窗口中从服务大厅打开一次公文通列表，应用据此记录 WebVPN 改写后的入口。会话过期后重新连接即可。
 - `POST /api/campus-sources/gwt/import-snapshot` 只接收桌面端在认证会话中取得的正文快照，不接收 Cookie 或统一认证凭据。
 
-同步内容进入“校园官网 / 来源名称”文件夹。正文会在打开文章、运行分析或提问时按需抓取并缓存。跨文章问答的演进方案见 [校园内容接入与 RAG 方案](/Users/chen/AmazingWork/Tools/video-knowledge/docs/campus-content-and-rag-plan.md)。
+同步内容进入“校园官网 / 来源名称”文件夹。正文会在打开文章、运行分析或提问时按需抓取并缓存。跨文章问答的演进方案见 [校园内容接入与 RAG 方案](docs/campus-content-and-rag-plan.md)。
 
 ### 微信小程序校园论坛
 
@@ -265,6 +267,12 @@ cd frontend
 npm run build
 ```
 
+公开发布前检查：
+
+```bash
+python scripts/check_public_release_tree.py
+```
+
 ## 常见问题
 
 | 现象 | 优先检查 |
@@ -279,6 +287,9 @@ npm run build
 ## 相关文档
 
 - [开发协作约定](AGENTS.md)
-- [产品开发计划](/Users/chen/AmazingWork/Tools/video-knowledge/docs/product-development-plan.md)
-- [界面参考与工作台规范](/Users/chen/AmazingWork/Tools/video-knowledge/docs/ui-reference-and-workbench-spec.md)
-- [校园内容接入与 RAG 方案](/Users/chen/AmazingWork/Tools/video-knowledge/docs/campus-content-and-rag-plan.md)
+- [隐私与数据处理](PRIVACY.md)
+- [安全策略](SECURITY.md)
+- [第三方声明](THIRD_PARTY_NOTICES.md)
+- [产品开发计划](docs/product-development-plan.md)
+- [界面参考与工作台规范](docs/ui-reference-and-workbench-spec.md)
+- [校园内容接入与 RAG 方案](docs/campus-content-and-rag-plan.md)

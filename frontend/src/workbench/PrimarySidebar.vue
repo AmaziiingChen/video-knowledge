@@ -1,32 +1,66 @@
 <template>
   <aside class="file-sidebar" :class="{ 'prompt-sidebar': activeView === 'prompts' }">
     <div v-if="activeView === 'library'" class="sidebar-tool-stack">
-      <div class="sidebar-section sidebar-search-row" @dragover.prevent @drop.prevent="importDroppedFiles">
-        <el-input
-          :model-value="searchQuery"
-          clearable
-          name="library-search"
-          autocomplete="off"
-          aria-label="搜索资料库内容"
-          placeholder="搜索标题、摘要或正文…"
-          @update:model-value="$emit('update:searchQuery', $event)"
-          @keyup.enter="$emit('search')"
-          @clear="$emit('clear-search')"
-        />
+      <input ref="markdownImportInput" class="sidebar-file-picker" type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,.docx,.mp4,.mov,.m4v,.mkv,.webm,.flv,.avi,.mp3,.m4a,.wav,.aac,.flac,.ogg,.opus,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,text/plain,text/markdown,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,video/*,audio/*,image/*" @change="importMarkdownFile" />
+
+      <div
+        v-if="libraryMode === 'files'"
+        class="sidebar-section sidebar-file-toolbar"
+        aria-label="文件树工具"
+        @dragover.prevent
+        @drop.prevent="importDroppedFiles"
+      >
         <el-tooltip content="新建文件夹" placement="bottom">
           <button class="sidebar-icon-button" type="button" aria-label="新建文件夹" @click="startNewFolder(null)">
-            <SvgMaskIcon :src="folderAddIcon" :size="16" />
+            <SvgMaskIcon :src="folderAddIcon" :size="24" />
           </button>
         </el-tooltip>
-        <input ref="markdownImportInput" class="sidebar-file-picker" type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,.docx,.mp4,.mov,.m4v,.mkv,.webm,.flv,.avi,.mp3,.m4a,.wav,.aac,.flac,.ogg,.opus,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,text/plain,text/markdown,text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,video/*,audio/*,image/*" @change="importMarkdownFile" />
         <el-tooltip content="导入本地资料" placement="bottom">
           <button class="sidebar-icon-button" type="button" aria-label="导入本地资料" @click="chooseMarkdownFile">
-            <SvgMaskIcon :src="markdownImportIcon" :size="16" />
+            <SvgMaskIcon :src="markdownImportIcon" :size="24" />
           </button>
         </el-tooltip>
       </div>
 
-      <div class="sidebar-section sidebar-tree-shell">
+      <section v-else class="sidebar-search-workspace" aria-label="资料搜索">
+        <label class="sidebar-search-input">
+          <SvgMaskIcon :src="magnifyingglassIcon" :size="17" />
+          <el-input
+            ref="librarySearchInput"
+            :model-value="searchQuery"
+            clearable
+            name="library-search"
+            autocomplete="off"
+            aria-label="搜索资料库内容"
+            placeholder="输入并开始搜索…"
+            @update:model-value="$emit('update:searchQuery', $event)"
+            @keyup.enter="$emit('search')"
+            @clear="$emit('clear-search')"
+          />
+          <span aria-hidden="true">Aa</span>
+        </label>
+        <div class="sidebar-search-options">
+          <div class="sidebar-search-options-heading">
+            <strong>搜索范围</strong>
+            <small>结果实时更新</small>
+          </div>
+          <button
+            v-for="option in searchScopeOptions"
+            :key="option.value"
+            type="button"
+            :class="{ active: searchScope === option.value }"
+            @click="$emit('update:search-scope', option.value)"
+          >
+            <strong>{{ option.label }}</strong>
+            <span>{{ option.description }}</span>
+          </button>
+        </div>
+      </section>
+
+      <div
+        class="sidebar-section sidebar-tree-shell"
+        :class="{ 'is-search-mode': libraryMode === 'search' }"
+      >
         <div
           ref="treeRef"
           class="sidebar-tree"
@@ -45,7 +79,7 @@
             </el-tooltip>
           </div>
         </Transition>
-        <template v-if="renderedLibraryNodes.length || editingNode?.isNew">
+        <template v-if="(libraryMode === 'files' || searchActive) && (renderedLibraryNodes.length || editingNode?.isNew)">
           <SidebarTreeRow
             v-if="editingNode?.isNew && editingNode.parentFolderId === null"
             kind="folder"
@@ -89,15 +123,15 @@
               :active="isContentNode(node) && selectedContentItem?.id === node.raw?.id"
               :selected="isNodeSelected(node)"
               :tone="node.type === 'pinned-root' ? 'medium' : 'normal'"
-              :unread="false"
-              :has-new-descendants="node.type === 'unread-root'"
-              :unread-count="node.type === 'unread-root' ? Number(node.unreadCount || 0) : 0"
+              :unread="Boolean(node.unread)"
+              :has-new-descendants="Boolean(node.hasNewDescendants)"
+              :unread-count="Number(node.unreadCount || 0)"
               :high-contrast-unread-count="node.type === 'unread-root'"
               :aria-label="nodeAriaLabel(node)"
               :open="isFolderNode(node) && isNodeOpen(node)"
               :editing="node.type === 'draft-folder' || isEditing(node)"
               :drop-position="isDropTarget(node, 'inside') ? 'inside' : isDropTarget(node, 'before') ? 'before' : isDropTarget(node, 'after') ? 'after' : ''"
-              :action-width="node.type === 'folder' ? 68 : node.type === 'unread-root' ? 28 : node.type === 'content' ? 44 : 0"
+              :action-width="node.type === 'folder' ? 68 : node.type === 'unread-root' ? 28 : isContentNode(node) ? 44 : 0"
               :draggable="(isMutableLibraryNode(node) || node.type === 'user-group-separator') && !searchActive"
               :interactive="node.type === 'user-group-separator'"
               @activate="activateNode($event, node)"
@@ -125,11 +159,11 @@
               </template>
 
               <template v-if="isMutableLibraryNode(node) || node.type === 'unread-root'" #actions>
-                  <el-tooltip v-if="node.type === 'unread-root'" content="全部标记为已查看" placement="top">
-                    <button class="sidebar-tree-action" type="button" aria-label="全部标记为已查看" @click.stop="markAllUnreadViewed">
-                      <el-icon><CircleCheck /></el-icon>
-                    </button>
-                  </el-tooltip>
+                <el-tooltip v-if="node.type === 'unread-root'" content="全部标记为已读" placement="top">
+                  <button class="sidebar-tree-action" type="button" aria-label="全部标记为已读" @click.stop="markAllUnreadViewed">
+                    <el-icon><CircleCheck /></el-icon>
+                  </button>
+                </el-tooltip>
                 <template v-if="isMutableLibraryNode(node)">
                   <el-tooltip v-if="node.type === 'folder'" content="新建文件夹" placement="top">
                     <button class="sidebar-tree-action" type="button" aria-label="新建子文件夹" @click.stop="startNewFolder(node.id)">
@@ -141,8 +175,8 @@
                       <SvgMaskIcon :src="highlighterIcon" :size="14" />
                     </button>
                   </el-tooltip>
-                  <el-tooltip v-if="node.type === 'folder' && node.hasNewDescendants" content="将文件夹内全部内容标记为已查看" placement="top">
-                    <button class="sidebar-tree-action" type="button" aria-label="将文件夹内全部内容标记为已查看" @click.stop="markFolderViewed(node)">
+                  <el-tooltip v-if="node.type === 'folder' && node.hasNewDescendants" content="将文件夹内全部内容标记为已读" placement="top">
+                    <button class="sidebar-tree-action" type="button" aria-label="将文件夹内全部内容标记为已读" @click.stop="markFolderViewed(node)">
                       <el-icon><CircleCheck /></el-icon>
                     </button>
                   </el-tooltip>
@@ -157,7 +191,9 @@
           </TransitionGroup>
           </div>
         </template>
-        <div v-else class="sidebar-empty">{{ searchActive ? '未找到匹配内容' : '空' }}</div>
+        <div v-else class="sidebar-empty">
+          {{ libraryMode === 'search' && !searchActive ? '输入关键词开始搜索' : searchActive ? '未找到匹配内容' : '空' }}
+        </div>
           <div
             v-if="selectionBox"
             class="sidebar-selection-box"
@@ -179,7 +215,7 @@
           </div>
         </div>
 
-        <section class="sidebar-trash" :class="{ open: trashOpen }">
+        <section v-if="libraryMode === 'files'" class="sidebar-trash" :class="{ open: trashOpen }">
           <button class="sidebar-trash-toggle" type="button" @click="toggleTrash">
             <SvgMaskIcon :src="trashIcon" :size="14" />
             <span>回收站</span>
@@ -203,7 +239,7 @@
         </section>
       </div>
 
-      <section class="sidebar-section sidebar-link-dock">
+      <section v-if="libraryMode === 'files'" class="sidebar-section sidebar-link-dock">
         <div class="sidebar-process-input">
           <el-input
             :model-value="shareText"
@@ -211,7 +247,7 @@
             name="source-link"
             autocomplete="off"
             aria-label="粘贴待处理链接"
-            :rows="2"
+            :autosize="{ minRows: 1, maxRows: 6 }"
             resize="none"
             placeholder="粘贴链接…"
             @update:model-value="$emit('update:shareText', $event)"
@@ -333,16 +369,17 @@ import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import PromptFileTree from './PromptFileTree.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 import { requestDestructiveConfirmation } from '../composables/useDestructiveConfirm'
-import sendIcon from '../../assets/arrow.up.circle.fill.svg'
-import folderIcon from '../../assets/folder.svg'
-import highlighterIcon from '../../assets/highlighter.svg'
-import trashIcon from '../../assets/trash.svg'
-import folderPinIcon from '../../assets/arrow.up.to.line.svg'
-import finderIcon from '../../assets/finder.svg'
-import markReadIcon from '../../assets/checkmark.circle.svg'
-import markUnreadIcon from '../../assets/x.circle.svg'
-import folderAddIcon from '../../assets/folder.badge.plus.svg'
-import markdownImportIcon from '../../assets/square.and.arrow.down.svg'
+const sendIcon = 'arrow.up.circle.fill'
+const folderIcon = 'folder'
+const highlighterIcon = 'highlighter'
+const trashIcon = 'trash'
+const folderPinIcon = 'arrow.up.to.line'
+const finderIcon = 'finder'
+const markReadIcon = 'checkmark.circle'
+const markUnreadIcon = 'x.circle'
+const folderAddIcon = 'folder.badge.plus'
+const markdownImportIcon = 'square.and.arrow.down'
+const magnifyingglassIcon = 'magnifyingglass'
 import { libraryContentIcon } from '../utils/contentIcons'
 
 async function requestPermanentDeletion(entry) {
@@ -369,6 +406,16 @@ const props = defineProps({
   activeView: {
     type: String,
     required: true
+  },
+  libraryMode: {
+    type: String,
+    default: 'files',
+    validator: (value) => ['files', 'search'].includes(value)
+  },
+  searchScope: {
+    type: String,
+    default: 'all',
+    validator: (value) => ['all', 'title', 'source'].includes(value)
   },
   searchQuery: {
     type: String,
@@ -467,6 +514,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'update:searchQuery',
+  'update:search-scope',
   'update:shareText',
   'search',
   'clear-search',
@@ -590,6 +638,8 @@ function saveOpenFolderIds(folderIds) {
 const openFolderIds = ref(loadOpenFolderIds())
 const editingNode = ref(null)
 const editingInput = ref(null)
+const librarySearchInput = ref(null)
+const searchScope = computed(() => props.searchScope)
 const markdownImportInput = ref(null)
 const dragNode = ref(null)
 const dragNodes = ref([])
@@ -619,13 +669,30 @@ const ROOT_LIBRARY_GROUPS = {
   reports: new Set(['日报', '周报', '月报', '区间汇总', '报告']),
 }
 const ROOT_LIBRARY_GROUP_ORDER = ['inbox', 'video', 'sources', 'reports', 'other']
+const searchScopeOptions = [
+  { value: 'all', label: '全部内容', description: '标题、摘要与正文' },
+  { value: 'title', label: '文件名', description: '只匹配资料标题' },
+  { value: 'source', label: '来源', description: '匹配来源名称与类型' },
+]
 let treeResizeObserver = null
 let treeScrollEndTimer = null
 
-const searchActive = computed(() => Boolean(props.searchQuery.trim()))
+defineExpose({
+  focusLibrarySearch() {
+    librarySearchInput.value?.focus?.()
+  },
+  async showLibrarySearch() {
+    await nextTick()
+    librarySearchInput.value?.focus?.()
+  },
+  showLibraryFiles() {
+    librarySearchInput.value?.blur?.()
+  },
+})
+
+const searchActive = computed(() => props.libraryMode === 'search' && Boolean(props.searchQuery.trim()))
 const viewedContentIdSet = computed(() => new Set(props.viewedContentIds.map(String)))
 const explicitlyUnreadContentIdSet = computed(() => new Set(props.explicitlyUnreadContentIds.map(String)))
-
 function folderHistoryState(folderId) {
   return props.folderHistoryStates[String(folderId)] || null
 }
@@ -675,9 +742,17 @@ function isUnreadContent(item) {
   })
 }
 
+function displayContentName(item) {
+  const title = String(item?.title || '').trim()
+  if (title) return title
+  const identity = String(item?.canonical_source_id || '').trim()
+  if (identity) return identity
+  return '未命名内容'
+}
+
 function nodeAriaLabel(node) {
-  if (node?.unread) return `${node.name}，新内容`
-  if (node?.hasNewDescendants) return `${node.name}，包含 ${node.unreadCount || ''} 条新内容`
+  if (node?.unread) return `${node.name}，未读`
+  if (node?.hasNewDescendants) return `${node.name}，包含 ${node.unreadCount || ''} 条未读内容`
   return ''
 }
 
@@ -700,14 +775,10 @@ const folderPathById = computed(() => {
   return paths
 })
 
-const unreadContentItems = computed(() => sortNodes(
-  props.libraryContentItems.filter(isUnreadContent)
-))
+const unreadContentItems = computed(() => sortNodes(props.libraryContentItems.filter(isUnreadContent)))
 
 function unreadSourcePath(item) {
-  return folderPathById.value.get(item?.library_folder_id)
-    || item?.source_name
-    || '资料库'
+  return folderPathById.value.get(item?.library_folder_id) || item?.source_name || '资料库'
 }
 
 function toggleTrash() {
@@ -717,10 +788,11 @@ function toggleTrash() {
 
 const visibleLibraryNodes = computed(() => {
   if (searchActive.value) {
-    return props.sidebarTreeItems.map((item) => ({
+    const items = props.sidebarTreeItems
+    return items.map((item) => ({
       type: 'content',
       id: item.id,
-      name: item.title || item.canonical_source_id || '未命名内容',
+      name: displayContentName(item),
       parentId: item.library_folder_id || null,
       sortOrder: Number(item.sort_order || 0),
       depth: 0,
@@ -759,12 +831,9 @@ const visibleLibraryNodes = computed(() => {
     if (isNodeOpen(unreadRoot)) {
       for (const item of unreadContentItems.value) {
         result.push({
-          type: 'unread-content',
-          id: item.id,
-          name: item.title || item.canonical_source_id || '未命名内容',
-          depth: 1,
-          unread: true,
-          raw: item,
+          type: 'unread-content', id: item.id,
+          name: displayContentName(item),
+          depth: 1, unread: true, raw: item,
         })
       }
     }
@@ -795,8 +864,8 @@ const visibleLibraryNodes = computed(() => {
       raw: null,
     })
   }
-  // Unread and pinned views stay ahead of the ordinary tree. The ordinary
-  // root order itself is user-controlled through folder and separator drag.
+  // The pinned view stays ahead of the ordinary tree. The ordinary root order
+  // itself is user-controlled through folder and separator drag.
   const appendChildren = (parentId, depth, ancestorIds = [], withinPinnedTree = false) => {
     const folderNodes = sortNodes((foldersByParent.get(parentId) || []).filter((folder) => (
       withinPinnedTree || !folder.is_pinned
@@ -816,7 +885,7 @@ const visibleLibraryNodes = computed(() => {
     const contentNodes = sortNodes(itemsByParent.get(parentId) || []).map((item) => ({
       type: 'content',
       id: item.id,
-      name: item.title || item.canonical_source_id || '未命名内容',
+      name: displayContentName(item),
       parentId: item.library_folder_id || null,
       sortOrder: Number(item.sort_order || 0),
       depth,
@@ -976,10 +1045,7 @@ const selectedNodes = computed(() => {
   const selected = selectedKeys.value
   return visibleLibraryNodes.value.filter((node) => selected.has(nodeKey(node)))
 })
-
-const selectedContentNodes = computed(() => selectedNodes.value.filter((node) => (
-  node.type === 'content' || node.type === 'unread-content'
-)))
+const selectedContentNodes = computed(() => selectedNodes.value.filter(isContentNode))
 
 const contentContextMenuStyle = computed(() => {
   if (!contentContextMenu.value) return {}
@@ -1200,9 +1266,7 @@ function recentTimestamp(item) {
 
 function contentNodeTitle(node) {
   if (!isContentNode(node)) return node?.name || ''
-  if (node.type === 'unread-content') {
-    return `${node.name}\n${unreadSourcePath(node.raw)}`
-  }
+  if (node.type === 'unread-content') return `${node.name}\n${unreadSourcePath(node.raw)}`
   const source = [node.raw?.source_name, node.raw?.source_section].filter(Boolean).join(' · ')
   return source ? `${node.name}\n${source}` : node.name
 }
@@ -1327,6 +1391,36 @@ watch(
   { immediate: true, deep: true },
 )
 
+function expandUnreadInNode(node) {
+  if (!node?.unreadCount) return
+  if (node.type === 'unread-root') {
+    unreadRootOpen.value = !unreadRootOpen.value
+    return
+  }
+  if (node.type !== 'folder') return
+  const open = new Set(openFolderIds.value)
+  const rootId = String(node.id)
+  const foldersById = new Map(props.libraryFolders.map((folder) => [String(folder.id), folder]))
+  for (const folder of props.libraryFolders) {
+    const folderId = String(folder.id)
+    if (!(folderUnreadCounts.value.get(folderId) || 0)) continue
+    let currentId = folderId
+    const visited = new Set()
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId)
+      if (currentId === rootId) {
+        open.add(folderId)
+        break
+      }
+      currentId = foldersById.get(currentId)?.parent_folder_id
+        ? String(foldersById.get(currentId).parent_folder_id)
+        : ''
+    }
+  }
+  openFolderIds.value = open
+  saveOpenFolderIds(open)
+}
+
 // Re-opening the application should restore only the branches the user chose
 // to keep open, and hydrate those branches independently. This never asks for
 // a global article page.
@@ -1343,41 +1437,6 @@ watch(
   },
   { immediate: true },
 )
-
-function expandUnreadInNode(node) {
-  if (!node?.unreadCount) return
-  if (node.type === 'unread-root') {
-    unreadRootOpen.value = !unreadRootOpen.value
-    return
-  }
-  const open = new Set(openFolderIds.value)
-
-  if (node.type === 'folder') {
-    const rootId = String(node.id)
-    const foldersById = new Map(props.libraryFolders.map((folder) => [String(folder.id), folder]))
-    for (const folder of props.libraryFolders) {
-      const folderId = String(folder.id)
-      if (!(folderUnreadCounts.value.get(folderId) || 0)) continue
-      let currentId = folderId
-      const visited = new Set()
-      while (currentId && !visited.has(currentId)) {
-        visited.add(currentId)
-        if (currentId === rootId) {
-          open.add(folderId)
-          break
-        }
-        currentId = foldersById.get(currentId)?.parent_folder_id
-          ? String(foldersById.get(currentId).parent_folder_id)
-          : ''
-      }
-    }
-  } else {
-    return
-  }
-
-  openFolderIds.value = open
-  saveOpenFolderIds(open)
-}
 
 function nodeKey(node) {
   if (node.type === 'draft-folder') return node.id
@@ -1597,10 +1656,9 @@ function markFolderViewed(folderNode) {
   while (changed) {
     changed = false
     for (const folder of props.libraryFolders) {
-      const folderId = String(folder.id)
-      if (folderIds.has(folderId) || !folder.parent_folder_id) continue
-      if (folderIds.has(String(folder.parent_folder_id))) {
-        folderIds.add(folderId)
+      const parentId = folder.parent_folder_id ? String(folder.parent_folder_id) : ''
+      if (parentId && folderIds.has(parentId) && !folderIds.has(String(folder.id))) {
+        folderIds.add(String(folder.id))
         changed = true
       }
     }
@@ -2010,10 +2068,20 @@ function cancelBoxSelection() {
   border-top: 0;
 }
 
-.sidebar-search-row {
-  grid-template-columns: minmax(0, 1fr) 26px 26px;
+.sidebar-file-toolbar {
+  grid-template-columns: repeat(2, 36px);
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: var(--vk-space-control);
+  min-height: 36px;
+  padding-block: 0;
+  padding-inline: 0;
+  border-top: 0;
+}
+
+.sidebar-file-toolbar .sidebar-icon-button {
+  width: 36px;
+  height: 36px;
 }
 
 .sidebar-file-picker {
@@ -2024,14 +2092,100 @@ function cancelBoxSelection() {
   pointer-events: none;
 }
 
-.sidebar-search-row :deep(.el-input__wrapper) {
-  height: 30px;
+.sidebar-search-workspace {
+  display: grid;
+  gap: var(--vk-space-control);
+  padding: var(--vk-space-control);
+}
+
+.sidebar-search-input {
+  min-width: 0;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--vk-space-xs);
+  padding: 0 var(--vk-space-control);
+  border: 1px solid var(--vk-border);
+  border-radius: var(--vk-radius-pill);
+  background: var(--vk-bg-panel);
+  color: var(--vk-muted);
+}
+
+.sidebar-search-input :deep(.el-input__wrapper) {
   min-height: 30px;
-  padding-top: 0;
-  padding-bottom: 0;
-  border-radius: 999px !important;
-  background: color-mix(in srgb, var(--vk-bg-panel) 88%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vk-border) 78%, transparent);
+  padding: 0;
+  border: 0;
+  border-radius: 0 !important;
+  background: transparent;
+  box-shadow: none !important;
+}
+
+.sidebar-search-input > span {
+  color: var(--vk-muted);
+  font-size: var(--vk-type-label-size);
+}
+
+.sidebar-search-options {
+  display: grid;
+  gap: var(--vk-space-xs);
+  padding: var(--vk-space-control);
+  border: 1px solid color-mix(in srgb, var(--vk-border) 82%, transparent);
+  border-radius: var(--vk-radius-surface);
+  background: color-mix(in srgb, var(--vk-bg-panel) 82%, transparent);
+}
+
+.sidebar-search-options-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vk-space-control);
+  padding: 0 var(--vk-space-xs) var(--vk-space-xs);
+}
+
+.sidebar-search-options-heading strong {
+  font-size: var(--vk-type-label-size);
+  font-weight: var(--vk-weight-strong);
+}
+
+.sidebar-search-options-heading small {
+  color: var(--vk-muted);
+  font-size: var(--vk-type-micro-size);
+}
+
+.sidebar-search-options button {
+  min-width: 0;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--vk-space-control);
+  padding: 0 var(--vk-space-control);
+  border: 0;
+  border-radius: var(--vk-radius-control);
+  background: transparent;
+  color: var(--vk-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-search-options button:hover,
+.sidebar-search-options button.active {
+  background: var(--vk-bg-hover);
+}
+
+.sidebar-search-options button strong {
+  font-size: var(--vk-type-label-size);
+  font-weight: var(--vk-weight-medium);
+}
+
+.sidebar-search-options button span {
+  overflow: hidden;
+  color: var(--vk-muted);
+  font-size: var(--vk-type-meta-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-icon-button,
@@ -2184,14 +2338,21 @@ function cancelBoxSelection() {
   overflow: hidden;
 }
 
+.sidebar-tree-shell.is-search-mode {
+  min-height: 0;
+  border-top: 0;
+}
+
 .sidebar-link-dock {
   padding: 8px 2px 0;
   border-top: 1px solid var(--vk-border);
 }
 
 .sidebar-process-input {
-  position: relative;
   min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px 8px 7px;
   border: 1px solid color-mix(in srgb, var(--vk-border) 80%, transparent);
   border-radius: 10px;
   background: color-mix(in srgb, var(--vk-bg-panel) 84%, transparent);
@@ -2203,14 +2364,16 @@ function cancelBoxSelection() {
 }
 
 .sidebar-process-input :deep(.el-textarea__inner) {
-  min-height: 54px !important;
-  padding: 9px 42px 9px 10px;
+  min-height: 0 !important;
+  max-height: 132px;
+  padding: 0 2px;
   border: 0;
   border-radius: 10px;
   background: transparent;
   box-shadow: none;
   color: var(--vk-text);
   line-height: 1.45;
+  overflow-y: auto;
 }
 
 .sidebar-process-input :deep(.el-textarea__inner:focus) {
@@ -2218,9 +2381,7 @@ function cancelBoxSelection() {
 }
 
 .sidebar-run-button {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
+  justify-self: end;
   width: 28px;
   height: 28px;
   min-height: 28px;

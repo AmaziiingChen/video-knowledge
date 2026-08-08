@@ -7,6 +7,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from typing import Any
@@ -29,7 +30,15 @@ MODEL_ESTIMATED_BYTES = {
     "medium": 1500 * 1024**2,
     "large-v3": 3000 * 1024**2,
 }
-HUGGING_FACE_HUB_ENDPOINT = "https://huggingface.co"
+# Model downloads are the one optional runtime download that benefits from a
+# mainland-friendly mirror.  It is deliberately scoped here: media download,
+# browser login and collectors keep their existing direct-network policy.
+# Users who run a private Hub mirror can override the primary endpoint through
+# ``HUGGING_FACE_HUB_ENDPOINT`` in the desktop settings environment file.
+HUGGING_FACE_HUB_ENDPOINT = str(
+    getattr(settings, "hugging_face_hub_endpoint", "https://hf-mirror.com")
+).rstrip("/")
+HUGGING_FACE_HUB_FALLBACK_ENDPOINT = "https://huggingface.co"
 FASTER_WHISPER_REPOS = {
     model_name: f"Systran/faster-whisper-{model_name}"
     for model_name in MODEL_ESTIMATED_BYTES
@@ -54,6 +63,34 @@ def faster_whisper_cache_dir() -> Path:
 
 def mlx_whisper_model_dir(model_name: str) -> Path:
     return settings.data_dir / "models" / "mlx-whisper" / model_name
+
+
+def _bundled_model_dir(model_name: str, backend: str) -> Path | None:
+    """Locate an optional model bundled with a local desktop build.
+
+    Public builds may intentionally omit the sizeable model.  PyInstaller
+    exposes bundled resources through ``_MEIPASS``; source runs must never
+    probe arbitrary project or user directories for a model cache.
+    """
+
+    resource_root = getattr(sys, "_MEIPASS", None)
+    if not resource_root:
+        return None
+    candidate = Path(resource_root) / "preloaded_models" / backend / model_name
+    return candidate if candidate.is_dir() else None
+
+
+def _directory_contains_mlx_model(directory: Path | None) -> bool:
+    return bool(directory and (directory / "config.json").is_file() and (
+        any(directory.glob("*.safetensors"))
+        or any(directory.glob("*.npz"))
+    ))
+
+
+def _bundled_model_available(model_name: str, backend: str) -> bool:
+    if backend != "mlx":
+        return False
+    return _directory_contains_mlx_model(_bundled_model_dir(model_name, backend))
 
 
 def _job_snapshot(key: str) -> dict[str, Any] | None:
@@ -225,10 +262,7 @@ def _mlx_model_available(model_name: str) -> bool:
     # Official MLX Community Whisper models store ``weights.npz`` rather than
     # safetensors.  Accept both formats so a successful local download is not
     # immediately misreported as missing.
-    return (directory / "config.json").is_file() and (
-        any(directory.glob("*.safetensors"))
-        or any(directory.glob("*.npz"))
-    )
+    return _directory_contains_mlx_model(directory)
 
 
 def model_storage_path(model_name: str, backend: str) -> Path:
@@ -262,14 +296,16 @@ def model_status(model_name: str, backend: str) -> dict[str, Any]:
     key = f"model:{backend}:{model_name}"
     job = _job_snapshot(key) or {}
     available = is_model_available(model_name, backend)
+    bundled = not available and _bundled_model_available(model_name, backend)
     return {
         "model": model_name,
         "backend": backend,
         "available": available,
-        "state": "ready" if available else job.get("state", "missing"),
-        "detail": "模型已准备完成" if available else job.get("detail", "尚未下载"),
+        "state": "ready" if available else job.get("state", "bundled" if bundled else "missing"),
+        "detail": "模型已准备完成" if available else job.get("detail", "模型已随此应用附带，点击安装" if bundled else "尚未下载"),
         "estimated_bytes": MODEL_ESTIMATED_BYTES[model_name],
         "installed_bytes": _directory_size(model_storage_path(model_name, backend)),
+        "bundled": bundled,
         "preferred": backend == preferred_asr_backend(),
         "job": job,
     }
@@ -358,6 +394,71 @@ def _download_progress_class(job_key: str) -> type[_DownloadProgress]:
     return DownloadProgress
 
 
+def _hub_endpoints() -> tuple[str, ...]:
+    """Return the primary model mirror and one canonical fallback."""
+
+    endpoints = (HUGGING_FACE_HUB_ENDPOINT, HUGGING_FACE_HUB_FALLBACK_ENDPOINT)
+    return tuple(dict.fromkeys(endpoint.rstrip("/") for endpoint in endpoints if endpoint))
+
+
+def _install_bundled_mlx_model(model_name: str, job_key: str) -> bool:
+    """Copy a bundled model into the user-owned runtime cache, resumably."""
+
+    source = _bundled_model_dir(model_name, "mlx")
+    if not _directory_contains_mlx_model(source):
+        return False
+    assert source is not None
+    target = mlx_whisper_model_dir(model_name)
+    total_bytes = _directory_size(source)
+    copied_bytes = 0
+    _set_job(job_key, detail="正在安装随应用附带的语音模型…", downloaded_bytes=0, total_bytes=total_bytes, updated_at=time.time())
+    for source_path in source.rglob("*"):
+        if not source_path.is_file():
+            continue
+        relative_path = source_path.relative_to(source)
+        target_path = target / relative_path
+        size = source_path.stat().st_size
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if not target_path.is_file() or target_path.stat().st_size != size:
+            shutil.copy2(source_path, target_path)
+        copied_bytes += size
+        _set_job(job_key, downloaded_bytes=copied_bytes, total_bytes=total_bytes, updated_at=time.time())
+    return _mlx_model_available(model_name)
+
+
+def _download_model_from_hub(repository: str, model_name: str, backend: str, progress_class: type[_DownloadProgress]) -> None:
+    """Fetch a model with a mirror fallback without changing other network paths."""
+
+    from huggingface_hub import snapshot_download
+
+    failures: list[str] = []
+    for endpoint in _hub_endpoints():
+        try:
+            if backend == "mlx":
+                snapshot_download(
+                    repository,
+                    local_dir=str(mlx_whisper_model_dir(model_name)),
+                    tqdm_class=progress_class,
+                    endpoint=endpoint,
+                    # Avoid a large parallel burst through local proxies. The
+                    # MLX model has only a few files and resumes its partial
+                    # weight file on a later attempt.
+                    max_workers=2,
+                )
+            else:
+                snapshot_download(
+                    repository,
+                    cache_dir=str(faster_whisper_cache_dir()),
+                    tqdm_class=progress_class,
+                    endpoint=endpoint,
+                    max_workers=2,
+                )
+            return
+        except Exception as exc:
+            failures.append(f"{endpoint}: {exc}")
+    raise RuntimeError("；".join(failures))
+
+
 def download_model(model_name: str, backend: str) -> dict[str, Any]:
     _model_repo(model_name, backend)
     if backend != preferred_asr_backend():
@@ -371,29 +472,12 @@ def download_model(model_name: str, backend: str) -> dict[str, Any]:
 
     def run() -> None:
         try:
-            from huggingface_hub import snapshot_download
-
             progress_class = _download_progress_class(key)
             repository = _model_repo(model_name, backend)
-            if backend == "mlx":
-                snapshot_download(
-                    repository,
-                    local_dir=str(mlx_whisper_model_dir(model_name)),
-                    tqdm_class=progress_class,
-                    endpoint=HUGGING_FACE_HUB_ENDPOINT,
-                    # Avoid a large parallel burst through local proxies. The
-                    # MLX model has only a few files and resumes its partial
-                    # weight file on a later attempt.
-                    max_workers=2,
-                )
-            else:
-                snapshot_download(
-                    repository,
-                    cache_dir=str(faster_whisper_cache_dir()),
-                    tqdm_class=progress_class,
-                    endpoint=HUGGING_FACE_HUB_ENDPOINT,
-                    max_workers=2,
-                )
+            if backend == "mlx" and _install_bundled_mlx_model(model_name, key):
+                _set_job(key, state="ready", detail="已安装应用附带的语音模型", updated_at=time.time())
+                return
+            _download_model_from_hub(repository, model_name, backend, progress_class)
             _set_job(key, state="ready", detail="模型已准备完成", updated_at=time.time())
         except Exception as exc:
             _set_job(key, state="failed", detail=f"模型下载失败：{exc}", updated_at=time.time())

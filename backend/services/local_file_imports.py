@@ -630,7 +630,9 @@ def _best_html_content_container(soup: BeautifulSoup) -> Tag | None:
     form a higher-priority tier; a cleaned body is only used as a fallback.
     """
     explicit = _html_unique_nodes(soup, _HTML_EXPLICIT_CONTENT_SELECTORS)
-    viable = [node for node in explicit if _html_content_score(node) > -10_000]
+    # An explicitly marked publisher container is more trustworthy than a
+    # large navigation-heavy body even when the article itself is short.
+    viable = [node for node in explicit if _html_node_text(node)]
     if viable:
         return max(viable, key=_html_content_score)
 

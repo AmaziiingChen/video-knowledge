@@ -21,6 +21,8 @@ class SourceSyncTaskRequest(BaseModel):
         "campus",
         "wechat_subscription",
         "wechat_bulk",
+        "wechat_public_discovery",
+        "wechat_public_import",
         "favorite_douyin",
         "favorite_bilibili",
         "favorite_xiaohongshu",

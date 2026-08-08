@@ -1,9 +1,4 @@
-const SHORT_ANSWER_INTERVAL = 44
-const MEDIUM_ANSWER_INTERVAL = 58
-const LONG_ANSWER_INTERVAL = 72
-
 export function createQaStreamRenderer({
-  getRenderedLength,
   onCommit,
   requestFrame = (callback) => requestAnimationFrame(callback),
   cancelFrame = (frame) => cancelAnimationFrame(frame),
@@ -11,15 +6,7 @@ export function createQaStreamRenderer({
 }) {
   let pendingText = ''
   let frame = null
-  let lastRenderAt = Number.NEGATIVE_INFINITY
   let drainResolvers = []
-
-  function renderInterval() {
-    const renderedLength = getRenderedLength()
-    if (renderedLength >= 8000) return LONG_ANSWER_INTERVAL
-    if (renderedLength >= 4000) return MEDIUM_ANSWER_INTERVAL
-    return SHORT_ANSWER_INTERVAL
-  }
 
   function resolveDrainWaiters() {
     if (pendingText || frame !== null) return
@@ -28,41 +15,18 @@ export function createQaStreamRenderer({
     resolvers.forEach((resolve) => resolve())
   }
 
-  function nextBatchSize() {
-    if (pendingText.length <= 4) return pendingText.length
-    let size = Math.min(96, Math.max(4, Math.ceil(pendingText.length / 4)))
-    const lastCodeUnit = pendingText.charCodeAt(size - 1)
-    const nextCodeUnit = pendingText.charCodeAt(size)
-    const splitsSurrogatePair = (
-      lastCodeUnit >= 0xD800
-      && lastCodeUnit <= 0xDBFF
-      && nextCodeUnit >= 0xDC00
-      && nextCodeUnit <= 0xDFFF
-    )
-    if (splitsSurrogatePair) size += 1
-    return size
-  }
-
-  function commitNextBatch() {
-    if (!pendingText) return
-    const batchSize = nextBatchSize()
-    const batch = pendingText.slice(0, batchSize)
-    pendingText = pendingText.slice(batchSize)
-    onCommit(batch)
-  }
-
-  function paint(timestamp) {
+  function paint() {
     frame = null
     if (!pendingText) {
       resolveDrainWaiters()
       return
     }
-    if (timestamp - lastRenderAt < renderInterval()) {
-      frame = requestFrame(paint)
-      return
-    }
-    commitNextBatch()
-    lastRenderAt = timestamp
+    // Render the complete model delta on the next visual frame. This limits
+    // DOM work to the display refresh rate without inventing a character
+    // speed or leaving text in a local queue after the model has finished.
+    const text = pendingText
+    pendingText = ''
+    onCommit(text)
     if (pendingText) {
       frame = requestFrame(paint)
     } else {

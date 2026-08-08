@@ -72,6 +72,14 @@
           清空
         </button>
         <button
+          v-if="activeBatchCount"
+          class="process-log-action"
+          type="button"
+          @click="$emit('cancel-active-tasks')"
+        >
+          取消全部
+        </button>
+        <button
           v-if="canCancelSelectedTask"
           class="process-log-action"
           type="button"
@@ -239,7 +247,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'update:height', 'clear', 'copy', 'collapse', 'expand',
-  'reconnect-douyin-and-retry', 'retry-task', 'cancel-task', 'load-task-details',
+  'reconnect-douyin-and-retry', 'retry-task', 'cancel-task', 'cancel-active-tasks', 'load-task-details',
 ])
 const localLogContainer = ref(null)
 const taskListContainer = ref(null)

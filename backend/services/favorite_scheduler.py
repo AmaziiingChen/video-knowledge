@@ -4,7 +4,6 @@ from threading import Event, Lock, Thread
 
 from config import settings
 from services.favorite_sync import sync_due_favorites
-from services.xiaohongshu_ingest import sync_due_xiaohongshu_favorites
 
 
 class FavoriteSubscriptionScheduler:
@@ -38,7 +37,6 @@ class FavoriteSubscriptionScheduler:
     def _sync_due_safely() -> None:
         try:
             sync_due_favorites()
-            sync_due_xiaohongshu_favorites()
         except Exception:
             pass
 

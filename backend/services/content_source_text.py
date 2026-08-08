@@ -7,7 +7,12 @@ from pathlib import Path
 import re
 import sqlite3
 
-from services.article_fetcher import enrich_cached_article_image_ocr, fetch_article
+from services.article_fetcher import (
+    ArticleFetchResult,
+    enrich_cached_article_image_ocr,
+    fetch_article,
+    parse_wechat_article_html,
+)
 from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_article_html
 from services.cache import (
     cache_dir_for_url,
@@ -186,6 +191,34 @@ def _load_xiaohongshu_article(item: ContentItemRecord) -> ContentSourceText:
     )
 
 
+def cache_preloaded_wechat_article(
+    content_item_id: str,
+    source_url: str,
+    page_html: str,
+    *,
+    fallback_title: str = "",
+) -> dict:
+    """Persist a verified WeChat response as the article's local snapshot."""
+    cache_dir = cache_dir_for_url(source_url)
+    existing = _mapping(read_cache_meta(cache_dir).get("article_info"))
+    if str(existing.get("body_text") or "").strip():
+        return existing
+    article = parse_wechat_article_html(
+        source_url,
+        page_html,
+        content_item_id=content_item_id,
+        include_image_ocr=False,
+    )
+    article_info = _article_info_from_fetch_result(
+        article,
+        platform="wechat",
+        fallback_title=fallback_title,
+    )
+    _write_article_snapshot(cache_dir, source_url, "wechat", article_info)
+    _sync_fetched_article_metadata(content_item_id, article_info)
+    return article_info
+
+
 def _load_article(
     content_item_id: str,
     item_title: str,
@@ -246,49 +279,15 @@ def _load_article(
                 write_cache_meta(cache_dir, updates)
                 raise
         else:
-            # Some WeChat text-share pages carry their complete body in
-            # ``window.title`` rather than a real title.  ``fetch_article``
-            # deliberately returns a generic fallback in that case; retain the
-            # subscription/feed title instead of overwriting it with that marker.
-            resolved_title = article.title
-            if resolved_title == "未命名公众号文章":
-                resolved_title = item_title or resolved_title
-            article_info = {
-                "title": resolved_title,
-                "platform": article.platform,
-                "author": article.author,
-                "published_at": article.published_at,
-                "published_at_parser_version": PUBLISHED_AT_PARSER_VERSION,
-                "body_text": article.body_text,
-                "body_html": article.body_html,
-                "normalized_html": normalize_article_html(article.body_html),
-                "normalized_html_version": ARTICLE_NORMALIZER_VERSION,
-                "images": article.images,
-                "image_ocr": article.image_ocr,
-                "document_ocr": article.document_ocr,
-                "document_markdown": article.document_markdown,
-                "attachments": article.attachments,
-                **({
-                    "rss_body_source": "web_full",
-                    "rss_full_text_status": "fetched",
-                    "rss_feed_summary": str(article_info.get("rss_feed_summary") or ""),
-                } if platform == "rss" else {}),
-            }
-            write_cache_meta(
-                cache_dir,
-                {
-                    "source_url": source_url,
-                    "platform": platform,
-                    "cache_key": cache_dir.name,
-                    "article_info": article_info,
-                    "article_capture": {
-                        "last_attempt_at": _utc_now_iso(),
-                        "last_error": "",
-                    },
-                },
+            article_info = _article_info_from_fetch_result(
+                article,
+                platform=platform,
+                fallback_title=item_title,
+                previous_article_info=article_info,
             )
+            _write_article_snapshot(cache_dir, source_url, platform, article_info)
             _sync_fetched_article_metadata(content_item_id, article_info)
-            body_text = str(article.body_text or "").strip()
+            body_text = str(article_info.get("body_text") or "").strip()
             fetched_now = True
 
     if not body_text:
@@ -301,6 +300,59 @@ def _load_article(
         text=body_text,
         source_kind="article",
         fetched_now=fetched_now,
+    )
+
+
+def _article_info_from_fetch_result(
+    article: ArticleFetchResult,
+    *,
+    platform: str,
+    fallback_title: str = "",
+    previous_article_info: dict | None = None,
+) -> dict:
+    # Some WeChat text-share pages carry their complete body in
+    # ``window.title`` rather than a real title. Retain the known list title
+    # instead of replacing it with the parser's generic marker.
+    resolved_title = article.title
+    if resolved_title == "未命名公众号文章":
+        resolved_title = fallback_title or resolved_title
+    previous = previous_article_info or {}
+    return {
+        "title": resolved_title,
+        "platform": article.platform,
+        "author": article.author,
+        "published_at": article.published_at,
+        "published_at_parser_version": PUBLISHED_AT_PARSER_VERSION,
+        "body_text": article.body_text,
+        "body_html": article.body_html,
+        "normalized_html": normalize_article_html(article.body_html),
+        "normalized_html_version": ARTICLE_NORMALIZER_VERSION,
+        "images": article.images,
+        "image_ocr": article.image_ocr,
+        "document_ocr": article.document_ocr,
+        "document_markdown": article.document_markdown,
+        "attachments": article.attachments,
+        **({
+            "rss_body_source": "web_full",
+            "rss_full_text_status": "fetched",
+            "rss_feed_summary": str(previous.get("rss_feed_summary") or ""),
+        } if platform == "rss" else {}),
+    }
+
+
+def _write_article_snapshot(cache_dir: Path, source_url: str, platform: str, article_info: dict) -> None:
+    write_cache_meta(
+        cache_dir,
+        {
+            "source_url": source_url,
+            "platform": platform,
+            "cache_key": cache_dir.name,
+            "article_info": article_info,
+            "article_capture": {
+                "last_attempt_at": _utc_now_iso(),
+                "last_error": "",
+            },
+        },
     )
 
 

@@ -32,10 +32,13 @@ import {
 import { createQaStreamRenderer } from '../features/assistant/qaStreamRenderer'
 import {
   mergeUniqueContentItems,
+  progressiveTaskSnapshot,
+  shouldHydrateProgressiveTask,
   shouldRefreshContentForTask,
   taskContentSnapshot
 } from './contentRefreshState'
 import { waitForDesktopBackend } from './backendStartupGate.js'
+import { localApiAuthHeaders, localApiRequestUrl } from '../utils/localApiAuth.js'
 import {
   aiCallTypeLabel,
   cacheHitLabel,
@@ -85,6 +88,16 @@ export function useAppController() {
   const WORKSPACE_TABS_KEY = 'video-knowledge.workspace-tabs.v1'
   const WORKSPACE_LAYOUT_KEY = 'video-knowledge.workspace-layout.v1'
   const ASR_SETTINGS_KEY = 'video-knowledge.asr-settings.v1'
+  const DESKTOP_ASR_POLICY = Object.freeze({
+    whisper_model: 'small',
+    asr_backend: 'auto',
+    asr_model_strategy: 'manual',
+    asr_short_video_model: 'base',
+    asr_long_video_model: 'small',
+    asr_beam_size: 1,
+    asr_vad_filter: true,
+    asr_fallback_enabled: false
+  })
   const AI_SETTINGS_KEY = 'video-knowledge.ai-settings.v1'
   const ASSISTANT_SETTINGS_KEY = 'video-knowledge.assistant-settings.v1'
   const LEGACY_TELEGRAM_SETTINGS_KEY = 'video-knowledge.telegram-settings.v1'
@@ -174,6 +187,8 @@ export function useAppController() {
   const backendLogCount = ref(0)
   const logClearedAt = ref(Number(localStorage.getItem(PROCESS_LOG_CLEARED_AT_KEY) || 0))
   const pollTimer = ref(null)
+  let taskEventSource = null
+  let taskEventSourceTaskId = ''
   const taskStatus = ref('idle')
   const taskCancelRequested = ref(false)
   const selectedModel = ref('small')
@@ -200,7 +215,9 @@ export function useAppController() {
   const autoDownloadBilibiliVideo = ref(false)
   const douyinVideoQuality = ref('standard')
   const searchQuery = ref('')
+  const librarySearchScope = ref('all')
   const searchResults = ref([])
+  const searchResultContentItems = ref([])
   const searchingContent = ref(false)
   const searchTimer = ref(null)
   let searchRequestVersion = 0
@@ -323,6 +340,9 @@ export function useAppController() {
   const taskPollFailureCount = ref(0)
   let taskQueueSyncing = false
   const taskQueueSnapshots = new Map()
+  const progressiveTaskSnapshots = new Map()
+  const progressiveTaskHydratingIds = new Set()
+  const backendLogCountsByTaskId = new Map()
   let taskQueueInitialized = false
   let taskQueueUpdatedAfter = logClearedAt.value
     ? new Date(logClearedAt.value).toISOString()
@@ -570,35 +590,12 @@ export function useAppController() {
     return `${API}/media?path=${encodeURIComponent(result.video_path)}`
   })
 
-  const workspaceModeLabel = computed(() => {
-    return ribbonItems.find((item) => item.view === activeView.value)?.label || '工作区'
-  })
-
   const sidebarContentItems = computed(() => {
     return contentItems.value
   })
 
   const sidebarTreeItems = computed(() => {
-    const query = searchQuery.value.trim().toLowerCase()
-    if (!query) return sidebarContentItems.value
-
-    const resultRanks = new Map(
-      searchResults.value
-        .map((item, index) => [item.content_key, index])
-        .filter(([contentKey]) => Boolean(contentKey))
-    )
-    return sidebarContentItems.value.filter((item) => {
-      const title = `${item.title || ''} ${item.canonical_source_id || ''} ${item.source_url || ''}`.toLowerCase()
-      return title.includes(query) || resultRanks.has(item.id)
-    }).sort((left, right) => {
-      const leftTitleMatch = String(left.title || '').toLowerCase().includes(query)
-      const rightTitleMatch = String(right.title || '').toLowerCase().includes(query)
-      if (leftTitleMatch !== rightTitleMatch) return leftTitleMatch ? -1 : 1
-      const leftRank = resultRanks.get(left.id) ?? Number.MAX_SAFE_INTEGER
-      const rightRank = resultRanks.get(right.id) ?? Number.MAX_SAFE_INTEGER
-      if (leftRank !== rightRank) return leftRank - rightRank
-      return String(left.title || '').localeCompare(String(right.title || ''))
-    })
+    return searchQuery.value.trim() ? searchResultContentItems.value : sidebarContentItems.value
   })
 
   const activeWorkspaceTab = computed(() => {
@@ -713,9 +710,16 @@ export function useAppController() {
     const tab = workspaceTabById(tabId)
     const contentItemId = tab?.content_item_id || (String(tabId || '').startsWith('content:') ? String(tabId).slice('content:'.length) : '')
     if (!contentItemId) return null
+    const matchingTasks = batchTasks.value.filter((candidate) => candidate.content_item_id === contentItemId)
+    // The process dock can hold an older completed snapshot and a newer live
+    // retry/reprocessing task for the same item. The old global result used to
+    // win here, leaving the right assistant idle while the status bar (which
+    // reads the task queue) correctly showed “AI 总结”. The live task is the
+    // only authoritative source while it exists.
+    const activeTask = matchingTasks.find((candidate) => isActiveTask(candidate))
+    if (activeTask) return activeTask
     if (result.content_item_id === contentItemId) return result
-    const task = batchTasks.value.find((candidate) => candidate.content_item_id === contentItemId)
-    return task || null
+    return matchingTasks[0] || null
   }
 
   function statusForTab(tabId) {
@@ -753,6 +757,10 @@ export function useAppController() {
   }
 
   const currentInsightHtml = computed(() => {
+    // Pipeline text is rendered in the same flowing bubble as a manual
+    // summary while it is still arriving. Avoid showing a second, static
+    // copy above it before the pipeline finishes.
+    if (isPipelineSummaryGenerating.value) return ''
     if (activeWorkspaceTab.value) {
       const summary = currentSummaryText.value
       return summary ? renderMarkdown(summary) : ''
@@ -770,6 +778,26 @@ export function useAppController() {
       || result.source_title
       || ''
   ).replace(/\s+/gu, ' ').trim())
+
+  // A background pipeline owns its own AI request.  Mirror that real task
+  // state into the assistant instead of pretending the sidebar is idle until
+  // the final summary is written.  This is intentionally separate from the
+  // manual “generate summary” action, which still streams through its own
+  // per-content QA session.
+  const isPipelineSummaryGenerating = computed(() => {
+    const task = activeWorkspaceResult.value
+    if (!task || !['queued', 'running'].includes(task.status)) return false
+    const progress = task.progress || {}
+    const summaryProgress = Number(progress.summarize || 0)
+    if (summaryProgress >= 100) return false
+    return task.step === 'summarize' || summaryProgress > 0
+  })
+
+  const pipelineGeneratingSummaryText = computed(() => (
+    isPipelineSummaryGenerating.value
+      ? String(activeWorkspaceResult.value?.summary || '')
+      : ''
+  ))
 
   const currentQaEnabled = computed(() => {
     const hasExistingContext = Boolean(
@@ -1101,13 +1129,14 @@ export function useAppController() {
 
   function clearLogs() {
     logs.value = []
+    backendLogCountsByTaskId.clear()
     clearReportLogHistory()
     logClearedAt.value = Date.now()
     localStorage.setItem(PROCESS_LOG_CLEARED_AT_KEY, String(logClearedAt.value))
     taskQueueUpdatedAfter = new Date(logClearedAt.value).toISOString()
     batchTasks.value = batchTasks.value.filter((task) => isActiveTask(task))
     batchTaskIds.value = batchTasks.value.map((task) => task.task_id)
-    backendLogCount.value = Array.isArray(result.logs) ? result.logs.length : backendLogCount.value
+    backendLogCount.value = 0
   }
 
   function isActiveTask(task) {
@@ -1187,9 +1216,17 @@ export function useAppController() {
   }
 
   function addBackendLogs(logList, task = {}) {
-    const newItems = logList.slice(backendLogCount.value)
-    backendLogCount.value = logList.length
+    if (!Array.isArray(logList)) return
+    const taskId = String(task.task_id || result.task_id || '__current__')
+    const previousCount = backendLogCountsByTaskId.get(taskId) || 0
+    const newItems = logList.slice(previousCount)
+    backendLogCountsByTaskId.set(taskId, logList.length)
+    if (taskId === String(result.task_id || '__current__')) {
+      backendLogCount.value = logList.length
+    }
     for (const item of newItems) {
+      const itemTimestamp = typeof item === 'object' ? Date.parse(item.created_at || '') : NaN
+      if (logClearedAt.value && Number.isFinite(itemTimestamp) && itemTimestamp <= logClearedAt.value) continue
       if (typeof item === 'string') {
         addLog(item, logTypeFromMessage(item))
         continue
@@ -1402,6 +1439,80 @@ export function useAppController() {
     await activateWorkspaceTab(tabId)
   }
 
+  function syncTaskTabMetadata(content) {
+    if (!content?.id) return
+    const tabId = tabIdForContent(content.id)
+    const tab = workspaceTabs.value.find((candidate) => candidate.id === tabId)
+    if (!tab) return
+    tab.title = content.title || tab.title
+    tab.source_provider = content.source_provider || tab.source_provider
+    tab.status = content.status || tab.status
+  }
+
+  async function syncVisibleProgressiveContent(task) {
+    if (!task?.content_item_id) return null
+    const content = await getContentItemDetail(task.content_item_id)
+    if (!content) return null
+    syncTaskTabMetadata(content)
+
+    // Do not steal focus or open a new tab whenever a background task makes
+    // progress. If the reader intentionally opened this item, however, keep
+    // its hydrated record current and retry a previously unavailable article
+    // preview as soon as the cache becomes readable.
+    if (activeWorkspaceTab.value?.content_item_id === content.id) {
+      selectedContentItem.value = content
+      currentMarkdownItem.value = content
+      updatePendingArticlePreviewReadiness(content)
+      const preview = articlePreviews[content.id]
+      const isReadableArticle = ['article', 'forum_post'].includes(content.content_type)
+        && ['wechat', 'campus', 'rss', 'wechat_miniprogram', 'xiaohongshu'].includes(content.source_provider)
+      if (isReadableArticle && (!preview || preview.error)) {
+        void loadArticlePreview(content, { force: Boolean(preview?.error) })
+      }
+    }
+    return content
+  }
+
+  async function hydrateProgressiveTask(task, previousSnapshot) {
+    if (!shouldHydrateProgressiveTask(task, previousSnapshot)) return
+    const taskId = String(task.task_id || '')
+    if (!taskId || progressiveTaskHydratingIds.has(taskId)) return
+    progressiveTaskHydratingIds.add(taskId)
+    try {
+      const previousParts = String(previousSnapshot || '').split('|')
+      const transcriptBecameReady = !previousParts.includes('transcript-ready')
+        && Number(task?.progress?.transcribe || 0) >= 100
+      const contentChanged = !previousSnapshot || previousParts[0] !== String(task.content_item_id || '')
+      // Summary growth does not alter the content row. Fetching it repeatedly
+      // caused a full detail read to contend with media rendering and made the
+      // active view feel frozen. Only hydrate the tree/source at durable
+      // content and subtitle milestones; task detail is still refreshed below.
+      const shouldSyncContent = contentChanged || transcriptBecameReady
+      const [detailResult, hydratedContent] = await Promise.all([
+        task.details_included === false
+          ? axios.get(`${API}/tasks/${taskId}`, { timeout: 10000 }).then((response) => response.data).catch(() => null)
+          : Promise.resolve(task),
+        shouldSyncContent ? syncVisibleProgressiveContent(task) : Promise.resolve(true),
+      ])
+      // Do not acknowledge the milestone before the item enters the local
+      // tree cache. A short backend/database race used to mark this as done
+      // after a failed detail request, leaving a newly queued video absent
+      // from “未读” until a later download milestone happened to change.
+      if (!hydratedContent) return
+
+      const resolvedTask = detailResult || task
+      if (detailResult) {
+        mergeBatchTasks([detailResult])
+        addBackendLogs(detailResult.logs || [], detailResult)
+        if (shouldSyncContent) await syncVisibleProgressiveContent(detailResult)
+        if (result.content_item_id === detailResult.content_item_id) applyTaskData(detailResult)
+      }
+      progressiveTaskSnapshots.set(taskId, progressiveTaskSnapshot(resolvedTask))
+    } finally {
+      progressiveTaskHydratingIds.delete(taskId)
+    }
+  }
+
   async function revealWechatArticleSnapshot(task) {
     if (
       task?.platform !== 'wechat'
@@ -1413,14 +1524,12 @@ export function useAppController() {
 
     // The article cache is persisted before the DeepSeek summary begins.
     // Hydrate only that entry so an active tree keeps its expansion state.
-    const content = await getContentItemDetail(task.content_item_id)
-    if (!content) return
+    await syncVisibleProgressiveContent(task)
 
     if (articleSnapshotPreviewedTaskIds.size >= 200) {
       articleSnapshotPreviewedTaskIds.clear()
     }
     articleSnapshotPreviewedTaskIds.add(task.task_id)
-    await openContentTab(content)
   }
 
   async function revealVideoSnapshot(task) {
@@ -1433,14 +1542,13 @@ export function useAppController() {
     // The backend creates this item at the video-ready milestone. Hydrate
     // only it; a whole-library refresh here made the left tree rebuild while
     // FFmpeg was preparing the preview.
-    const content = await getContentItemDetail(task.content_item_id)
+    const content = await syncVisibleProgressiveContent(task)
     if (!content) return
 
     if (mediaSnapshotPreviewedTaskIds.size >= 200) {
       mediaSnapshotPreviewedTaskIds.clear()
     }
     mediaSnapshotPreviewedTaskIds.add(task.task_id)
-    await openContentTab(content)
   }
 
   async function revealTranscriptSnapshot(task) {
@@ -1453,7 +1561,7 @@ export function useAppController() {
     // Segment timings are written beside the transcript before this task
     // update is published. Hydrate only this item (rather than reload the
     // library) so the open video gains its timed subtitle panel immediately.
-    const detail = await getContentItemDetail(task.content_item_id)
+    const detail = await syncVisibleProgressiveContent(task)
     if (!detail) return
     if (transcriptSnapshotPreviewedTaskIds.size >= 200) {
       transcriptSnapshotPreviewedTaskIds.clear()
@@ -1543,32 +1651,16 @@ export function useAppController() {
     workspaceLayout.editor = clampPanePercent(100 - workspaceLayout.primary - workspaceLayout.context, 18, 80, 50)
   }
 
-  const asrRequestOptions = () => ({
-    whisper_model: selectedModel.value,
-    asr_backend: selectedAsrBackend.value,
-    asr_model_strategy: asrModelStrategy.value,
-    asr_short_video_model: asrShortVideoModel.value,
-    asr_long_video_model: asrLongVideoModel.value,
-    // Fixed desktop baseline: one deterministic decode pass and no hidden
-    // cross-backend retry. Advanced tuning is intentionally not user-facing.
-    asr_beam_size: 1,
-    asr_vad_filter: Boolean(asrVadFilter.value),
-    asr_fallback_enabled: false
-  })
+  // Audio and video share one predictable desktop baseline.  The runtime
+  // resolves `auto` to the host-native implementation; no user preference or
+  // stale localStorage value can change a new task's ASR configuration.
+  const asrRequestOptions = () => ({ ...DESKTOP_ASR_POLICY })
 
   const aiRequestOptions = () => ({
     ai_model: selectedAiModel.value
   })
 
   const appearanceRequestOptions = () => ({ theme: selectedTheme.value })
-
-  const persistAsrSettings = () => {
-    try {
-      localStorage.setItem(ASR_SETTINGS_KEY, JSON.stringify(asrRequestOptions()))
-    } catch {
-      // 本地存储失败不影响处理流程。
-    }
-  }
 
   const persistAiSettings = () => {
     try {
@@ -1606,6 +1698,14 @@ export function useAppController() {
 
   watch(workspaceTabs, persistWorkspaceTabs, { deep: true })
   watch(activeWorkspaceTabId, persistWorkspaceTabs)
+  watch(
+    () => [
+      activeWorkspaceTab.value?.content_item_id || '',
+      batchTasks.value.map((task) => `${task.task_id}:${task.content_item_id || ''}:${task.status || ''}`).join('|'),
+    ],
+    () => syncTaskEventStreamForActiveContent(),
+    { flush: 'post' }
+  )
   watch(workspaceLayout, persistWorkspaceLayout)
   watch(selectedAiModel, (model) => {
     assistantAiModel.value = model
@@ -1613,20 +1713,7 @@ export function useAppController() {
   })
   watch(autoQaShortcutRecognition, persistAssistantSettings)
   watch(selectedTheme, persistAppearanceSettings)
-  watch(
-    [
-      selectedAsrBackend,
-      asrModelStrategy,
-      asrShortVideoModel,
-      asrLongVideoModel,
-      asrBeamSize,
-      asrVadFilter,
-      asrFallbackEnabled,
-      selectedModel
-    ],
-    persistAsrSettings
-  )
-  watch(searchQuery, (value) => {
+  watch([searchQuery, librarySearchScope], ([value]) => {
     const requestVersion = ++searchRequestVersion
     if (searchTimer.value) {
       clearTimeout(searchTimer.value)
@@ -1635,11 +1722,13 @@ export function useAppController() {
     const query = value.trim()
     if (!query) {
       searchResults.value = []
+      searchResultContentItems.value = []
       searchingContent.value = false
       return
     }
     if (query.length < 2) {
       searchResults.value = []
+      searchResultContentItems.value = []
       searchingContent.value = false
       return
     }
@@ -1649,11 +1738,10 @@ export function useAppController() {
   })
 
   onMounted(async () => {
-    const hasLocalAsrSettings = restoreAsrSettings()
+    restoreAsrSettings()
     const hasLocalAiSettings = restoreAiSettings()
     restoreAssistantSettings()
     restoreAppearanceSettings()
-    restoreTelegramSettings()
 
     // Electron has already verified that this is the backend instance it
     // launched. Do not race it with an arbitrary renderer timeout: the
@@ -1689,18 +1777,6 @@ export function useAppController() {
         if (!availableAsrBackends.value.includes(selectedAsrBackend.value)) {
           selectedAsrBackend.value = 'auto'
         }
-      }
-      if (!hasLocalAsrSettings && res.data.whisper_model) {
-        selectedModel.value = res.data.whisper_model
-      }
-      if (!hasLocalAsrSettings) {
-        selectedAsrBackend.value = res.data.asr_backend || selectedAsrBackend.value
-        asrModelStrategy.value = res.data.asr_model_strategy || asrModelStrategy.value
-        asrShortVideoModel.value = res.data.asr_short_video_model || asrShortVideoModel.value
-        asrLongVideoModel.value = res.data.asr_long_video_model || asrLongVideoModel.value
-        asrBeamSize.value = 1
-        asrVadFilter.value = Boolean(res.data.asr_vad_filter ?? asrVadFilter.value)
-        asrFallbackEnabled.value = false
       }
       if (!hasLocalAiSettings && res.data.deepseek_model_option) {
         selectedAiModel.value = res.data.deepseek_model_option
@@ -1742,16 +1818,6 @@ export function useAppController() {
     loadClipboardStatus()
     loadOpenClawStatus()
     startOpenClawStatusPolling()
-    const hasBackendTelegramSettings = await loadTelegramSettings()
-    if (!hasBackendTelegramSettings && telegramBotToken.value.trim()) {
-      try {
-        await persistTelegramSettings()
-      } catch {
-        // 旧本地配置迁移失败时，仍保留表单里的值。
-      }
-    }
-    if (hasBackendTelegramSettings) telegramBotToken.value = ''
-    loadTelegramStatus()
     window.addEventListener('keydown', handleLibraryHistoryShortcut)
   })
 
@@ -1761,7 +1827,6 @@ export function useAppController() {
     stopTaskQueuePolling()
     stopClipboardStatusPolling()
     stopOpenClawStatusPolling()
-    stopTelegramStatusPolling()
     stopCookieStatusPolling()
     stopArticlePreparationStatusPolling()
     stopCompletionNotificationPolling()
@@ -1856,7 +1921,64 @@ export function useAppController() {
       clearTimeout(pollTimer.value)
       pollTimer.value = null
     }
+    stopTaskEventStream()
     taskPollFailureCount.value = 0
+  }
+
+  function stopTaskEventStream() {
+    if (taskEventSource) taskEventSource.close()
+    taskEventSource = null
+    taskEventSourceTaskId = ''
+  }
+
+  function startTaskEventStream(taskId) {
+    const normalizedTaskId = String(taskId || '')
+    if (!normalizedTaskId || typeof EventSource === 'undefined') return
+    if (taskEventSource && taskEventSourceTaskId === normalizedTaskId) return
+    stopTaskEventStream()
+
+    const source = new EventSource(`${API}/tasks/${encodeURIComponent(normalizedTaskId)}/events`)
+    taskEventSource = source
+    taskEventSourceTaskId = normalizedTaskId
+    source.addEventListener('task', (event) => {
+      let data
+      try {
+        data = JSON.parse(event.data)
+      } catch {
+        return
+      }
+      if (String(data?.task_id || '') !== normalizedTaskId) return
+      // Normal queue polling remains the durable source for history, while
+      // the local stream makes every progressive milestone visible at once:
+      // playable media, transcript readiness and the growing AI summary.
+      mergeBatchTasks([data])
+      applyTaskData(data)
+      const previousSnapshot = progressiveTaskSnapshots.get(normalizedTaskId)
+      void hydrateProgressiveTask(data, previousSnapshot)
+      if (terminalStatuses.has(data.status) && taskEventSourceTaskId === normalizedTaskId) {
+        stopTaskEventStream()
+      }
+    })
+    source.addEventListener('error', () => {
+      // EventSource reconnects itself. The regular task poll stays active as
+      // the durable fallback if a local backend restart closes this channel.
+    })
+  }
+
+  function syncTaskEventStreamForActiveContent() {
+    const contentItemId = String(activeWorkspaceContent.value?.id || '')
+    const activeTask = contentItemId
+      ? batchTasks.value.find((task) => (
+        String(task?.content_item_id || '') === contentItemId && isActiveTask(task)
+      ))
+      : null
+    if (activeTask?.task_id) {
+      startTaskEventStream(activeTask.task_id)
+      return
+    }
+    // A stream belongs to one open detail pane. Do not leave a hidden tab
+    // subscribed after the reader moves to a completed or unrelated item.
+    if (taskEventSourceTaskId) stopTaskEventStream()
   }
 
   function stopBatchPolling() {
@@ -2436,20 +2558,11 @@ export function useAppController() {
 
   function restoreAsrSettings() {
     try {
-      const raw = localStorage.getItem(ASR_SETTINGS_KEY)
-      if (!raw) return false
-      const data = JSON.parse(raw)
-      selectedAsrBackend.value = data.asr_backend || selectedAsrBackend.value
-      asrModelStrategy.value = data.asr_model_strategy || asrModelStrategy.value
-      asrShortVideoModel.value = data.asr_short_video_model || asrShortVideoModel.value
-      asrLongVideoModel.value = data.asr_long_video_model || asrLongVideoModel.value
-      selectedModel.value = data.whisper_model || selectedModel.value
-      asrBeamSize.value = 1
-      asrVadFilter.value = Boolean(data.asr_vad_filter ?? asrVadFilter.value)
-      asrFallbackEnabled.value = false
-      return true
+      // v1 exposed ASR tuning.  New tasks are fixed to the desktop policy, so
+      // discard that local preset instead of silently carrying it forward.
+      localStorage.removeItem(ASR_SETTINGS_KEY)
     } catch {
-      return false
+      // Storage availability does not affect the fixed ASR policy.
     }
   }
 
@@ -2727,6 +2840,7 @@ export function useAppController() {
     cancelling.value = false
     logs.value = []
     backendLogCount.value = 0
+    backendLogCountsByTaskId.clear()
     activeStep.value = 0
     currentStep.value = null
     taskStatus.value = 'idle'
@@ -2817,6 +2931,9 @@ export function useAppController() {
       taskPollFailureCount.value = 0
       const data = res.data
       applyTaskData(data)
+      if (!terminalStatuses.has(data.status)) startTaskEventStream(taskId)
+      const previousSnapshot = progressiveTaskSnapshots.get(data.task_id)
+      await hydrateProgressiveTask(data, previousSnapshot)
       await revealWechatArticleSnapshot(data)
       await revealVideoSnapshot(data)
       await revealTranscriptSnapshot(data)
@@ -2846,7 +2963,7 @@ export function useAppController() {
         return
       }
 
-      pollTimer.value = setTimeout(() => pollTask(taskId), 1500)
+      pollTimer.value = setTimeout(() => pollTask(taskId), isPipelineSummaryGenerating.value ? 220 : 1500)
     } catch (e) {
       taskPollFailureCount.value += 1
       const msg = e.message || '查询任务状态失败'
@@ -3249,10 +3366,20 @@ export function useAppController() {
     const restorableEntries = Array.isArray(entries) ? entries.filter((entry) => entry?.entry_type && entry?.id) : []
     if (!restorableEntries.length) return false
     try {
+      const restoredContentIds = new Set()
+      const restoredFolderIds = new Set()
       for (const entry of restorableEntries) {
-        await axios.post(`${API}/content/trash/${entry.entry_type}/${entry.id}/restore`, null, { timeout: 10000 })
+        const response = await axios.post(`${API}/content/trash/${entry.entry_type}/${entry.id}/restore`, null, { timeout: 10000 })
+        for (const id of response.data?.restored_content_ids || []) restoredContentIds.add(String(id))
+        for (const id of response.data?.restored_folder_ids || []) restoredFolderIds.add(String(id))
       }
       await Promise.all([loadContentItems(), loadLibraryTrash()])
+      // Folder metadata alone is intentionally lightweight. Restore the
+      // concrete file records returned by the backend as well, otherwise a
+      // restored file stays absent until the user manually expands its folder
+      // or a later global refresh happens.
+      if (restoredContentIds.size) await revealContentItems([...restoredContentIds])
+      if (restoredFolderIds.size) expandLibraryFolders([...restoredFolderIds])
       libraryUndoStack.value = []
       libraryRedoStack.value = []
       ElMessage.success(successText || (restorableEntries.length === 1
@@ -3914,6 +4041,10 @@ export function useAppController() {
       allContentItems.value = existing
         ? allContentItems.value.map((entry) => (String(entry.id) === String(detail.id) ? detail : entry))
         : [...allContentItems.value, detail]
+      // Detail hydration is also how a just-enqueued link enters the lazy
+      // file tree. Keep the presentation list in sync immediately instead of
+      // waiting for a terminal task refresh.
+      applyContentFilter()
       return detail
     } catch {
       // A stale persisted tab or a backend restart must not prevent the rest
@@ -4495,6 +4626,7 @@ export function useAppController() {
     const query = searchQuery.value.trim()
     if (!query) {
       searchResults.value = []
+      searchResultContentItems.value = []
       searchingContent.value = false
       return
     }
@@ -4502,16 +4634,27 @@ export function useAppController() {
     searchingContent.value = true
     try {
       const res = await axios.get(`${API}/search`, {
-        params: { q: query, limit: 20 },
+        params: { q: query, scope: librarySearchScope.value, limit: 200 },
         timeout: 10000
       })
       if (requestVersion !== searchRequestVersion) return
-      searchResults.value = res.data || []
-      const count = searchResults.value.length
+      const results = Array.isArray(res.data) ? res.data : []
+      const contentItemIds = results.map((item) => item.content_key).filter(Boolean)
+      const resolved = contentItemIds.length
+        ? await axios.post(`${API}/content/items/resolve`, { content_item_ids: contentItemIds }, { timeout: 10000 })
+        : { data: [] }
+      if (requestVersion !== searchRequestVersion) return
+      const itemsById = new Map((resolved.data || []).map((item) => [String(item.id), item]))
+      searchResults.value = results
+      searchResultContentItems.value = contentItemIds
+        .map((id) => itemsById.get(String(id)))
+        .filter(Boolean)
+      const count = searchResultContentItems.value.length
       const bucket = count === 0 ? '0' : (count <= 5 ? '1_5' : (count <= 20 ? '6_20' : '20_plus'))
       void recordTelemetry('search_completed', { result_count_bucket: bucket })
     } catch (e) {
       if (requestVersion !== searchRequestVersion) return
+      searchResultContentItems.value = []
       const msg = e.response?.data?.detail || e.message || '搜索失败'
       ElMessage.error(typeof msg === 'string' ? msg : '搜索失败')
     } finally {
@@ -4546,8 +4689,10 @@ export function useAppController() {
       const visibleTasks = tasks.filter((task) => shouldDisplayTask(task))
       const taskIds = visibleTasks.map((task) => task.task_id).filter(Boolean)
       let shouldRefreshContent = false
+      const progressiveUpdates = []
       for (const task of visibleTasks) {
         const previousSnapshot = taskQueueSnapshots.get(task.task_id)
+        const previousProgressiveSnapshot = progressiveTaskSnapshots.get(task.task_id)
         shouldRefreshContent = shouldRefreshContent || shouldRefreshContentForTask(
           task,
           previousSnapshot,
@@ -4556,6 +4701,17 @@ export function useAppController() {
         )
         const snapshot = taskContentSnapshot(task)
         taskQueueSnapshots.set(task.task_id, snapshot)
+        // The first queue read also contains historical task records. Do not
+        // turn startup into hundreds of content/detail requests; only live
+        // work (or the item the reader already has open) needs progressive
+        // hydration at that point. Later queue deltas are handled normally.
+        if (
+          taskQueueInitialized
+          || isActiveTask(task)
+          || activeWorkspaceTab.value?.content_item_id === task.content_item_id
+        ) {
+          progressiveUpdates.push(hydrateProgressiveTask(task, previousProgressiveSnapshot))
+        }
       }
 
       if (!tasks.length) {
@@ -4565,6 +4721,7 @@ export function useAppController() {
       batchTaskIds.value = [...new Set([...batchTaskIds.value, ...taskIds])]
       mergeBatchTasks(visibleTasks)
       taskQueueInitialized = true
+      await Promise.allSettled(progressiveUpdates)
       if (shouldRefreshContent) {
         await loadContentItems()
       }
@@ -4588,13 +4745,20 @@ export function useAppController() {
         use_cache: useCache.value
       }, { timeout: 10000 })
       const taskId = res.data.task_id
+      const taskSummary = {
+        ...res.data,
+        content_item_id: res.data.item?.id || item.id,
+        status: res.data.task_status || 'queued',
+      }
       if (taskId) {
         batchTaskNames.value[taskId] = item.title || item.source_url || `任务 ${taskId}`
         batchTaskIds.value = [...new Set([...batchTaskIds.value, taskId])]
+        mergeBatchTasks([taskSummary])
+        await hydrateProgressiveTask(taskSummary, progressiveTaskSnapshots.get(taskId))
         await pollBatchTasks()
       }
       await loadInboxItems()
-      await loadContentItems()
+      await syncVisibleProgressiveContent(taskSummary)
       clipboardStatus.value = '已创建处理任务'
       ElMessage.success('已加入处理队列')
     } catch (e) {
@@ -4716,6 +4880,7 @@ export function useAppController() {
       })
       batchTaskIds.value = [...new Set([...batchTaskIds.value, ...responses.map((task) => task.task_id)])]
       mergeBatchTasks(responses)
+      await Promise.allSettled(responses.map((task) => hydrateProgressiveTask(task, progressiveTaskSnapshots.get(task.task_id))))
       if (options.clearBatchText) {
         batchShareText.value = ''
       }
@@ -4758,6 +4923,7 @@ export function useAppController() {
       })
       batchTaskIds.value = [...new Set([...batchTaskIds.value, ...tasks.map((task) => task.task_id)])]
       mergeBatchTasks(tasks)
+      await Promise.allSettled(tasks.map((task) => hydrateProgressiveTask(task, progressiveTaskSnapshots.get(task.task_id))))
       uploadFiles.value = []
       ElMessage.success(`已创建 ${tasks.length} 个任务`)
       await pollBatchTasks()
@@ -4792,6 +4958,7 @@ export function useAppController() {
       })
       batchTaskIds.value = [...new Set([...batchTaskIds.value, ...tasks.map((task) => task.task_id)])]
       mergeBatchTasks(tasks)
+      await Promise.allSettled(tasks.map((task) => hydrateProgressiveTask(task, progressiveTaskSnapshots.get(task.task_id))))
       subtitleFiles.value = []
       ElMessage.success(`已创建 ${tasks.length} 个字幕任务`)
       await pollBatchTasks()
@@ -4821,19 +4988,30 @@ export function useAppController() {
       const byId = new Map((res.data || []).map((task) => [task.task_id, task]))
       const nextTasks = batchTaskIds.value.map((id) => byId.get(id)).filter(Boolean)
       const previousStatusByTaskId = new Map(batchTasks.value.map((task) => [task.task_id, task.status]))
+      const previousProgressiveSnapshots = new Map(
+        nextTasks.map((task) => [task.task_id, progressiveTaskSnapshots.get(task.task_id)])
+      )
       const newlyCompletedContentTasks = nextTasks.filter((task) => (
         task.content_item_id
         && terminalStatuses.has(task.status)
         && !terminalStatuses.has(previousStatusByTaskId.get(task.task_id))
       ))
       mergeBatchTasks(nextTasks)
+      await Promise.allSettled(nextTasks.map((task) => (
+        hydrateProgressiveTask(task, previousProgressiveSnapshots.get(task.task_id))
+      )))
       // Do not wait for every task in a batch to finish before refreshing the
       // tree. A content item receives its provider folder during processing,
       // so refreshing at each terminal transition keeps (for example) Douyin
       // videos inside their folder immediately.
       if (newlyCompletedContentTasks.length) await loadContentItems()
       if (activeBatchCount.value) {
-        batchPollTimer.value = setTimeout(() => pollBatchTasks(), 1500)
+        const hasStreamingSummary = nextTasks.some((task) => (
+          task.status === 'running'
+          && Number(task?.progress?.summarize || 0) > 0
+          && Number(task?.progress?.summarize || 0) < 100
+        ))
+        batchPollTimer.value = setTimeout(() => pollBatchTasks(), hasStreamingSummary ? 320 : 1500)
       } else {
         await loadContentItems()
       }
@@ -4892,6 +5070,25 @@ export function useAppController() {
     } catch (e) {
       const msg = e.response?.data?.detail || e.message || '取消失败'
       ElMessage.error(msg)
+    }
+  }
+
+  async function cancelActiveTasks() {
+    try {
+      const response = await axios.post(`${API}/tasks/cancel-active`, {}, { timeout: 10000 })
+      const cancelled = Array.isArray(response.data?.tasks) ? response.data.tasks : []
+      if (!cancelled.length) {
+        ElMessage.info('当前没有可取消的任务')
+        return
+      }
+      mergeBatchTasks(cancelled)
+      const activeResult = cancelled.find((task) => task.task_id === result.task_id)
+      if (activeResult) applyTaskData(activeResult)
+      ElMessage.warning(`已请求取消 ${response.data.cancelled_count || cancelled.length} 个任务`)
+      await pollBatchTasks()
+    } catch (error) {
+      const message = error.response?.data?.detail || error.message || '批量取消失败'
+      ElMessage.error(typeof message === 'string' ? message : '批量取消失败')
     }
   }
 
@@ -4972,6 +5169,7 @@ export function useAppController() {
     resetRunState()
     logs.value = []
     backendLogCount.value = 0
+    backendLogCountsByTaskId.clear()
     applyTaskData(task)
     activeView.value = 'library'
   }
@@ -5148,14 +5346,20 @@ export function useAppController() {
     addLog('提交任务…', 'info')
 
     try {
-      const res = await axios.post(`${API}/tasks`, {
-        share_text: text,
+      const res = await axios.post(`${API}/ingest/link`, {
+        text,
+        mode: 'process',
         ...asrRequestOptions(),
         ...aiRequestOptions(),
         use_cache: useCache.value
       }, { timeout: 10000 })
-      const data = res.data
+      const data = res.data.task || res.data
+      if (!data?.task_id) throw new Error('链接已识别，但未能创建处理任务')
       applyTaskData(data)
+      batchTaskNames.value[data.task_id] = res.data.item?.title || data.source_title || text
+      batchTaskIds.value = [...new Set([...batchTaskIds.value, data.task_id])]
+      mergeBatchTasks([data])
+      await hydrateProgressiveTask(data, progressiveTaskSnapshots.get(data.task_id))
       inputParseRequestId += 1
       shareText.value = ''
       parsedUrl.value = null
@@ -5249,9 +5453,9 @@ export function useAppController() {
     }
     try {
       const shouldAppendToObsidian = obsidianAutoWrite.value && Boolean(currentObsidianPath.value)
-      const response = await fetch(`${API}/qa/stream`, {
+      const response = await fetch(localApiRequestUrl(`${API}/qa/stream`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           question: modelQuestion,
           display_question: displayQuestion,
@@ -5362,9 +5566,9 @@ export function useAppController() {
     item.error = false
     refreshQaSessionHistory(contentItemId, session)
     try {
-      const response = await fetch(`${API}/qa/stream`, {
+      const response = await fetch(localApiRequestUrl(`${API}/qa/stream`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           question,
           display_question: String(item.displayQuestion || item.question || '').trim(),
@@ -5459,9 +5663,9 @@ export function useAppController() {
     }
 
     try {
-      const response = await fetch(`${API}/qa/stream`, {
+      const response = await fetch(localApiRequestUrl(`${API}/qa/stream`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           question: '请基于当前内容的完整原文生成 AI 摘要。',
           display_question: displayQuestion,
@@ -5786,6 +5990,7 @@ export function useAppController() {
     autoDownloadBilibiliVideo,
     douyinVideoQuality,
     searchQuery,
+    librarySearchScope,
     searchResults,
     searchingContent,
     searchTimer,
@@ -5907,7 +6112,6 @@ export function useAppController() {
     selectedMarkdownSizeBytes,
     selectedReportSourceStats,
     mediaPreviewUrl,
-    workspaceModeLabel,
     sidebarContentItems,
     sidebarTreeItems,
     activeWorkspaceTab,
@@ -5921,6 +6125,8 @@ export function useAppController() {
     activeWorkspaceTranscript,
     currentInsightHtml,
     currentInsightTitle,
+    isPipelineSummaryGenerating,
+    pipelineGeneratingSummaryText,
     currentQaEnabled,
     currentQaHint,
     canGenerateAiSummary,
@@ -6112,6 +6318,7 @@ export function useAppController() {
     pollBatchTasks,
     monitorCreatorSyncTasks,
     cancelBatchTask,
+    cancelActiveTasks,
     loadBatchTaskDetails,
     pauseBatchTask,
     resumeBatchTask,

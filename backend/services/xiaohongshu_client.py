@@ -69,6 +69,13 @@ def clear_xiaohongshu_cookie() -> None:
     xiaohongshu_cookie_path().unlink(missing_ok=True)
 
 
+def _is_guest_session(profile_data: object) -> bool:
+    if not isinstance(profile_data, dict):
+        return False
+    value = profile_data.get("guest")
+    return value is True or value == 1 or str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
 def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
     path = xiaohongshu_cookie_path()
     configured = path.is_file() and bool(path.read_text(encoding="utf-8", errors="ignore").strip())
@@ -88,13 +95,21 @@ def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
         }
     try:
         success, message, profile = _api().get_user_me()
-        user_id = str(((profile or {}).get("data") or {}).get("user_id") or "").strip()
-        if success and user_id:
+        profile_data = (profile or {}).get("data") or {}
+        user_id = str(profile_data.get("user_id") or "").strip()
+        if success and user_id and not _is_guest_session(profile_data):
             return {
                 "configured": True,
                 "state": "valid",
                 "label": "小红书登录态可用",
                 "detail": "会话已验证，可读取图文和“我的收藏”。",
+            }
+        if success and _is_guest_session(profile_data):
+            return {
+                "configured": True,
+                "state": "invalid",
+                "label": "小红书登录态需要更新",
+                "detail": "当前 Cookie 被小红书识别为访客会话，请重新登录并完成授权。",
             }
         return {
             "configured": True,
@@ -159,34 +174,99 @@ def fetch_note(
 
 
 def fetch_my_favorites(*, limit: int = 5) -> list[XiaohongshuNote]:
+    notes, _account = fetch_my_favorites_preview(limit=limit)
+    return notes
+
+
+def fetch_my_favorites_preview(
+    *,
+    limit: int = 50,
+    profile_user_id: str | None = None,
+) -> tuple[list[XiaohongshuNote], dict[str, str]]:
+    """Read a bounded, paginated preview of the current account's favorites.
+
+    The bundled collector exposes a cursor API with 30 entries per page.  The
+    old synchronizer intentionally read one page and then silently sliced it
+    to five.  Creator subscriptions need an explicit user-selected breadth,
+    so this bridge follows cursors only until that bounded request is met.
+    """
+    requested_limit = max(1, min(int(limit), 500))
     api = _api()
     try:
         success, message, profile = api.get_user_me()
-        user_id = str(((profile or {}).get("data") or {}).get("user_id") or "").strip()
+        profile_data = (profile or {}).get("data") or {}
+        user_id = str(profile_data.get("user_id") or "").strip()
         if not success or not user_id:
             raise XiaohongshuClientError(message or "未读取到当前登录账号")
-        # The upstream helper walks every page of a user's collection.  This
-        # product deliberately samples only the first page: background sync is
-        # incremental and capped, so fetching a large history wastes time and
-        # makes a normal source check look stalled.
-        success, message, payload = api.get_user_collect_note_info(user_id, "", xsec_source="pc_user")
-        notes = list(((payload or {}).get("data") or {}).get("notes") or [])
+        if _is_guest_session(profile_data):
+            raise XiaohongshuClientError("当前小红书登录态为访客会话，请在设置中重新登录并完成授权")
+        collection_user_id = str(profile_user_id or user_id).strip()
+        if not collection_user_id:
+            raise XiaohongshuClientError("未读取到收藏页账号标识")
+        account = {
+            "user_id": user_id,
+            "collection_user_id": collection_user_id,
+            "nickname": str(profile_data.get("nickname") or profile_data.get("nick_name") or "我的小红书收藏").strip(),
+            "avatar_url": str(profile_data.get("image") or profile_data.get("avatar") or "").strip(),
+        }
+        raw_notes: list[dict] = []
+        seen_note_ids: set[str] = set()
+        cursor = ""
+        # 500 / 30 is 17; the extra guard protects against an upstream cursor
+        # loop without turning an interactive search into an endless task.
+        for _page in range(18):
+            success, message, payload = api.get_user_collect_note_info(
+                collection_user_id,
+                cursor,
+                xsec_source="pc_user",
+            )
+            if not success or not isinstance(payload, dict):
+                raise XiaohongshuClientError(message or "小红书未返回收藏列表")
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            page_notes = data.get("notes") if isinstance(data.get("notes"), list) else []
+            for entry in page_notes:
+                if not isinstance(entry, dict):
+                    continue
+                note_id = str(entry.get("note_id") or entry.get("id") or "").strip()
+                if note_id and note_id in seen_note_ids:
+                    continue
+                raw_notes.append(entry)
+                if note_id:
+                    seen_note_ids.add(note_id)
+                if len(raw_notes) >= requested_limit:
+                    break
+            if len(raw_notes) >= requested_limit or not bool(data.get("has_more")):
+                break
+            next_cursor = str(data.get("cursor") or "").strip()
+            if not next_cursor or next_cursor == cursor:
+                break
+            cursor = next_cursor
     except Exception as exc:
         raise XiaohongshuClientError(f"读取小红书收藏失败：{exc}") from exc
-    if not success:
-        raise XiaohongshuClientError(f"读取小红书收藏失败：{message or '未知错误'}")
     resolved: list[XiaohongshuNote] = []
-    for entry in list(notes or [])[: max(1, min(int(limit), 20))]:
+    for entry in raw_notes[:requested_limit]:
         note_id = str(entry.get("note_id") or entry.get("id") or "").strip()
         token = str(entry.get("xsec_token") or "").strip()
         if not note_id:
             continue
         url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={token}&xsec_source=pc_user"
         try:
-            resolved.append(fetch_note(url, include_comments=False))
+            # List cards already expose the metadata used by the creator
+            # preview. Avoid serially reopening every note during search; the
+            # regular processing pipeline fetches full content after a user
+            # explicitly subscribes it.
+            resolved.append(_note_from_raw(entry, source_url=url))
         except XiaohongshuClientError:
-            continue
-    return resolved
+            try:
+                resolved.append(fetch_note(url, include_comments=False))
+            except XiaohongshuClientError:
+                continue
+        except (KeyError, TypeError, ValueError):
+            try:
+                resolved.append(fetch_note(url, include_comments=False))
+            except XiaohongshuClientError:
+                continue
+    return resolved, account
 
 
 def _api():
@@ -222,14 +302,23 @@ def _note_from_raw(raw: dict, *, source_url: str) -> XiaohongshuNote:
             images.append(candidate)
     interaction = card.get("interact_info") or {}
     raw_id = str(raw.get("id") or note_id_from_url(source_url))
+    description = str(card.get("desc") or "").strip()
+    title = str(card.get("title") or "").strip()
+    # Title is optional on XHS notes.  Prefer the first readable description
+    # line over a generic placeholder; when a note is genuinely textless, its
+    # stable note ID still makes the row identifiable and retryable.
+    if not title and description:
+        title = " ".join(description.split())[:80]
+    if not title:
+        title = f"小红书图文 · {raw_id[:12]}"
     return XiaohongshuNote(
         note_id=raw_id,
         source_url=normalize_note_url(source_url),
-        title=str(card.get("title") or "").strip() or "无标题小红书笔记",
+        title=title,
         author=str(user.get("nickname") or "小红书用户").strip(),
         author_url=f"https://www.xiaohongshu.com/user/profile/{str(user.get('user_id') or '').strip()}",
         avatar_url=str(user.get("avatar") or ""),
-        description=str(card.get("desc") or "").strip(),
+        description=description,
         image_urls=tuple(images),
         published_at=_format_timestamp(card.get("time")),
         tags=tuple(str(tag.get("name") or "").strip() for tag in list(card.get("tag_list") or []) if tag.get("name")),

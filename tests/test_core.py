@@ -98,6 +98,7 @@ from services.prompt_templates import PromptTemplateRepository
 from services.repository import ContentRepository, TaskRepository
 from services.runtime_components import (
     HUGGING_FACE_HUB_ENDPOINT,
+    HUGGING_FACE_HUB_FALLBACK_ENDPOINT,
     MLX_WHISPER_REPOS,
     _download_progress_class,
     _mlx_model_available,
@@ -175,7 +176,8 @@ class UrlParserTests(unittest.TestCase):
 
 class AsrBackendTests(unittest.TestCase):
     def test_mlx_whisper_repositories_use_current_public_names(self):
-        self.assertEqual(HUGGING_FACE_HUB_ENDPOINT, "https://huggingface.co")
+        self.assertEqual(HUGGING_FACE_HUB_ENDPOINT, "https://hf-mirror.com")
+        self.assertEqual(HUGGING_FACE_HUB_FALLBACK_ENDPOINT, "https://huggingface.co")
         self.assertEqual(MLX_WHISPER_REPOS["base"], "mlx-community/whisper-base-mlx")
         self.assertEqual(MLX_WHISPER_REPOS["small"], "mlx-community/whisper-small-mlx")
         self.assertEqual(MLX_WHISPER_REPOS["large-v3"], "mlx-community/whisper-large-v3-mlx")
@@ -352,27 +354,28 @@ class ClipboardWatcherTests(unittest.TestCase):
         self.assertEqual(created_requests[1].share_text, "https://b23.tv/abc123")
 
     def test_clipboard_watcher_defaults_to_manual_processing(self):
-        old_data_dir = settings.data_dir
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                settings.data_dir = Path(temp_dir)
-                watcher = ClipboardWatcher(clipboard_reader=lambda: "")
-                watcher.start()
-                watcher.stop()
+        created_requests = []
 
-                first = watcher.scan_text("https://www.bilibili.com/video/BV1xx411c7mD")
-                second = watcher.scan_text("https://www.bilibili.com/video/BV1xx411c7mD")
-                retry = watcher.scan_text("稍后再看 https://www.bilibili.com/video/BV1xx411c7mD")
+        def fake_create(request):
+            created_requests.append(request)
+            return SimpleNamespace(task_id=f"task-{len(created_requests)}")
 
-                self.assertEqual(len(first), 1)
-                self.assertEqual(len(second), 0)
-                self.assertEqual(len(retry), 1)
-                self.assertIsNone(first[0].item_id)
-                self.assertIsNotNone(first[0].task_id)
-                self.assertEqual(first[0].capture_mode, "task")
-                self.assertFalse(retry[0].duplicate)
-        finally:
-            settings.data_dir = old_data_dir
+        watcher = ClipboardWatcher(task_creator=fake_create, clipboard_reader=lambda: "")
+        watcher.start()
+        watcher.stop()
+
+        first = watcher.scan_text("https://www.bilibili.com/video/BV1xx411c7mD")
+        second = watcher.scan_text("https://www.bilibili.com/video/BV1xx411c7mD")
+        retry = watcher.scan_text("稍后再看 https://www.bilibili.com/video/BV1xx411c7mD")
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 0)
+        self.assertEqual(len(retry), 1)
+        self.assertIsNone(first[0].item_id)
+        self.assertIsNotNone(first[0].task_id)
+        self.assertEqual(first[0].capture_mode, "task")
+        self.assertFalse(retry[0].duplicate)
+        self.assertEqual(created_requests[0].execution_mode, "background")
 
     def test_clipboard_watcher_restore_primes_current_clipboard_without_creating_task(self):
         created_requests = []
@@ -470,23 +473,16 @@ class WatcherPersistenceTests(unittest.TestCase):
         finally:
             settings.data_dir = old_data_dir
 
-    def test_restore_enabled_watchers_only_restores_previously_enabled_listeners(self):
+    def test_restore_enabled_watchers_restores_supported_listeners_only(self):
         old_data_dir = settings.data_dir
         try:
-            with tempfile.TemporaryDirectory() as temp_dir, patch(
-                "services.telegram_settings._load_keychain_token", return_value="test-token"
-            ), patch("services.telegram_settings._save_keychain_token"):
+            with tempfile.TemporaryDirectory() as temp_dir:
                 settings.data_dir = Path(temp_dir)
                 save_clipboard_watcher_settings({"enabled": True, "whisper_model": "base"})
-                save_telegram_settings({"bot_token": "test-token", "allowed_user_ids": [100], "watch_enabled": True})
-                with (
-                    patch("services.watcher_restore.clipboard_watcher.start") as clipboard_start,
-                    patch("services.watcher_restore.telegram_watcher.start") as telegram_start,
-                ):
+                with patch("services.watcher_restore.clipboard_watcher.start") as clipboard_start:
                     restore_enabled_watchers()
 
                 self.assertTrue(clipboard_start.call_args.kwargs["skip_current_clipboard"])
-                telegram_start.assert_called_once_with()
         finally:
             settings.data_dir = old_data_dir
 
@@ -2269,7 +2265,7 @@ class SubtitleTests(unittest.TestCase):
                     patch("services.pipeline_runner.transcribe_with_details") as transcribe_mock,
                     patch("services.pipeline_runner.load_content_source_text"),
                     patch("services.pipeline_runner.fetch_bilibili_source_context", return_value=source_context) as context_mock,
-                    patch("services.pipeline_runner.summarize", return_value=("字幕笔记", "## 快速判断\n值得看")) as summarize_mock,
+                    patch("services.pipeline_runner.summarize_stream", return_value=("字幕笔记", "## 快速判断\n值得看")) as summarize_mock,
                     patch(
                         "services.pipeline_runner.replace_content_summary_and_sync",
                         return_value=SimpleNamespace(
@@ -2338,7 +2334,7 @@ class SubtitleTests(unittest.TestCase):
                     patch("services.pipeline_runner.download_video", side_effect=download_after_summary),
                     patch("services.pipeline_runner.extract_audio_with_details") as extract_mock,
                     patch("services.pipeline_runner.transcribe_with_details") as transcribe_mock,
-                    patch("services.pipeline_runner.summarize", side_effect=summarize_while_downloading),
+                    patch("services.pipeline_runner.summarize_stream", side_effect=summarize_while_downloading),
                     patch("services.pipeline_runner.load_content_source_text"),
                     patch(
                         "services.pipeline_runner.replace_content_summary_and_sync",
@@ -2384,7 +2380,7 @@ class SubtitleTests(unittest.TestCase):
                     patch("services.pipeline_runner.download_video") as download_mock,
                     patch("services.pipeline_runner.extract_audio_with_details") as extract_mock,
                     patch("services.pipeline_runner.transcribe_with_details") as transcribe_mock,
-                    patch("services.pipeline_runner.summarize", return_value=("字幕笔记", "仅使用外挂字幕完成总结")),
+                    patch("services.pipeline_runner.summarize_stream", return_value=("字幕笔记", "仅使用外挂字幕完成总结")),
                     patch("services.pipeline_runner.load_content_source_text"),
                     patch(
                         "services.pipeline_runner.replace_content_summary_and_sync",
@@ -2499,7 +2495,7 @@ class SubtitleTests(unittest.TestCase):
                     patch("services.pipeline_runner.download_video", return_value=download_result) as download_mock,
                     patch("services.pipeline_runner.extract_audio_with_details", return_value=extract_result) as extract_mock,
                     patch("services.pipeline_runner.transcribe_with_details", return_value=transcribe_result) as transcribe_mock,
-                    patch("services.pipeline_runner.summarize", return_value=("回退笔记", "## 快速判断\n可用")),
+                    patch("services.pipeline_runner.summarize_stream", return_value=("回退笔记", "## 快速判断\n可用")),
                 ):
                     result = run_pipeline_sync(
                         source_url,
@@ -2556,7 +2552,7 @@ class SubtitleTests(unittest.TestCase):
                     patch("services.pipeline_runner.download_video", return_value=download_result),
                     patch("services.pipeline_runner.extract_audio_with_details", return_value=extract_result),
                     patch("services.pipeline_runner.transcribe_with_details", return_value=transcribe_result),
-                    patch("services.pipeline_runner.summarize", return_value=("抖音笔记", "## 快速判断\n可用")) as summarize_mock,
+                    patch("services.pipeline_runner.summarize_stream", return_value=("抖音笔记", "## 快速判断\n可用")) as summarize_mock,
                 ):
                     result = run_pipeline_sync(
                         "https://v.douyin.com/abc123/",
@@ -2594,7 +2590,7 @@ class SubtitleTests(unittest.TestCase):
                     patch("services.pipeline_runner.download_video") as download_mock,
                     patch("services.pipeline_runner.extract_audio_with_details") as extract_mock,
                     patch("services.pipeline_runner.transcribe_with_details") as transcribe_mock,
-                    patch("services.pipeline_runner.summarize", return_value=("本地字幕笔记", "## 快速判断\n可读")),
+                    patch("services.pipeline_runner.summarize_stream", return_value=("本地字幕笔记", "## 快速判断\n可读")),
                 ):
                     result = run_pipeline_sync(
                         local_subtitle_path=str(subtitle_path),
@@ -4910,7 +4906,7 @@ class TaskApiTests(unittest.TestCase):
         finally:
             settings.data_dir = old_data_dir
 
-    def test_task_manager_serializes_desktop_pipeline_tasks(self):
+    def test_task_manager_bounds_desktop_pipeline_coordinators(self):
         old_data_dir = settings.data_dir
         old_pipeline_concurrency = settings.pipeline_concurrency
         try:
@@ -4949,7 +4945,7 @@ class TaskApiTests(unittest.TestCase):
                     time.sleep(0.05)
 
                 running_ids = {call.args[0] for call in run_mock.call_args_list}
-                self.assertEqual(running_ids, {"parallel-1"})
+                self.assertEqual(running_ids, {"parallel-1", "parallel-2"})
                 self.assertNotIn("parallel-3", running_ids)
                 manager._executor.shutdown(wait=True, cancel_futures=True)
         finally:
@@ -5308,6 +5304,43 @@ class UploadApiTests(unittest.TestCase):
                 self.assertEqual(len(tasks), 1)
                 self.assertEqual(tasks[0]["source_title"], "lesson")
                 self.assertTrue(tasks[0]["local_subtitle_path"].endswith(".vtt"))
+        finally:
+            settings.data_dir = old_data_dir
+
+    def test_upload_rejects_oversized_file_without_leaving_a_partial_copy(self):
+        old_data_dir = settings.data_dir
+        old_file_limit = settings.upload_max_file_bytes
+        old_batch_limit = settings.upload_max_batch_bytes
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                settings.data_dir = Path(temp_dir)
+                settings.upload_max_file_bytes = 4
+                settings.upload_max_batch_bytes = 16
+                response = TestClient(app).post(
+                    "/api/upload-tasks",
+                    files=[("files", ("too-large.mp4", b"12345", "video/mp4"))],
+                )
+                self.assertEqual(response.status_code, 413)
+                self.assertFalse((Path(temp_dir) / "uploads").exists())
+        finally:
+            settings.data_dir = old_data_dir
+            settings.upload_max_file_bytes = old_file_limit
+            settings.upload_max_batch_bytes = old_batch_limit
+
+    def test_invalid_file_in_batch_removes_earlier_uploaded_files(self):
+        old_data_dir = settings.data_dir
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                settings.data_dir = Path(temp_dir)
+                response = TestClient(app).post(
+                    "/api/upload-subtitle-tasks",
+                    files=[
+                        ("files", ("valid.vtt", b"WEBVTT", "text/vtt")),
+                        ("files", ("invalid.txt", b"not a subtitle", "text/plain")),
+                    ],
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse((Path(temp_dir) / "uploads").exists())
         finally:
             settings.data_dir = old_data_dir
 

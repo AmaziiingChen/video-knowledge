@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,10 +49,23 @@ def default_deepseek_pricing() -> dict[str, dict[str, float]]:
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=(
+            Path(os.environ["KNOWLEDGEHUB_ENV_FILE"]).expanduser()
+            if os.environ.get("KNOWLEDGEHUB_ENV_FILE")
+            else Path(__file__).with_name(".env")
+        )
+    )
     # Desktop builds override DATA_DIR. These defaults also keep a source checkout
     # usable on another Mac without carrying the original developer's home path.
     obsidian_vault: Path = PROJECT_ROOT / "data" / "obsidian"
     data_dir: Path = PROJECT_ROOT / "data"
+    # Resource limits are enforced while multipart data is copied to disk. They
+    # stay out of the normal UI because they protect the local service rather
+    # than describe a user-facing media preference.
+    upload_max_file_bytes: int = 4 * 1024 * 1024 * 1024
+    upload_max_batch_bytes: int = 8 * 1024 * 1024 * 1024
+    upload_max_files: int = 20
     # Source directory consumed by the static public-report build. It is kept
     # outside SQLite so the deployment package contains only explicit public
     # artifacts, never the local application database or caches.
@@ -94,12 +107,14 @@ class Settings(BaseSettings):
     # be downloaded and retained.  It can still be enabled explicitly for a
     # compatibility investigation.
     asr_fallback_enabled: bool = False
-    # Network-bound article snapshots and DeepSeek requests can safely share a
-    # modest worker pool. ASR keeps its separate lower limit below.
-    # Desktop video work is intentionally serialized: concurrent downloads,
-    # FFmpeg, and ASR saturate a laptop far too easily.
-    pipeline_concurrency: int = 1
-    asr_concurrency: int = 2
+    # This is intentionally environment-only for now.  It controls only
+    # optional Whisper model downloads, never collector or media traffic.
+    hugging_face_hub_endpoint: str = "https://hf-mirror.com"
+    # Task coordinators may overlap lightweight work, while the pipeline keeps
+    # actual downloads and ASR in their own single-resource lanes. These
+    # values remain for compatibility with existing local settings.
+    pipeline_concurrency: int = 3
+    asr_concurrency: int = 1
     ffmpeg_path: str = ""
     yt_dlp_path: str = ""
     douyin_cookie_file: str = ""
@@ -154,12 +169,9 @@ class Settings(BaseSettings):
     miniprogram_forum_capture_enabled: bool = False
     # Manual updates only: clients read a strict public manifest and open its
     # download page in the browser. Empty values disable update checks.
-    app_version: str = "0.0.0"
+    app_version: str = "0.1.0"
     release_manifest_url: str = ""
     download_page_url: str = ""
-
-    class Config:
-        env_file = Path(os.environ.get("KNOWLEDGEHUB_ENV_FILE", "")).expanduser() if os.environ.get("KNOWLEDGEHUB_ENV_FILE") else Path(__file__).with_name(".env")
 
 settings = Settings()
 ensure_private_data_directory(settings.data_dir)

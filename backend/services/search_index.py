@@ -114,15 +114,26 @@ def upsert_source_text_document(
         connection.commit()
 
 
-def search_documents(query: str, *, limit: int = 20) -> list[SearchResult]:
+def search_documents(query: str, *, limit: int = 20, scope: str = "all") -> list[SearchResult]:
     normalized = query.strip()
     if not normalized:
         return []
+    if scope not in {"all", "title", "source"}:
+        raise ValueError(f"unsupported search scope: {scope}")
     ensure_database_initialized()
     with connect() as connection:
-        rows = _search_fts(connection, normalized, limit=limit)
-        if not rows:
-            rows = _search_like(connection, normalized, limit=limit)
+        if scope == "title":
+            rows = _search_title(connection, normalized, limit=limit)
+        elif scope == "source":
+            rows = _search_source(connection, normalized, limit=limit)
+        else:
+            # FTS is fast but tokenization cannot express every CJK substring.
+            # Always merge the SQL substring pass so a few FTS matches do not
+            # hide other valid results from the same full local database.
+            rows = [
+                *_search_fts(connection, normalized, limit=limit),
+                *_search_like(connection, normalized, limit=limit),
+            ]
         return _merge_search_rows(rows, normalized, limit=limit)
 
 
@@ -320,6 +331,47 @@ def _search_like(connection: sqlite3.Connection, query: str, *, limit: int) -> l
         """,
         (pattern, pattern, pattern, limit),
         ).fetchall()
+
+
+def _search_title(connection: sqlite3.Connection, query: str, *, limit: int) -> list[sqlite3.Row]:
+    pattern = f"%{query}%"
+    return connection.execute(
+        """
+        SELECT content_search.content_item_id, content_search.title, content_search.summary, content_search.transcript
+        FROM content_search
+        JOIN content_items ON content_items.id = content_search.content_item_id
+        WHERE content_items.deleted_at IS NULL
+          AND content_search.title LIKE ?
+        ORDER BY content_search.title
+        LIMIT ?
+        """,
+        (pattern, limit),
+    ).fetchall()
+
+
+def _search_source(connection: sqlite3.Connection, query: str, *, limit: int) -> list[sqlite3.Row]:
+    pattern = f"%{query}%"
+    return connection.execute(
+        """
+        SELECT content_items.id AS content_item_id,
+               COALESCE(content_search.title, content_items.title, '') AS title,
+               COALESCE(content_search.summary, '') AS summary,
+               COALESCE(content_search.transcript, '') AS transcript
+        FROM content_items
+        LEFT JOIN content_search ON content_search.content_item_id = content_items.id
+        WHERE content_items.deleted_at IS NULL
+          AND content_items.library_visible = 1
+          AND (
+            content_items.source_name LIKE ?
+            OR content_items.source_provider LIKE ?
+            OR content_items.content_type LIKE ?
+            OR content_items.source_url LIKE ?
+          )
+        ORDER BY content_items.title
+        LIMIT ?
+        """,
+        (pattern, pattern, pattern, pattern, limit),
+    ).fetchall()
 
 
 def _merge_search_rows(

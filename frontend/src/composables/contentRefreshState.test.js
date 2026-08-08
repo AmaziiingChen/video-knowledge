@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import {
   mergeUniqueContentItems,
+  progressiveTaskSnapshot,
+  shouldHydrateProgressiveTask,
   shouldRefreshContentForTask,
   taskContentSnapshot
 } from './contentRefreshState.js'
@@ -32,5 +34,28 @@ test('refreshes content once when a task reaches a terminal state', () => {
   assert.equal(
     shouldRefreshContentForTask(task, taskContentSnapshot(task), true, terminalStatuses),
     false
+  )
+})
+
+test('hydrates a task only when a readable or playable milestone changes', () => {
+  const queued = { status: 'queued', content_item_id: 'content-a', step: 'parse' }
+  assert.equal(shouldHydrateProgressiveTask(queued, undefined), true)
+
+  const downloading = {
+    status: 'running',
+    content_item_id: 'content-a',
+    step: 'download',
+    progress: { transcribe: 0 },
+  }
+  assert.equal(shouldHydrateProgressiveTask(downloading, progressiveTaskSnapshot(downloading)), false)
+
+  const subtitlesReady = {
+    ...downloading,
+    step: 'transcribe',
+    progress: { transcribe: 100 },
+  }
+  assert.equal(
+    shouldHydrateProgressiveTask(subtitlesReady, progressiveTaskSnapshot(downloading)),
+    true
   )
 })

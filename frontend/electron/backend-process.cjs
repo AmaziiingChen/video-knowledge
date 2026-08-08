@@ -1,6 +1,6 @@
 function backendSpawnOptions(platform = process.platform) {
-  // Uvicorn's development reloader owns a worker process. Giving the launch
-  // its own group lets shutdown address both without touching another app.
+  // Give the local backend its own process group. This lets Electron stop the
+  // server and any child media workers without touching another app.
   return { detached: platform !== 'win32' }
 }
 

@@ -2,6 +2,7 @@ import os
 import subprocess
 import time
 import multiprocessing as mp
+import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from collections.abc import Callable
@@ -23,9 +24,15 @@ from services.runtime_components import (
 )
 from services.text_normalizer import normalize_transcript_segments, normalize_transcript_text
 
+
+logger = logging.getLogger(__name__)
+
 _model = None
 _models: dict[str, Any] = {}
-_asr_semaphore = BoundedSemaphore(max(1, int(settings.asr_concurrency or 1)))
+# ASR is the one CPU/GPU-heavy stage in the desktop media pipeline.  Keep it
+# serial even when a legacy environment file still contains a higher value;
+# downloads and model summaries can proceed independently in other workers.
+_asr_semaphore = BoundedSemaphore(1)
 
 ASR_BACKENDS = {"auto", "mlx", "faster_whisper"}
 @dataclass
@@ -344,6 +351,10 @@ def _transcribe_mlx_inline(
     try:
         import mlx_whisper
     except Exception as exc:
+        # The short task error must remain safe for the UI, while the backend
+        # log retains the native-extension traceback needed to distinguish a
+        # transient Metal/session issue from a packaging or compatibility bug.
+        logger.exception("MLX Whisper extension initialization failed")
         return TranscriptionResult(
             success=False,
             error=f"MLX Whisper 不可用: {exc}",
@@ -392,6 +403,7 @@ def _transcribe_mlx_inline(
             backend="mlx",
         )
     except Exception as exc:
+        logger.exception("MLX Whisper transcription failed")
         return TranscriptionResult(
             success=False,
             error=f"MLX Whisper 转写异常: {exc}",

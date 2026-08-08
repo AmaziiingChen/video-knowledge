@@ -1004,6 +1004,7 @@
 }
 
 .app-shell {
+  position: relative;
   width: 100vw;
   height: 100vh;
   min-width: 0;
@@ -1050,17 +1051,30 @@
 }
 
 .topbar {
-  height: 32px;
-  min-height: 32px;
+  height: 40px;
+  min-height: 40px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
-  padding: 0 8px;
+  padding: 0;
+  overflow: hidden;
   border-bottom: 1px solid var(--vk-border);
   background: var(--vk-bg-quiet);
   color: var(--vk-text);
   user-select: none;
+}
+
+.topbar.is-single-pane-topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 8px;
+}
+
+.topbar.is-single-pane-topbar .topbar-actions {
+  grid-column: auto;
+  margin-left: auto;
 }
 
 :global(html.desktop-shell .topbar) {
@@ -1069,12 +1083,8 @@
   -webkit-app-region: drag;
 }
 
-:global(html.desktop-shell .brand) {
+:global(html.desktop-shell .is-single-pane-topbar .brand) {
   padding-left: 76px;
-}
-
-:global(html.desktop-shell .topbar-actions) {
-  -webkit-app-region: no-drag;
 }
 
 :global(html.desktop-shell .topbar button),
@@ -1096,6 +1106,70 @@
 :global(html.desktop-shell .main-canvas input),
 :global(html.desktop-shell .main-canvas textarea) {
   -webkit-app-region: no-drag;
+}
+
+.workspace-primary-controls {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vk-space-xs);
+  padding: 0 var(--vk-space-control);
+}
+
+/* Native traffic lights sit on a slightly lower optical baseline than the
+   glyphs used by our workspace tools. Move the glyph artwork—not its 28px
+   hit target—so the folder, search and sidebar controls share that baseline. */
+.workspace-primary-controls .topbar-icon-button > :is(.svg-mask-icon, .panel-toggle-icon),
+.workspace-primary-controls.is-collapsed .topbar-icon-button > :is(.svg-mask-icon, .panel-toggle-icon) {
+  transform: translateY(1px);
+}
+
+:global(html.desktop-shell .workspace-primary-controls:not(.is-collapsed)) {
+  /* The primary header begins just right of the activity rail, so it needs
+     the full traffic-light clearance. */
+  padding-left: calc(var(--vk-space-page) + 24px);
+}
+
+.workspace-editor-header-content {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.workspace-primary-controls.is-collapsed {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.workspace-editor-header-content .workspace-primary-controls.is-collapsed {
+  padding-left: calc(var(--vk-space-section) + var(--vk-space-cluster));
+}
+
+.workspace-primary-collapse {
+  margin-left: auto;
+}
+
+.workspace-editor-header-content .workspace-tabs-shell {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+/* When the context pane is hidden, global chrome actions occupy the editor's
+   right edge. Reserve that exact region so tabs scroll before, never beneath,
+   the controls. With a visible context pane, its own header owns the region. */
+.workspace-editor-header-content.is-context-collapsed .workspace-tabs-shell {
+  margin-right: var(--workspace-global-actions-width);
+}
+
+.single-pane-chrome-actions {
+  width: auto;
+  flex: 0 0 auto;
 }
 
 .brand,
@@ -1141,10 +1215,6 @@
   white-space: nowrap;
 }
 
-.topbar-actions {
-  justify-content: flex-end;
-}
-
 .topbar-command-trigger {
   height: 26px;
   display: inline-grid;
@@ -1178,6 +1248,28 @@
   font-family: var(--vk-font-mono);
   font-size: 9px;
   line-height: 1.1;
+}
+
+.topbar-view-title {
+  min-width: 0;
+  padding: 0 var(--vk-space-cluster);
+  overflow: hidden;
+  color: var(--vk-muted);
+  font-size: var(--vk-type-label-size);
+  font-weight: var(--vk-weight-regular);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-actions {
+  grid-column: 4;
+  min-width: 0;
+  overflow: hidden;
+  justify-content: flex-end;
+  gap: var(--vk-space-xs);
+  padding: 0 var(--vk-space-control);
+  background: var(--vk-bg-quiet);
 }
 
 .layout-toggle-group {
@@ -1344,69 +1436,63 @@
 }
 
 .startup-gate {
-  position: absolute;
-  z-index: 24;
+  position: fixed;
+  z-index: 5000;
   inset: 0;
   display: grid;
   place-items: center;
-  padding: var(--vk-space-section);
-  background: color-mix(in srgb, var(--vk-bg-center) 52%, transparent);
-  backdrop-filter: blur(8px) saturate(0.92);
-  -webkit-backdrop-filter: blur(8px) saturate(0.92);
+  padding: var(--vk-space-wide);
+  background: var(--vk-bg-center);
+  -webkit-app-region: drag;
 }
 
-.startup-gate-card {
-  width: min(100%, 360px);
+.startup-gate-content {
+  width: min(88vw, 1440px);
   display: grid;
-  gap: var(--vk-space-sm);
-  padding: 20px;
-  border: 1px solid color-mix(in srgb, var(--vk-border) 82%, transparent);
-  border-radius: var(--vk-radius-surface);
-  background: color-mix(in srgb, var(--vk-bg-panel) 94%, var(--vk-bg-center));
-  box-shadow: 0 12px 30px color-mix(in srgb, var(--vk-text) 10%, transparent);
-  color: var(--vk-text);
+  justify-items: center;
+  gap: var(--vk-space-section);
+  transform: translateY(3vh);
 }
 
-.startup-gate-label {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-  font-weight: var(--vk-weight-medium);
-  letter-spacing: var(--vk-tracking-meta);
-}
-
-.startup-gate-card strong {
-  font-size: var(--vk-type-reading-size);
-  font-weight: var(--vk-weight-strong);
-  line-height: var(--vk-leading-heading);
-}
-
-.startup-gate-card p {
+.startup-gate-status {
   margin: 0;
   color: var(--vk-muted);
   font-size: var(--vk-type-body-size);
-  line-height: var(--vk-leading-body);
+  font-weight: var(--vk-weight-medium);
+  letter-spacing: var(--vk-tracking-meta);
+  line-height: var(--vk-leading-label);
+  text-align: center;
 }
 
 .startup-gate-progress {
-  height: 3px;
+  width: 100%;
+  height: 5px;
   overflow: hidden;
   border-radius: var(--vk-radius-pill);
-  background: color-mix(in srgb, var(--vk-accent) 17%, var(--vk-bg-hover));
+  background: color-mix(in srgb, var(--vk-accent) 22%, var(--vk-bg-center));
 }
 
 .startup-gate-progress span {
   display: block;
-  width: 38%;
+  width: 34%;
   height: 100%;
   border-radius: inherit;
   background: var(--vk-accent-strong);
-  animation: startup-gate-progress 1.15s var(--vk-ease-out) infinite;
+  animation: startup-gate-progress 1.45s var(--vk-ease-out) infinite;
+}
+
+.startup-gate-recovery {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--vk-space-control);
+  color: var(--vk-muted);
+  font-size: var(--vk-type-label-size);
 }
 
 .startup-gate-retry {
-  justify-self: start;
-  margin-top: var(--vk-space-xs);
   border-radius: var(--vk-radius-control);
+  -webkit-app-region: no-drag;
 }
 
 .startup-gate-enter-active,
@@ -1435,6 +1521,10 @@
     width: 58%;
     animation: none;
   }
+
+  .startup-gate-content {
+    transform: none;
+  }
 }
 
 body.workspace-resizing,
@@ -1460,12 +1550,29 @@ body.workspace-resizing * {
   white-space: nowrap;
 }
 
-.statusbar-breadcrumb-slot {
+.statusbar-context-slot {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
   align-items: center;
   overflow: hidden;
+}
+
+.statusbar-breadcrumb-slot {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.statusbar-summary {
+  flex: 0 0 auto;
+  min-width: max-content;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .statusbar-static {
@@ -2245,12 +2352,21 @@ body.workspace-resizing * {
 }
 
 
-:global(.main-canvas),
 :global(.editor-surface),
 :global(.workspace-tool-surface) {
   height: 100%;
   min-height: 0;
   border-radius: var(--vk-radius-structural);
+  background: var(--vk-bg-center);
+}
+
+/* The canvas contains the central reading/preview workbench. Unlike a
+   settings surface, it must not clip videos, images or transcript panes into
+   a rounded card. */
+:global(.main-canvas) {
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
   background: var(--vk-bg-center);
 }
 
@@ -2408,14 +2524,6 @@ body.workspace-resizing * {
 }
 
 @media (max-width: 1180px) {
-  .topbar {
-    gap: 8px;
-  }
-
-  .brand h1 {
-    max-width: 44vw;
-  }
-
   .statusbar {
     height: 28px;
     min-height: 28px;

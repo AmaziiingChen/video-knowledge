@@ -26,12 +26,14 @@ router = APIRouter()
 
 class CreatorSourceRequest(BaseModel):
     source_url: str = Field(min_length=1, max_length=2000)
+    # Initial import only. Scheduled checks use persisted source membership as
+    # their boundary rather than a user-entered item cap.
     limit: int = Field(default=1, ge=1, le=500)
     published_after: str | None = Field(default=None, max_length=32)
+    published_before: str | None = Field(default=None, max_length=32)
     auto_process: bool = True
     sync_interval_minutes: int = Field(default=360, ge=30, le=1440)
     processing_mode: str = Field(default="full", pattern="^(metadata|transcript|full)$")
-    queue_limit: int = Field(default=1, ge=1, le=500)
     selected_video_ids: list[str] | None = Field(default=None, max_length=500)
     allow_personal_sources: bool = False
 
@@ -41,7 +43,6 @@ class CreatorSourceSettingsRequest(BaseModel):
     auto_process: bool | None = None
     processing_mode: str | None = Field(default=None, pattern="^(metadata|transcript|full)$")
     sync_interval_minutes: int | None = Field(default=None, ge=30, le=1440)
-    queue_limit: int | None = Field(default=None, ge=1, le=500)
 
 
 class CreatorVideoResponse(BaseModel):
@@ -148,6 +149,7 @@ async def preview_creator_source_endpoint(req: CreatorSourceRequest):
             source_url=req.source_url,
             limit=req.limit,
             published_after=req.published_after,
+            published_before=req.published_before,
             allow_personal_sources=req.allow_personal_sources,
         )
     except CreatorSyncError as exc:
@@ -167,10 +169,9 @@ async def sync_creator_source_endpoint(req: CreatorSourceRequest):
 @router.post("/creator-sources/{source_id}/sync", response_model=CreatorSyncResponse)
 async def sync_saved_creator_source_endpoint(source_id: str):
     try:
-        # An explicit user action may recover items that failed before a
-        # collector or parser fix. Scheduled checks intentionally do not keep
-        # retrying an old failed backlog.
-        result = await asyncio.to_thread(sync_saved_creator_source, source_id, retry_existing_items=True)
+        # This endpoint is the ordinary update check. Historical failures are
+        # retried only through the explicit retry action/task payload.
+        result = await asyncio.to_thread(sync_saved_creator_source, source_id, retry_existing_items=False)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="创作者订阅不存在") from exc
     except CreatorSyncError as exc:

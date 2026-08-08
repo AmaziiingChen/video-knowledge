@@ -64,19 +64,12 @@
           class="assistant-message-body qa-answer"
           v-html="renderMarkdown(generatingSummaryText)"
         />
-        <div
+        <AiSkeletonStream
           v-else
-          class="assistant-message-body qa-answer qa-answer-skeleton"
-          role="status"
-          aria-live="polite"
+          class="assistant-message-body qa-answer"
+          label="正在生成 AI 摘要"
           aria-label="AI 正在生成摘要"
-        >
-          <span class="assistant-summary-generation-label">正在生成 AI 摘要</span>
-          <span class="skeleton-line wide"></span>
-          <span class="skeleton-line"></span>
-          <span class="skeleton-line medium"></span>
-          <span class="skeleton-line short"></span>
-        </div>
+        />
       </article>
 
       <template v-for="(item, index) in qaHistory" :key="index">
@@ -97,12 +90,11 @@
             class="assistant-message-body qa-answer"
             v-html="renderMarkdown(item.answer)"
           />
-          <div v-else-if="item.pending" class="assistant-message-body qa-answer qa-answer-skeleton" role="status" aria-live="polite" aria-label="AI 正在生成回答">
-            <span class="skeleton-line wide"></span>
-            <span class="skeleton-line"></span>
-            <span class="skeleton-line medium"></span>
-            <span class="skeleton-line short"></span>
-          </div>
+          <AiSkeletonStream
+            v-else-if="item.pending"
+            class="assistant-message-body qa-answer"
+            aria-label="AI 正在生成回答"
+          />
           <div v-else-if="item.error" class="assistant-message-body qa-answer qa-answer-error">追问失败，请检查连接后重试。</div>
           <button
             v-if="item.answer && !item.pending && !item.error && externalImportCitation"
@@ -255,8 +247,8 @@
           aria-label="向当前内容提问"
           :value="questionInput"
           :placeholder="questionPlaceholder"
-          rows="3"
-          @input="$emit('update:questionInput', $event.target.value)"
+          rows="1"
+          @input="handleQuestionInput"
           @keydown.enter.exact.prevent="handleAskKeydown"
         />
 
@@ -334,16 +326,17 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
+import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
 import { starterPromptsForContent } from './starterPrompts'
-import summaryIcon from '../../../assets/apple.intelligence.svg'
-import customActionIcon from '../../../assets/dot.scope.svg'
-import exportIcon from '../../../assets/arrow.down.document.svg'
-import newChatIcon from '../../../assets/ellipsis.bubble.svg'
-import emptyDocumentIcon from '../../../assets/questionmark.bubble.fill.svg'
-import emptyConversationIcon from '../../../assets/bubble.and.pencil.svg'
-import sendIcon from '../../../assets/custom.paperplane.fill.svg'
-import copyExchangeIcon from '../../../assets/document.on.clipboard.svg'
-import regenerateAnswerIcon from '../../../assets/arrow.clockwise.svg'
+const summaryIcon = 'apple.intelligence'
+const customActionIcon = 'dot.scope'
+const exportIcon = 'arrow.down.document'
+const newChatIcon = 'ellipsis.bubble'
+const emptyDocumentIcon = 'questionmark.bubble.fill'
+const emptyConversationIcon = 'bubble.and.pencil'
+const sendIcon = 'custom.paperplane.fill'
+const copyExchangeIcon = 'document.on.clipboard'
+const regenerateAnswerIcon = 'arrow.clockwise'
 
 const props = defineProps({
   currentInsightHtml: {
@@ -571,6 +564,7 @@ function summaryTitleMarkdown(title) {
     .trim()
   return safeTitle ? `# ${safeTitle}` : ''
 }
+
 const selectedAiModelLabel = computed(() => {
   return aiModelOptions.value.find((model) => model.value === props.selectedAiModel)?.label
     || normalizeAiModelOption(props.selectedAiModel)?.label
@@ -757,6 +751,22 @@ function handleAskKeydown(event) {
   triggerQuestionSend()
 }
 
+function resizeQuestionInput(input = questionInputRef.value) {
+  if (!input) return
+  input.style.height = 'auto'
+  const maxHeight = Number.parseFloat(window.getComputedStyle(input).maxHeight)
+  const nextHeight = Number.isFinite(maxHeight)
+    ? Math.min(input.scrollHeight, maxHeight)
+    : input.scrollHeight
+  input.style.height = `${nextHeight}px`
+  input.style.overflowY = Number.isFinite(maxHeight) && input.scrollHeight > maxHeight ? 'auto' : 'hidden'
+}
+
+function handleQuestionInput(event) {
+  emit('update:questionInput', event.target.value)
+  resizeQuestionInput(event.target)
+}
+
 function triggerQuestionSend() {
   if (!props.questionInput.trim() || props.askingQuestion || !props.currentQaEnabled) return
   sendLaunchActive.value = false
@@ -780,6 +790,10 @@ watch(() => props.selectedTextContext?.id || '', async (contextId) => {
   if (!contextId) return
   await nextTick()
   questionInputRef.value?.focus({ preventScroll: true })
+})
+
+watch(() => props.questionInput, () => {
+  nextTick(() => resizeQuestionInput())
 })
 
 function conversationDistanceFromBottom(container) {
@@ -884,6 +898,7 @@ watch(
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleOutsidePointerDown)
+  nextTick(() => resizeQuestionInput())
   if (props.selectedTextContext?.id) nextTick(() => questionInputRef.value?.focus({ preventScroll: true }))
 })
 
@@ -1360,54 +1375,8 @@ onBeforeUnmount(() => {
   font-size: 1em;
 }
 
-.qa-answer-skeleton {
-  display: grid;
-  gap: 9px;
-  width: min(100%, 420px);
-  padding: 12px 0 6px;
-}
-
-.assistant-summary-generation-label {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-  font-weight: var(--vk-weight-medium);
-  line-height: 1.35;
-}
-
-.skeleton-line {
-  position: relative;
-  width: 78%;
-  height: 10px;
-  overflow: hidden;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--vk-border) 62%, var(--vk-bg-panel));
-}
-
-.skeleton-line::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, #ffffff 56%, var(--vk-border)) 48%,
-    transparent 100%
-  );
-  transform: translateX(-110%);
-  animation: qa-skeleton-shimmer 1.2s linear infinite;
-  will-change: transform;
-}
-
-.skeleton-line.wide { width: 96%; }
-.skeleton-line.medium { width: 61%; }
-.skeleton-line.short { width: 38%; }
-
 .qa-answer-error {
   color: var(--vk-error-text);
-}
-
-@keyframes qa-skeleton-shimmer {
-  to { transform: translateX(110%); }
 }
 
 .assistant-action-button {
@@ -1559,12 +1528,6 @@ onBeforeUnmount(() => {
     transition: opacity var(--vk-motion-fast) ease;
   }
 
-  .skeleton-line::after {
-    transform: none;
-    animation: none;
-    opacity: 0.72;
-  }
-
   .assistant-regenerate-button.loading :deep(.svg-mask-icon),
   .assistant-export-button.loading :deep(.svg-mask-icon),
   .assistant-custom-button.loading :deep(.svg-mask-icon) {
@@ -1664,10 +1627,7 @@ onBeforeUnmount(() => {
 }
 
 .assistant-side-actions {
-  position: absolute;
-  right: 8px;
-  bottom: 12px;
-  left: 8px;
+  min-height: 30px;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1791,8 +1751,8 @@ onBeforeUnmount(() => {
 .assistant-question-textarea {
   width: 100%;
   box-sizing: border-box;
-  min-height: 58px;
-  max-height: 180px;
+  min-height: 21px;
+  max-height: 121px;
   resize: none;
   border: 0;
   outline: 0;
@@ -1801,7 +1761,8 @@ onBeforeUnmount(() => {
   font: inherit;
   font-size: var(--vk-type-body-size);
   line-height: var(--vk-leading-body);
-  padding: 0 0 34px;
+  padding: 0;
+  overflow-y: hidden;
 }
 
 .assistant-selected-context {

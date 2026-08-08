@@ -53,7 +53,9 @@ def run_source_sync_task(
     elif kind == "creator_saved":
         result = sync_saved_creator_source(
             str(request.get("source_id") or ""),
-            retry_existing_items=bool(request.get("retry_existing_items", True)),
+            # A normal check only discovers new works. Retrying an old failed
+            # item is an explicit user action, never a side effect of polling.
+            retry_existing_items=bool(request.get("retry_existing_items", False)),
         )
         payload = dict(result.__dict__)
     elif kind == "rss_saved":
@@ -91,6 +93,25 @@ def run_source_sync_task(
         )
     elif kind == "wechat_bulk":
         payload = _sync_all_wechat_subscriptions(on_progress=on_progress, cancel_check=cancel_check)
+    elif kind == "wechat_public_discovery":
+        from services.wechat_discovery import run_wechat_discovery
+
+        payload = run_wechat_discovery(
+            str(dict(request.get("payload") or {}).get("run_id") or request.get("source_id") or ""),
+            on_progress=on_progress,
+            cancel_check=cancel_check,
+        )
+    elif kind == "wechat_public_import":
+        from services.wechat_discovery import import_reviewed_candidates
+
+        task_payload = dict(request.get("payload") or {})
+        payload = import_reviewed_candidates(
+            str(task_payload.get("run_id") or request.get("source_id") or ""),
+            list(task_payload.get("candidate_ids") or []),
+            auto_analyze=bool(task_payload.get("auto_analyze")),
+            on_progress=on_progress,
+            cancel_check=cancel_check,
+        )
     elif kind == "campus":
         payload = _sync_campus(request, on_progress=on_progress, cancel_check=cancel_check)
     elif kind == "source_context_refresh":
