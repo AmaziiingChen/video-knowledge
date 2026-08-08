@@ -1,5 +1,7 @@
 {
   "name": "knowledgehub-desktop",
+  "description": "A local-first knowledge workspace for macOS.",
+  "author": "AmaziiingChen",
   "private": true,
   "version": "0.1.0",
   "main": "electron/main.cjs",
@@ -40,6 +42,9 @@
   "build": {
     "appId": "com.knowledgehub.desktop",
     "productName": "KnowledgeHub",
+    "directories": {
+      "output": "release"
+    },
     "asar": true,
     "files": [
       "dist/**/*",
@@ -54,6 +59,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "identity": null,
       "target": [
         "dmg"
       ],

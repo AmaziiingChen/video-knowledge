@@ -36,7 +36,7 @@ SQLite 全文检索 + 本地播放器 + Obsidian 同步
 
 | 层级 | 技术 |
 | --- | --- |
-| 前端 | Vue 3、Vite、Element Plus、Artplayer、Electron（Beta 外壳） |
+| 前端 | Vue 3、Vite、Element Plus、Artplayer、Electron 桌面外壳 |
 | 后端 | FastAPI、SQLite、Pydantic Settings |
 | 媒体与转写 | yt-dlp、ffmpeg、faster-whisper、MLX Whisper（可选） |
 | AI | OpenAI SDK 兼容接口，默认 DeepSeek |
@@ -102,7 +102,7 @@ WECHAT_SUBSCRIPTION_SCHEDULER_ENABLED=true
 WECHAT_SUBSCRIPTION_SCHEDULER_INTERVAL_SECONDS=60
 WECHAT_SUBSCRIPTION_DEFAULT_INTERVAL_MINUTES=1440
 
-# 微信小程序视觉采集仍在 Beta，公开发行版保持关闭
+# 微信小程序视觉采集默认关闭；按需显式启用
 MINIPROGRAM_FORUM_CAPTURE_ENABLED=false
 
 ```
@@ -127,7 +127,7 @@ python scripts/preflight.py
 macOS 也可直接双击：
 
 - `Video Knowledge.command`：启动前后端并打开浏览器。
-- `Video Knowledge Desktop.command`：以当前源码启动 Electron Beta 外壳；后端修改在下次启动时直接生效。正式发布包再执行对应的 `desktop:package:*` 命令。
+- `Video Knowledge Desktop.command`：以当前源码启动 Electron 桌面外壳；后端修改在下次启动时直接生效。正式发布包再执行对应的 `desktop:package:*` 命令。
 - `Stop Video Knowledge.command`：停止由启动器管理的服务。
 
 日志位于 `data/logs/backend.log` 与 `data/logs/frontend.log`；停止服务可运行：
@@ -242,7 +242,7 @@ B站和抖音内容会在常规处理时保存可用的作者、发布时间、�
 backend/                 FastAPI 路由、处理服务与 MCP 服务
   routers/               内容、任务、搜索、上传、同步等 API
   services/              下载、转写、总结、缓存、SQLite、索引等领域逻辑
-frontend/                Vue 工作台与 Electron Beta 外壳
+frontend/                Vue 工作台与 Electron 桌面外壳
 data/                    本地数据库、缓存、上传文件、草稿与日志（运行产物）
 docs/                    产品规划、界面规范、OpenClaw 接入说明
 scripts/preflight.py     环境自检

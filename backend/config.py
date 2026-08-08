@@ -165,7 +165,7 @@ class Settings(BaseSettings):
     campus_embedding_api_model: str = "qwen3.7-text-embedding"
     campus_embedding_api_dimensions: int = 1024
     # The WeChat mini-program visual collector is not ready for public
-    # distribution. Beta builds must explicitly enable it.
+    # distribution. Builds must explicitly enable it.
     miniprogram_forum_capture_enabled: bool = False
     # Manual updates only: clients read a strict public manifest and open its
     # download page in the browser. Empty values disable update checks.

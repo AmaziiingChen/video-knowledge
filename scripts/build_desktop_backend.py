@@ -71,6 +71,11 @@ def build_backend(target: str, *, bundle_local_asr_model: bool = False) -> None:
             f"{model_directory}{os.pathsep}preloaded_models/mlx/small",
         ))
     build_root = DESKTOP_DIR / "build" / target
+    environment = os.environ.copy()
+    # Keep PyInstaller's cache inside the project build directory. Its default
+    # user-wide cache can be cleaned by another build process concurrently,
+    # which makes reproducible packaging unnecessarily flaky.
+    environment["PYINSTALLER_CONFIG_DIR"] = str(build_root / "pyinstaller-cache")
     subprocess.run(
         [
             sys.executable,
@@ -97,6 +102,7 @@ def build_backend(target: str, *, bundle_local_asr_model: bool = False) -> None:
         ],
         check=True,
         cwd=ROOT,
+        env=environment,
     )
 
 if __name__ == "__main__":
