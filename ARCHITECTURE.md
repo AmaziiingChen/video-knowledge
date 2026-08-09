@@ -65,6 +65,7 @@ flowchart TD
 - `App.vue` chooses workspaces, composes feature controllers, and owns global error surfaces. It must not accumulate feature-specific API workflows.
 - `workbench/` owns layout, panes, tabs, editor dispatch, and shared reading interactions. Feature-specific collection, publishing, or synchronization logic belongs under `features/`.
 - A feature owns its state, API calls, polling, and presentation helpers. Cross-feature reuse is extracted only after repeated use is proven.
+- Settings, command palette, report planning, and other closed overlays load on demand; their code and styles must not return to the initial renderer entry.
 - The canonical renderer API base is exported by `frontend/src/utils/localApiAuth.js`. Components must not hard-code loopback API origins.
 - Electron-only capabilities go through the preload bridge. Browser development fallbacks must remain explicit and must not weaken the packaged desktop boundary.
 
@@ -131,7 +132,7 @@ External text, comments, web pages, OCR output, and model responses remain untru
 
 ## Architecture checks
 
-The repository currently enforces frontend source reachability with `npm run check:reachability`. The intended additional invariants are:
+The repository enforces frontend source reachability with `npm run check:reachability` and initial renderer budgets during `npm run build`. Additional invariants are:
 
 - no hard-coded renderer loopback API origins outside the canonical API module and its tests;
 - no router-to-router imports of private symbols;

@@ -525,12 +525,14 @@
       </Transition>
 
       <CommandPalette
+        v-if="commandPaletteOpen"
         v-model="commandPaletteOpen"
         :items="commandPaletteItems"
         @select="handleCommandPaletteSelect"
       />
 
       <SettingsDialog
+        v-if="showSettings"
         v-model="showSettings"
         @library-changed="loadContentItems"
         @processing-started="handleCreatorProcessingStarted"
@@ -680,6 +682,7 @@
       />
 
       <SourceGroupEditorDialog
+        v-if="showSourceGroupEditor"
         v-model="showSourceGroupEditor"
         :group="sourceGroupEditor"
         :removing-source-key="removingSourceGroupKey"
@@ -688,12 +691,14 @@
       />
 
       <ReportGenerationDialog
+        v-if="reportGenerationDialog.visible"
         :state="reportGenerationDialog"
         @cancel="cancelReportGenerationDialog"
         @confirm="confirmReportGenerationDialog"
       />
 
       <WechatCoverPlanDialog
+        v-if="wechatCoverPlanDialogVisible"
         v-model:visible="wechatCoverPlanDialogVisible"
         :loading="planningWechatCover"
         :submitting="submittingWechatCoverPlan"
@@ -916,10 +921,8 @@ import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, onMounted
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SvgMaskIcon from './components/SvgMaskIcon.vue'
-import CommandPalette from './components/CommandPalette.vue'
 import PanelToggleIcon from './components/PanelToggleIcon.vue'
 import StatusBreadcrumb from './components/StatusBreadcrumb.vue'
-import SettingsDialog from './components/SettingsDialog.vue'
 import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
@@ -936,13 +939,8 @@ import {
   isSinglePaneWorkspaceView,
   preloadWorkspaceViewModules,
 } from './workbench/workspaceViewLoading.js'
-import ReportGenerationDialog from './features/reports/ReportGenerationDialog.vue'
 import { formatReportTaskWindow } from './features/reports/reportGenerationPresentation.js'
-import SourceGroupEditorDialog from './features/reports/SourceGroupEditorDialog.vue'
-import WechatCoverPlanDialog from './features/wechat/WechatCoverPlanDialog.vue'
 import SecondarySidebar from './features/assistant/SecondarySidebar.vue'
-import KnowledgeSidebar from './features/knowledge/KnowledgeSidebar.vue'
-import EvidencePreviewSidebar from './features/knowledge/EvidencePreviewSidebar.vue'
 import { useAppController } from './composables/useAppController'
 import { useCampusAccess } from './composables/useCampusAccess'
 import { useRuntimeSettingsController } from './features/settings/useRuntimeSettingsController.js'
@@ -957,6 +955,8 @@ const loadCreatorWorkspace = () => import('./features/creator/CreatorWorkspace.v
 const loadRssWorkspace = () => import('./features/rss/RssWorkspace.vue')
 const loadReportsWorkspace = () => import('./features/reports/ReportsWorkspace.vue')
 const loadKnowledgeWorkspace = () => import('./features/knowledge/KnowledgeWorkspace.vue')
+const loadKnowledgeSidebar = () => import('./features/knowledge/KnowledgeSidebar.vue')
+const loadEvidencePreviewSidebar = () => import('./features/knowledge/EvidencePreviewSidebar.vue')
 const workspaceViewModuleLoaders = [
   loadWeChatManager,
   loadCampusManager,
@@ -964,6 +964,8 @@ const workspaceViewModuleLoaders = [
   loadRssWorkspace,
   loadReportsWorkspace,
   loadKnowledgeWorkspace,
+  loadKnowledgeSidebar,
+  loadEvidencePreviewSidebar,
 ]
 const WeChatManager = defineAsyncComponent(loadWeChatManager)
 const CampusManager = defineAsyncComponent(loadCampusManager)
@@ -971,6 +973,13 @@ const CreatorWorkspace = defineAsyncComponent(loadCreatorWorkspace)
 const RssWorkspace = defineAsyncComponent(loadRssWorkspace)
 const ReportsWorkspace = defineAsyncComponent(loadReportsWorkspace)
 const KnowledgeWorkspace = defineAsyncComponent(loadKnowledgeWorkspace)
+const KnowledgeSidebar = defineAsyncComponent(loadKnowledgeSidebar)
+const EvidencePreviewSidebar = defineAsyncComponent(loadEvidencePreviewSidebar)
+const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
+const SettingsDialog = defineAsyncComponent(() => import('./components/SettingsDialog.vue'))
+const ReportGenerationDialog = defineAsyncComponent(() => import('./features/reports/ReportGenerationDialog.vue'))
+const SourceGroupEditorDialog = defineAsyncComponent(() => import('./features/reports/SourceGroupEditorDialog.vue'))
+const WechatCoverPlanDialog = defineAsyncComponent(() => import('./features/wechat/WechatCoverPlanDialog.vue'))
 const {
   activeView,
   workspaceTabs,
