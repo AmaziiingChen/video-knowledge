@@ -83,6 +83,7 @@ import { useLibraryTrashController } from '../features/library/useLibraryTrashCo
 import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
 import { useContentRecoveryController } from '../features/library/useContentRecoveryController.js'
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
+import { useMarkdownOutputSettingsController } from '../features/library/useMarkdownOutputSettingsController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { usePlatformCredentialController } from '../features/integrations/usePlatformCredentialController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
@@ -458,9 +459,13 @@ export function useAppController() {
   } = useContentReadState({
     isCurrentContent: (contentItemId) => String(selectedContentItem.value?.id || '') === contentItemId
   })
-  const obsidianVaultPath = ref('')
-  const markdownExportPath = ref('')
-  const obsidianAutoWrite = ref(false)
+  const {
+    obsidianVaultPath,
+    markdownExportPath,
+    obsidianAutoWrite,
+    loadObsidianSettings,
+    saveObsidianSettingsFromForm,
+  } = useMarkdownOutputSettingsController({ notify: ElMessage })
   const showSettings = ref(false)
   const {
     cookieInput,
@@ -2044,45 +2049,6 @@ export function useAppController() {
       }
       pollTimer.value = setTimeout(() => pollTask(taskId), retryDelay)
     }
-  }
-
-  async function loadObsidianSettings() {
-    try {
-      const res = await axios.get(`${API}/obsidian/settings`, { timeout: 10000 })
-      obsidianVaultPath.value = res.data.vault_path || ''
-      markdownExportPath.value = res.data.export_path || res.data.vault_path || ''
-      obsidianAutoWrite.value = Boolean(res.data.auto_write)
-    } catch {
-      // Markdown 输出设置读取失败不影响其他功能。
-    }
-  }
-
-  async function saveObsidianSettings() {
-    const vaultPath = obsidianVaultPath.value.trim()
-    const exportPath = markdownExportPath.value.trim()
-    if (!vaultPath || !exportPath) {
-      ElMessage.warning('请填写 Markdown 写入目录和默认导出目录')
-      return false
-    }
-    try {
-      const res = await axios.post(`${API}/obsidian/settings`, {
-        vault_path: vaultPath,
-        export_path: exportPath,
-        auto_write: obsidianAutoWrite.value
-      }, { timeout: 10000 })
-      obsidianVaultPath.value = res.data.vault_path || vaultPath
-      markdownExportPath.value = res.data.export_path || exportPath
-      obsidianAutoWrite.value = Boolean(res.data.auto_write)
-      return true
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '保存 Markdown 输出目录失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '保存 Markdown 输出目录失败')
-      return false
-    }
-  }
-
-  async function saveObsidianSettingsFromForm() {
-    await saveObsidianSettings()
   }
 
   function scheduleContentStartupRetry() {
