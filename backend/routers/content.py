@@ -125,15 +125,6 @@ class FolderHistoryPageResponse(BaseModel):
     history_before: str
 
 
-class FolderContentPageResponse(BaseModel):
-    """A lightweight, explicit-folder page for the lazy library tree."""
-
-    items: list[ContentItemResponse]
-    total: int
-    offset: int
-    has_more: bool
-
-
 class ArticlePreviewResponse(BaseModel):
     content_item_id: str
     title: str
@@ -570,100 +561,6 @@ def refresh_content_source_text(item_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return _readiness_response(inspect_content_text_readiness(item))
-
-
-@router.get("/content/folders", response_model=list[LibraryFolderResponse])
-async def list_library_folders():
-    initialize_database()
-    # The library sidebar commonly loads folders before content.  Ensure the
-    # pre-created campus source folders are visible in that first response.
-    ensure_content_index_ready()
-    with connect() as connection:
-        rows = connection.execute(
-            """
-            SELECT folder.*,
-                   (
-                     SELECT CASE binding.source_type
-                       WHEN 'provider_root' THEN 'provider:' || binding.source_key
-                       WHEN 'manual_collection' THEN 'manual:' || binding.source_key
-                       WHEN 'external_markdown' THEN 'external'
-                     END
-                     FROM library_source_folder_bindings AS binding
-                     WHERE binding.folder_id = folder.id
-                       AND binding.source_type IN ('provider_root', 'manual_collection', 'external_markdown')
-                     ORDER BY CASE binding.source_type
-                       WHEN 'provider_root' THEN 0
-                       WHEN 'manual_collection' THEN 1
-                       ELSE 2
-                     END
-                     LIMIT 1
-                   ) AS presentation_group
-            FROM library_folders AS folder
-            WHERE folder.deleted_at IS NULL
-            ORDER BY folder.sort_order ASC, folder.created_at ASC
-            """
-        ).fetchall()
-        direct_count_rows = connection.execute(
-            """
-            SELECT library_folder_id, COUNT(*) AS content_count
-            FROM content_items
-            WHERE deleted_at IS NULL
-              AND library_visible = 1
-              AND library_folder_id IS NOT NULL
-            GROUP BY library_folder_id
-            """
-        ).fetchall()
-
-    # Folder rows are intentionally tiny, while the count must include all
-    # descendants so a collapsed source still communicates its real scope.
-    # Aggregate grouped counts in Python instead of joining every content row
-    # into the startup response.
-    folders_by_id = {str(row["id"]): row for row in rows}
-    children_by_parent: dict[str, list[str]] = {}
-    for row in rows:
-        parent_id = row["parent_folder_id"]
-        if parent_id and str(parent_id) in folders_by_id:
-            children_by_parent.setdefault(str(parent_id), []).append(str(row["id"]))
-    direct_counts = {str(row["library_folder_id"]): int(row["content_count"] or 0) for row in direct_count_rows}
-    aggregate_counts: dict[str, int] = {}
-
-    def count_descendants(folder_id: str, visiting: set[str] | None = None) -> int:
-        if folder_id in aggregate_counts:
-            return aggregate_counts[folder_id]
-        active = visiting or set()
-        if folder_id in active:
-            return direct_counts.get(folder_id, 0)
-        active.add(folder_id)
-        total = direct_counts.get(folder_id, 0)
-        total += sum(count_descendants(child_id, active) for child_id in children_by_parent.get(folder_id, []))
-        active.remove(folder_id)
-        aggregate_counts[folder_id] = total
-        return total
-
-    return [_folder_response(row, content_count=count_descendants(str(row["id"]))) for row in rows]
-
-
-@router.get("/content/folders/{folder_id}/items", response_model=FolderContentPageResponse)
-def list_library_folder_content(
-    folder_id: str,
-    limit: int = Query(80, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-):
-    """Fetch article rows only after the user expands one sidebar folder."""
-    initialize_database()
-    ensure_content_index_ready()
-    with connect() as connection:
-        _ensure_folder_exists(connection, folder_id)
-        repository = ContentRepository(connection)
-        items = repository.list_folder_content_items(folder_id, limit=limit, offset=offset)
-        total = repository.count_folder_content_items(folder_id)
-    responses = [_item_to_response(item, include_runtime_details=False) for item in items]
-    return FolderContentPageResponse(
-        items=responses,
-        total=total,
-        offset=offset,
-        has_more=offset + len(responses) < total,
-    )
 
 
 @router.get("/content/folders/{folder_id}/history", response_model=FolderHistoryPageResponse)
@@ -1152,19 +1049,17 @@ def _cache_entries_by_source_url(source_urls) -> dict[str, dict]:
     return entries
 
 
-def _folder_response(row, *, content_count: int | None = None) -> LibraryFolderResponse:
+def _folder_response(row) -> LibraryFolderResponse:
     return LibraryFolderResponse(
         id=row["id"],
         name=row["name"],
         parent_folder_id=row["parent_folder_id"],
         sort_order=float(row["sort_order"] or 0),
         is_pinned=bool(row["is_pinned"]),
-        presentation_group=(str(row["presentation_group"] or "") or None) if "presentation_group" in row.keys() else None,
-        content_count=(
-            int(content_count)
-            if content_count is not None
-            else int(row["content_count"] or 0) if "content_count" in row.keys() else 0
-        ),
+        presentation_group=(str(row["presentation_group"] or "") or None)
+        if "presentation_group" in row.keys()
+        else None,
+        content_count=int(row["content_count"] or 0) if "content_count" in row.keys() else 0,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
