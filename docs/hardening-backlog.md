@@ -73,8 +73,9 @@ lines.
 - [x] Remove verified-unreachable renderer batch-link, batch-upload and queue
   action code after facade/template/call-site audit; retain the live queue,
   clipboard and single-link processing paths.
-- [ ] Remove the three verified-unused Vite starter assets after the full
-  renderer build confirms they are absent from output.
+- [x] Remove the two remaining verified-unused Vite starter assets after the
+  full renderer build confirmed they are absent from source and output.  The
+  previously listed third starter asset was no longer tracked.
 - [ ] Remove committed macOS helper binaries after an arm64 build proves the
   tracked Objective-C sources reproduce them.
 - [ ] Add generated SBOM/license review evidence to release artifacts; extend
