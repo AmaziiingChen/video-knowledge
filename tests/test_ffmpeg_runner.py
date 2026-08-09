@@ -31,7 +31,10 @@ def test_active_ffmpeg_output_is_not_limited_by_total_runtime(monkeypatch, tmp_p
         output_path=output,
         duration_seconds=6,
         progress_callback=updates.append,
-        activity_timeout_seconds=0.12,
+        # The child reports every 60 ms and runs for roughly 420 ms. Keep the
+        # inactivity window below the total runtime while leaving enough room
+        # for scheduling jitter on shared macOS CI runners.
+        activity_timeout_seconds=0.25,
     )
 
     assert result.success is True
