@@ -677,6 +677,7 @@ import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
 import { usePreviewFindController } from './usePreviewFindController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
+import { activeTimelineSegmentKey, formatTimelineTime, mediaTranscriptState, timelineSegmentKey } from './mediaTranscriptModel.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
 const ArtAudioPlayer = defineAsyncComponent(() => import('./ArtAudioPlayer.vue'))
@@ -2305,37 +2306,26 @@ function formatDocumentSize(content) {
 
 function timelineSegmentsForTab(tabId) {
   const content = props.contentForTab(tabId)
-  const segments = content?.transcript_segments || []
-  const normalizedSegments = segments.map((segment, index) => ({
-    position: segment.position ?? index,
-    start_seconds: segment.start_seconds,
-    text: segment.text || '',
-    approximate: Boolean(segment.approximate),
-  })).filter((segment) => segment.text)
-  if (normalizedSegments.length) return normalizedSegments
-
-  // A task response can reach the renderer a fraction earlier than the
-  // cache-detail hydration. Keep the transcript visible in that narrow window
-  // instead of making the user wait for the final AI summary or a reload.
-  const transcript = String(props.transcriptForTab(tabId) || '').trim()
-  return transcript
-    ? [{ position: 0, start_seconds: 0, text: transcript, approximate: true }]
-    : []
+  return mediaTranscriptState({
+    isTimedMedia: isTimedMediaTab(tabId),
+    contentStatus: content?.status,
+    segments: content?.transcript_segments,
+    fallbackTranscript: props.transcriptForTab(tabId),
+    taskStatus: props.resultForTab(tabId)?.status,
+    taskStep: props.resultForTab(tabId)?.step,
+  }).timelineSegments
 }
 
 function hasTranscriptTimeline(tabId) {
   // A source document can expose its text through transcriptForTab for search
   // and reader metadata. That text is not timed media, so it must never turn
   // a Markdown/report reader into the timed-media transcript workspace.
-  return (isVideoTab(tabId) || isAudioTab(tabId)) && timelineSegmentsForTab(tabId).length > 0
+  return mediaTranscriptState({ isTimedMedia: isTimedMediaTab(tabId), segments: props.contentForTab(tabId)?.transcript_segments, fallbackTranscript: props.transcriptForTab(tabId) }).hasTimeline
 }
 
 function shouldShowTranscriptGeneration(tabId) {
-  if (!isTimedMediaTab(tabId) || hasTranscriptTimeline(tabId)) return false
   const task = props.resultForTab(tabId) || {}
-  const status = String(task.status || '').toLowerCase()
-  if (['queued', 'running', 'processing'].includes(status)) return true
-  return props.contentForTab(tabId)?.status === 'processing'
+  return mediaTranscriptState({ isTimedMedia: isTimedMediaTab(tabId), contentStatus: props.contentForTab(tabId)?.status, segments: props.contentForTab(tabId)?.transcript_segments, fallbackTranscript: props.transcriptForTab(tabId), taskStatus: task.status, taskStep: task.step }).showGeneration
 }
 
 function hasMediaTranscriptWorkspace(tabId) {
@@ -2343,21 +2333,11 @@ function hasMediaTranscriptWorkspace(tabId) {
 }
 
 function transcriptGenerationLabel(tabId) {
-  const step = String(props.resultForTab(tabId)?.step || '').toLowerCase()
-  if (['info', 'parse', 'subtitle', 'fetch_subtitle'].includes(step)) return '正在获取字幕'
-  if (step === 'download') return '正在准备字幕'
-  if (step === 'extract_audio') return '正在提取音频'
-  if (step === 'transcribe') return '正在转写音频'
-  if (['summarize', 'save'].includes(step)) return '正在整理字幕文本'
-  return '正在准备字幕'
+  return mediaTranscriptState({ taskStep: props.resultForTab(tabId)?.step }).label
 }
 
 function transcriptGenerationDescription(tabId) {
-  const step = String(props.resultForTab(tabId)?.step || '').toLowerCase()
-  if (step === 'download') return '下载与字幕获取会并行进行，首段文本就绪后会立即显示。'
-  if (step === 'extract_audio') return '音频准备完成后将立刻开始转写。'
-  if (step === 'transcribe') return '字幕会按片段出现，无需等待整段音频完成。'
-  return '首段文本就绪后会立即显示。'
+  return mediaTranscriptState({ taskStep: props.resultForTab(tabId)?.step }).description
 }
 
 function verticalContentBounds() {
@@ -2530,19 +2510,7 @@ function isTimelineSegmentActive(tabId, segment) {
 
 function findActiveTimelineKey(tabId) {
   if (!tabId || tabId !== activeContentTab.value?.id) return ''
-  const segments = timelineSegmentsForTab(tabId)
-  const current = currentPlaybackTime.value
-  const activeSegment = segments.find((segment, index) => {
-    const start = Number(segment.start_seconds)
-    if (!Number.isFinite(start) || current < start) return false
-    const nextStart = Number(segments[index + 1]?.start_seconds)
-    return Number.isFinite(nextStart) ? current < nextStart : true
-  })
-  return activeSegment ? timelineSegmentKey(tabId, activeSegment) : ''
-}
-
-function timelineSegmentKey(tabId, segment) {
-  return `${tabId}:${segment.position}`
+  return activeTimelineSegmentKey({ tabId, activeTabId: activeContentTab.value?.id, segments: timelineSegmentsForTab(tabId), playbackTime: currentPlaybackTime.value })
 }
 
 function setTimelineSegmentRef(tabId, segment, el) {
@@ -2616,15 +2584,6 @@ defineExpose({
   seekToTimestamp,
   focusSourceReader,
 })
-
-function formatTimelineTime(seconds) {
-  const value = Number(seconds)
-  if (!Number.isFinite(value)) return '--:--'
-  const total = Math.max(0, Math.floor(value))
-  const minutes = Math.floor(total / 60)
-  const rest = total % 60
-  return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`
-}
 
 function exportVideoSubtitles(tabId) {
   const segments = timelineSegmentsForTab(tabId)
