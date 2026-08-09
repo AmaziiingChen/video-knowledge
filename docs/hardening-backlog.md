@@ -47,6 +47,9 @@ lines.
   compatible. Bounded prior-turn pairing, truncation and role-preserving
   message construction now live in `services/knowledge_conversation_context.py`;
   `knowledge_v2.py` retains its existing private entry point for compatibility.
+  Model stream collection and final usage/reasoning metadata reconstruction now
+  live in `services/knowledge_response_transport.py`, with the original helper
+  retained as a compatibility import.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity

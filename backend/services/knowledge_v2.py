@@ -39,6 +39,9 @@ from services.knowledge_conversation_context import (
     CONVERSATION_CONTEXT_QUESTION_MAX_CHARS,  # noqa: F401 - compatibility re-export
     conversation_context_messages as _conversation_context_messages,
 )
+from services.knowledge_response_transport import (
+    collect_model_response as _answer_model_response,
+)
 from services.llm_provider import (
     LLMMessage,
     LLMResponse,
@@ -929,59 +932,6 @@ def stream_answer_from_evidence(
                 *messages,
                 LLMMessage(role="user", content=managed_prompt_text("knowledge_answer_retry", DEFAULT_KNOWLEDGE_ANSWER_RETRY_PROMPT)),
             ]
-
-
-def _answer_model_response(
-    provider: object,
-    messages: list[LLMMessage],
-    *,
-    temperature: float,
-    response_format: str,
-    max_tokens: int,
-) -> LLMResponse:
-    """Collect a Thinking model response without waiting for its whole trace.
-
-    The configured Flash Thinking endpoint emits reasoning before final content.
-    Its non-streaming endpoint can therefore hit the idle read timeout on a
-    long answer even though the model is still working. Streaming keeps the
-    connection active and we validate only the completed final content.
-    """
-    stream = getattr(provider, "chat_stream_events", None)
-    if not callable(stream):
-        return provider.chat(
-            messages,
-            temperature=temperature,
-            response_format=response_format,
-            max_tokens=max_tokens,
-        )
-    content_parts: list[str] = []
-    reasoning_parts: list[str] = []
-    usage: LLMUsage | None = None
-    finish_reason: str | None = None
-    for event in stream(
-        messages,
-        temperature=temperature,
-        response_format=response_format,
-        max_tokens=max_tokens,
-    ):
-        if not isinstance(event, LLMStreamChunk):
-            continue
-        if event.content:
-            content_parts.append(event.content)
-        if event.reasoning_content:
-            reasoning_parts.append(event.reasoning_content)
-        if event.usage:
-            usage = event.usage
-        if event.finish_reason:
-            finish_reason = event.finish_reason
-    return LLMResponse(
-        content="".join(content_parts).strip(),
-        provider=str(getattr(provider, "name", "unknown")),
-        model=str(getattr(provider, "model", "unknown")),
-        usage=usage,
-        finish_reason=finish_reason,
-        reasoning_content="".join(reasoning_parts),
-    )
 
 
 def _evidence_payload(results: list[RetrievedChunk], *, question: str = "") -> list[dict[str, object]]:
