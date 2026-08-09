@@ -866,6 +866,7 @@ import { useWechatReportPromptController } from './features/prompts/useWechatRep
 import { usePromptWorkspaceController } from './features/prompts/usePromptWorkspaceController.js'
 import { useWechatAccountController } from './features/wechat/useWechatAccountController.js'
 import { useWechatFilterController } from './features/wechat/useWechatFilterController.js'
+import { useWechatReportGroupController } from './features/wechat/useWechatReportGroupController.js'
 import { useWechatSubscriptionSyncController } from './features/wechat/useWechatSubscriptionSyncController.js'
 import { useWechatSubscriptionManagementController } from './features/wechat/useWechatSubscriptionManagementController.js'
 
@@ -1594,8 +1595,6 @@ const showSourceGroupEditor = ref(false)
 const removingSourceGroupKey = ref('')
 const wechatGeneratingGroupId = ref('')
 const wechatPreparingGroupId = ref('')
-const wechatDeletingGroupId = ref('')
-const wechatSavingScheduleGroupId = ref('')
 const reportGenerationDialog = ref({
   visible: false,
   phase: 'checking',
@@ -1756,6 +1755,20 @@ const {
 } = useWechatFilterController({
   filterApi: WECHAT_FILTER_API,
   loadSubscriptions: loadWeChatSubscriptions,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const {
+  wechatDeletingGroupId,
+  wechatSavingScheduleGroupId,
+  createWeChatReportGroup,
+  deleteWeChatReportGroup,
+  saveWeChatReportSchedule,
+} = useWechatReportGroupController({
+  reportGroupApi: WECHAT_REPORT_GROUP_API,
+  loadSubscriptions: loadWeChatSubscriptions,
+  loadReportPrompts: loadWechatReportPrompts,
+  selectedReportPromptGroupId: selectedWechatReportPromptGroupId,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 
@@ -2036,52 +2049,6 @@ async function openOriginalFile(path) {
     await openPath(String(path || ''))
   } catch (error) {
     ElMessage.error(wechatErrorMessage(error, '打开原始文件失败'))
-  }
-}
-
-async function createWeChatReportGroup(payload, done) {
-  try {
-    const response = await axios.post(WECHAT_REPORT_GROUP_API, payload, { timeout: 10000 })
-    done?.()
-    await loadWeChatSubscriptions()
-    selectedWechatReportPromptGroupId.value = response.data?.id || selectedWechatReportPromptGroupId.value
-    await loadWechatReportPrompts()
-    ElMessage.success('报告分组已添加；可前往“提示词 → 分组报告”完善区间报告写法')
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, '添加公众号分组失败')) }
-}
-
-async function deleteWeChatReportGroup(group) {
-  if (!group?.id || wechatDeletingGroupId.value) return
-  wechatDeletingGroupId.value = group.id
-  try {
-    const response = await axios.delete(`${WECHAT_REPORT_GROUP_API}/${group.id}`, { timeout: 10000 })
-    await loadWeChatSubscriptions()
-    await loadWechatReportPrompts()
-    const affected = Number(response.data?.affected_subscription_count || 0)
-    ElMessage.success(`分组“${group.name}”已删除${affected ? `，已从 ${affected} 个公众号移除标签` : ''}`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '删除公众号分组失败'))
-  } finally {
-    if (wechatDeletingGroupId.value === group.id) wechatDeletingGroupId.value = ''
-  }
-}
-
-async function saveWeChatReportSchedule(groupId, payload, done) {
-  if (!groupId || wechatSavingScheduleGroupId.value) return
-  wechatSavingScheduleGroupId.value = groupId
-  try {
-    await axios.put(
-      `${WECHAT_REPORT_GROUP_API}/${encodeURIComponent(groupId)}/schedule`,
-      payload,
-      { timeout: 10000 },
-    )
-    await loadWeChatSubscriptions()
-    done?.()
-    ElMessage.success(payload.enabled ? '已开启定时生成' : '已关闭定时生成')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '保存定时生成计划失败'))
-  } finally {
-    if (wechatSavingScheduleGroupId.value === groupId) wechatSavingScheduleGroupId.value = ''
   }
 }
 

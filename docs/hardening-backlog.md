@@ -36,8 +36,9 @@ lines.
   transfer and account-search state live in
   `features/wechat/useWechatAccountController.js`; body-cleaning filter CRUD
   now lives in `features/wechat/useWechatFilterController.js`. Report-group
-  state remains deliberately in `App.vue` for a separate behavior-preserving
-  slice.
+  creation, deletion and schedule changes now live in
+  `features/wechat/useWechatReportGroupController.js`, retaining prompt
+  selection and refresh ordering.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
   The first library boundary, debounced global search and result hydration, now
