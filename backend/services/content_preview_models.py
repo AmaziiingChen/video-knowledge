@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import html
+import re
+
 from pydantic import BaseModel, Field
 
 from services.campus_sources import is_campus_attachment_blacklisted
@@ -39,3 +42,10 @@ def safe_article_attachments(value: object, *, filter_campus_navigation: bool = 
         seen.add(url)
         attachments.append({"name": name, "url": url, "download_type": "direct" if raw.get("download_type") == "direct" else "external"})
     return attachments
+
+
+def xiaohongshu_description_from_html(body_html: str) -> str:
+    """Recover legacy descriptions without ever reading OCR sidecars."""
+    paragraphs = re.sub(r"</(?:p|div|section)\s*>", "\n", str(body_html or ""), flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", paragraphs)
+    return html.unescape(text).strip()

@@ -26,6 +26,7 @@ from services.content_presentation import (
 from services.content_preview_models import (
     ArticlePreviewResponse,
     safe_article_attachments,
+    xiaohongshu_description_from_html,
 )
 from services.content_source_text import (
     inspect_content_text_readiness,
@@ -273,7 +274,7 @@ def get_article_preview(
         # only.  Re-render from the stored description when available; the
         # fallback keeps existing local captures compatible without applying
         # badges to OCR text or image annotations.
-        description = str(article_info.get("description") or _xiaohongshu_description_from_html(body_html)).strip()
+        description = str(article_info.get("description") or xiaohongshu_description_from_html(body_html)).strip()
         body_html = render_xiaohongshu_description_html(description)
         return ArticlePreviewResponse(
             content_item_id=item.id,
@@ -377,13 +378,6 @@ def get_article_preview(
         formatting_status=formatting_status,
         formatting_detail=formatting_detail,
     )
-
-
-def _xiaohongshu_description_from_html(body_html: str) -> str:
-    """Recover legacy XHS descriptions without ever reading OCR sidecars."""
-    paragraphs = re.sub(r"</(?:p|div|section)\s*>", "\n", str(body_html or ""), flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", paragraphs)
-    return html.unescape(text).strip()
 
 
 def _is_legacy_document_markdown_preview(article_info: dict, body_html: str) -> bool:
