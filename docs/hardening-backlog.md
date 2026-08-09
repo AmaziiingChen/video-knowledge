@@ -147,6 +147,8 @@ lines.
   import surface while retaining all runtime orchestration.
   ASR configuration normalization and automatic short/long-model selection now
   live in `services/pipeline_asr_policy.py`.
+  Timing, percentage bounding and log-level classification now live in
+  `services/pipeline_progress_rules.py`.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now

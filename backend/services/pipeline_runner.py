@@ -49,6 +49,11 @@ from services.pipeline_contracts import (
     TextSourceInfo,
     classify_pipeline_error,
 )
+from services.pipeline_progress_rules import (
+    clamp_percent as _clamp_percent,
+    elapsed as _elapsed,
+    level_from_message as _level_from_message,
+)
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.knowledge_library import attachments_root
 from services.content_source_text import load_content_source_text
@@ -92,14 +97,6 @@ ProgressCallback = Callable[[PipelineResponse], None]
 CancelCheck = Callable[[], bool]
 
 
-def _elapsed(start: float) -> float:
-    return round(time.perf_counter() - start, 2)
-
-
-def _clamp_percent(value: float) -> float:
-    return max(0.0, min(100.0, round(float(value), 1)))
-
-
 def _is_under_data_dir(path: Path) -> bool:
     try:
         path.relative_to(settings.data_dir.resolve())
@@ -130,16 +127,6 @@ def _is_managed_local_media(path: Path, *, content_item_id: str | None = None) -
         return row is not None
     except Exception:
         return False
-
-
-def _level_from_message(message: str) -> str:
-    if any(token in message for token in ["失败", "错误", "异常", "ERROR"]):
-        return "error"
-    if any(token in message for token in ["警告", "注意", "WARNING"]):
-        return "warn"
-    if any(token in message for token in ["完成", "成功"]):
-        return "success"
-    return "info"
 
 
 def run_pipeline_sync(
