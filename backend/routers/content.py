@@ -51,10 +51,8 @@ from services.pipeline_runner import PipelineRequest
 from services.task_manager import task_manager
 from services.content_presentation import (
     ContentItemResponse,
-    ContentTextReadinessResponse,
     LocalFileImportResponse,
     content_item_response as _item_to_response,
-    readiness_response as _readiness_response,
 )
 from services.library_folder_tree import (
     is_descendant_folder as _is_descendant_folder,
@@ -462,37 +460,6 @@ def _safe_article_attachments(
             }
         )
     return attachments
-
-
-@router.get("/content/{item_id}/text-readiness", response_model=ContentTextReadinessResponse)
-async def get_content_text_readiness(item_id: str):
-    initialize_database()
-    with connect() as connection:
-        try:
-            item = ContentRepository(connection).get_content_item(item_id)
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail="内容不存在") from exc
-    return _readiness_response(inspect_content_text_readiness(item))
-
-
-@router.post("/content/{item_id}/source-text/refresh", response_model=ContentTextReadinessResponse)
-def refresh_content_source_text(item_id: str):
-    """Retry article text capture on an explicit user action, never via listing."""
-    initialize_database()
-    with connect() as connection:
-        try:
-            item = ContentRepository(connection).get_content_item(item_id)
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail="内容不存在") from exc
-
-    if item.source_provider not in {"wechat", "campus", "rss"} or item.content_type != "article":
-        raise HTTPException(status_code=400, detail="仅已支持的文章来源可以重新抓取正文")
-    try:
-        load_content_source_text(item.id, refresh=True)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return _readiness_response(inspect_content_text_readiness(item))
 
 
 @router.get("/content/folders/{folder_id}/history", response_model=FolderHistoryPageResponse)
