@@ -49,6 +49,10 @@ lines.
   readers; each reader receives a mounted behavior test.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
   tree, drag, search and trash behavior at their owners.
+  Local tree-preference persistence and pure tree-node construction now live in
+  `features/library/libraryTreePreferences.js` and
+  `features/library/libraryTreeModel.js`; drag/drop, selection and virtual-row
+  rendering stay in the sidebar until they have their own behavior boundaries.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
   backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network
