@@ -63,6 +63,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `features/wechat/useWechatSubscriptionSyncController.js` | single/bulk subscription task enqueueing, observer progress and completion feedback | account authorization, subscription loading, filters and report groups |
 | `features/library/useLibrarySearchController.js` | debounced library search, stale-result rejection, result hydration and search lifecycle cleanup | sidebar tree presentation, content selection, telemetry transport |
 | `features/library/useLibraryTrashController.js` | trash loading, restore/delete/empty transactions and the bounded undo notice | folder/history model, selected tabs, content-tree rendering |
+| `features/tasks/useTaskQueueController.js` | queue snapshots, compact-detail merging, task polling, cancellation and retry | single-task runner presentation, content hydration implementation, workbench selection |
 | `features/library/libraryTreeModel.js` | pure folder/content/unread/pinned tree-node construction and deterministic ordering | localStorage preferences, drag/drop, selection, virtual rendering and parent events |
 | `features/assistant/useSelectedTextContext.js` | selected quote normalization and its explicit assistant-input token | reader DOM selection, Q&A transport, document persistence |
 | `features/prompts/useWechatReportPromptController.js` | report-prompt loading, selection, editing and save boundary | prompt file tabs, report generation, account subscriptions |

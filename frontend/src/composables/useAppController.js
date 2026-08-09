@@ -87,6 +87,7 @@ import { useCookieStatusController } from '../features/integrations/useCookieSta
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
+import { useTaskQueueController } from '../features/tasks/useTaskQueueController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -355,6 +356,71 @@ export function useAppController() {
     selectedContentItem,
     applyContentFilter,
   })
+  const loadingContent = ref(false)
+  const updatingContentId = ref(null)
+  const showMarkdownDialog = ref(false)
+  const currentMarkdownItem = ref(null)
+  const loadingMarkdown = ref(false)
+  const savingMarkdown = ref(false)
+  const syncingMarkdown = ref(false)
+  const exportingConversationMarkdown = ref(false)
+  const promptTaskType = ref('summary')
+  const promptTemplates = ref([])
+  const selectedPromptTemplateId = ref('')
+  const qaShortcutTemplates = ref([])
+  const loadingPrompts = ref(false)
+  const savingPromptTemplate = ref(false)
+  const activatingPromptTemplate = ref(false)
+  const creatingPromptTemplate = ref(false)
+  const creatingPromptFolderId = ref(null)
+  const promptEditorName = ref('')
+  const promptEditorText = ref('')
+  const batchTasks = ref([])
+  const batchTaskIds = ref([])
+  const batchTaskNames = ref({})
+  const taskPollFailureCount = ref(0)
+  const progressiveTaskSnapshots = new Map()
+  const progressiveTaskHydratingIds = new Set()
+  const backendLogCountsByTaskId = new Map()
+  const articleSnapshotPreviewedTaskIds = new Set()
+  const mediaSnapshotPreviewedTaskIds = new Set()
+  const transcriptSnapshotPreviewedTaskIds = new Set()
+  const {
+    mergeBatchTasks,
+    batchTaskName,
+    registerContentRecoveryBatchTask,
+    stopBatchPolling,
+    startTaskQueuePolling,
+    stopTaskQueuePolling,
+    setTaskQueuePollingInterval,
+    resetTaskQueueCursor,
+    loadTaskQueue,
+    pollBatchTasks,
+    cancelBatchTask,
+    cancelActiveTasks,
+    loadBatchTaskDetails,
+    retryBatchTask,
+  } = useTaskQueueController({
+    batchTasks,
+    batchTaskIds,
+    batchTaskNames,
+    progressiveTaskSnapshots,
+    terminalStatuses,
+    shouldDisplayTask,
+    isActiveTask,
+    shouldRefreshContentForTask,
+    taskContentSnapshot,
+    hydrateProgressiveTask,
+    loadContentItems,
+    isActiveContentTask: (task) => activeWorkspaceTab.value?.content_item_id === task.content_item_id,
+    shouldContinueBatchPolling: () => activeBatchCount.value > 0,
+    getActiveTaskId: () => result.task_id,
+    applyTaskData,
+    notify: ElMessage,
+    initialUpdatedAfter: logClearedAt.value
+      ? new Date(logClearedAt.value).toISOString()
+      : '',
+  })
   const {
     retryingContentId,
     retryContentSourceText,
@@ -380,45 +446,6 @@ export function useAppController() {
     getContentItemDetail,
     notify: ElMessage,
   })
-  const loadingContent = ref(false)
-  const updatingContentId = ref(null)
-  const showMarkdownDialog = ref(false)
-  const currentMarkdownItem = ref(null)
-  const loadingMarkdown = ref(false)
-  const savingMarkdown = ref(false)
-  const syncingMarkdown = ref(false)
-  const exportingConversationMarkdown = ref(false)
-  const promptTaskType = ref('summary')
-  const promptTemplates = ref([])
-  const selectedPromptTemplateId = ref('')
-  const qaShortcutTemplates = ref([])
-  const loadingPrompts = ref(false)
-  const savingPromptTemplate = ref(false)
-  const activatingPromptTemplate = ref(false)
-  const creatingPromptTemplate = ref(false)
-  const creatingPromptFolderId = ref(null)
-  const promptEditorName = ref('')
-  const promptEditorText = ref('')
-  const batchTasks = ref([])
-  const batchTaskIds = ref([])
-  const batchTaskNames = ref({})
-  const batchPollTimer = ref(null)
-  const taskQueueTimer = ref(null)
-  const taskQueuePollingIntervalMs = ref(2000)
-  const taskPollFailureCount = ref(0)
-  let taskQueueSyncing = false
-  const taskQueueSnapshots = new Map()
-  const progressiveTaskSnapshots = new Map()
-  const progressiveTaskHydratingIds = new Set()
-  const backendLogCountsByTaskId = new Map()
-  let taskQueueInitialized = false
-  let taskQueueUpdatedAfter = logClearedAt.value
-    ? new Date(logClearedAt.value).toISOString()
-    : ''
-  const loadingBatchTaskDetailIds = new Set()
-  const articleSnapshotPreviewedTaskIds = new Set()
-  const mediaSnapshotPreviewedTaskIds = new Set()
-  const transcriptSnapshotPreviewedTaskIds = new Set()
   const autoQaShortcutRecognition = ref(true)
   const {
     viewedContentIds,
@@ -1017,7 +1044,7 @@ export function useAppController() {
     clearReportLogHistory()
     logClearedAt.value = Date.now()
     localStorage.setItem(PROCESS_LOG_CLEARED_AT_KEY, String(logClearedAt.value))
-    taskQueueUpdatedAfter = new Date(logClearedAt.value).toISOString()
+    resetTaskQueueCursor(new Date(logClearedAt.value).toISOString())
     batchTasks.value = batchTasks.value.filter((task) => isActiveTask(task))
     batchTaskIds.value = batchTasks.value.map((task) => task.task_id)
     backendLogCount.value = 0
@@ -1661,36 +1688,6 @@ export function useAppController() {
     // A stream belongs to one open detail pane. Do not leave a hidden tab
     // subscribed after the reader moves to a completed or unrelated item.
     if (taskEventSourceTaskId) stopTaskEventStream()
-  }
-
-  function stopBatchPolling() {
-    if (batchPollTimer.value) {
-      clearTimeout(batchPollTimer.value)
-      batchPollTimer.value = null
-    }
-  }
-
-  function startTaskQueuePolling() {
-    if (taskQueueTimer.value) return
-    taskQueueTimer.value = setInterval(() => {
-      loadTaskQueue()
-    }, taskQueuePollingIntervalMs.value)
-  }
-
-  function stopTaskQueuePolling() {
-    if (taskQueueTimer.value) {
-      clearInterval(taskQueueTimer.value)
-      taskQueueTimer.value = null
-    }
-  }
-
-  function setTaskQueuePollingInterval(intervalMs) {
-    const nextInterval = Math.max(2000, Number(intervalMs) || 2000)
-    if (taskQueuePollingIntervalMs.value === nextInterval) return
-    taskQueuePollingIntervalMs.value = nextInterval
-    if (!taskQueueTimer.value) return
-    stopTaskQueuePolling()
-    startTaskQueuePolling()
   }
 
   function shortLink(link) {
@@ -3030,184 +3027,6 @@ export function useAppController() {
     }
   }
 
-  async function loadTaskQueue() {
-    if (taskQueueSyncing) return
-    taskQueueSyncing = true
-    try {
-      const requestStartedAt = new Date().toISOString()
-      const params = taskQueueUpdatedAfter
-        ? { updated_after: taskQueueUpdatedAfter }
-        : undefined
-      const res = await axios.get(`${API}/tasks`, { params, timeout: 10000 })
-      taskQueueUpdatedAfter = requestStartedAt
-      const tasks = res.data || []
-      const visibleTasks = tasks.filter((task) => shouldDisplayTask(task))
-      const taskIds = visibleTasks.map((task) => task.task_id).filter(Boolean)
-      let shouldRefreshContent = false
-      const progressiveUpdates = []
-      for (const task of visibleTasks) {
-        const previousSnapshot = taskQueueSnapshots.get(task.task_id)
-        const previousProgressiveSnapshot = progressiveTaskSnapshots.get(task.task_id)
-        shouldRefreshContent = shouldRefreshContent || shouldRefreshContentForTask(
-          task,
-          previousSnapshot,
-          taskQueueInitialized,
-          terminalStatuses
-        )
-        const snapshot = taskContentSnapshot(task)
-        taskQueueSnapshots.set(task.task_id, snapshot)
-        // The first queue read also contains historical task records. Do not
-        // turn startup into hundreds of content/detail requests; only live
-        // work (or the item the reader already has open) needs progressive
-        // hydration at that point. Later queue deltas are handled normally.
-        if (
-          taskQueueInitialized
-          || isActiveTask(task)
-          || activeWorkspaceTab.value?.content_item_id === task.content_item_id
-        ) {
-          progressiveUpdates.push(hydrateProgressiveTask(task, previousProgressiveSnapshot))
-        }
-      }
-
-      if (!tasks.length) {
-        taskQueueInitialized = true
-        return
-      }
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, ...taskIds])]
-      mergeBatchTasks(visibleTasks)
-      taskQueueInitialized = true
-      await Promise.allSettled(progressiveUpdates)
-      if (shouldRefreshContent) {
-        await loadContentItems()
-      }
-      if (activeBatchCount.value) {
-        pollBatchTasks()
-      }
-    } catch {
-      // 队列加载失败不影响单条处理。
-    } finally {
-      taskQueueSyncing = false
-    }
-  }
-
-  function mergeBatchTasks(tasks) {
-    const byId = new Map(batchTasks.value.map((task) => [task.task_id, task]))
-    for (const task of tasks) {
-      const existing = byId.get(task.task_id)
-      if (task.details_included === false && existing) {
-        const merged = { ...existing, ...task }
-        const detailFields = [
-          'text_source',
-          'ai_calls',
-          'cache_hits',
-          'logs',
-          'timings',
-          'error_info',
-          'transcript',
-          'summary',
-        ]
-        detailFields.forEach((field) => {
-          if (existing[field] !== undefined) merged[field] = existing[field]
-        })
-        merged.details_included = Boolean(
-          existing.detail_updated_at
-          && existing.detail_updated_at === task.updated_at
-        )
-        merged.detail_updated_at = existing.detail_updated_at || ''
-        byId.set(task.task_id, merged)
-        continue
-      }
-      byId.set(task.task_id, {
-        ...existing,
-        ...task,
-        detail_updated_at: task.updated_at || existing?.detail_updated_at || '',
-      })
-    }
-    batchTasks.value = batchTaskIds.value
-      .map((id) => byId.get(id))
-      .filter(Boolean)
-  }
-
-  function batchTaskName(task) {
-    return batchTaskNames.value[task.task_id]
-      || task.display_title
-      || task.source_title
-      || task.local_video_path?.split('/').pop()
-      || task.local_subtitle_path?.split('/').pop()
-      || task.video_path?.split('/').pop()
-      || task.url
-      || `任务 ${task.task_id}`
-  }
-
-  function batchTaskMeta(task) {
-    const parts = [stepLabel(task.step || 'queued'), `模型 ${modelLabel(task.whisper_model)}`]
-    if (task.execution_mode === 'background') {
-      parts.push('后台')
-    }
-    if (Number(task.priority || 100) <= 10) {
-      parts.push('优先')
-    }
-    return parts.join(' · ')
-  }
-
-  function registerContentRecoveryBatchTask(task, item, { merge = true, allowSourceUrlFallback = true } = {}) {
-    const taskId = task?.task_id
-    if (!taskId) return
-    batchTaskNames.value[taskId] = item?.title || (allowSourceUrlFallback ? item?.source_url : '') || `任务 ${taskId}`
-    batchTaskIds.value = [...new Set([...batchTaskIds.value, taskId])]
-    if (merge) mergeBatchTasks([task])
-  }
-
-  async function pollBatchTasks() {
-    stopBatchPolling()
-    if (!batchTaskIds.value.length) return
-
-    try {
-      const knownTasks = new Map(batchTasks.value.map((task) => [task.task_id, task]))
-      const taskIds = batchTaskIds.value.filter((taskId) => {
-        const task = knownTasks.get(taskId)
-        return !task || isActiveTask(task)
-      }).slice(0, 200)
-      if (!taskIds.length) return
-      const res = await axios.get(`${API}/tasks`, {
-        params: { task_ids: taskIds.join(',') },
-        timeout: 10000,
-      })
-      const byId = new Map((res.data || []).map((task) => [task.task_id, task]))
-      const nextTasks = batchTaskIds.value.map((id) => byId.get(id)).filter(Boolean)
-      const previousStatusByTaskId = new Map(batchTasks.value.map((task) => [task.task_id, task.status]))
-      const previousProgressiveSnapshots = new Map(
-        nextTasks.map((task) => [task.task_id, progressiveTaskSnapshots.get(task.task_id)])
-      )
-      const newlyCompletedContentTasks = nextTasks.filter((task) => (
-        task.content_item_id
-        && terminalStatuses.has(task.status)
-        && !terminalStatuses.has(previousStatusByTaskId.get(task.task_id))
-      ))
-      mergeBatchTasks(nextTasks)
-      await Promise.allSettled(nextTasks.map((task) => (
-        hydrateProgressiveTask(task, previousProgressiveSnapshots.get(task.task_id))
-      )))
-      // Do not wait for every task in a batch to finish before refreshing the
-      // tree. A content item receives its provider folder during processing,
-      // so refreshing at each terminal transition keeps (for example) Douyin
-      // videos inside their folder immediately.
-      if (newlyCompletedContentTasks.length) await loadContentItems()
-      if (activeBatchCount.value) {
-        const hasStreamingSummary = nextTasks.some((task) => (
-          task.status === 'running'
-          && Number(task?.progress?.summarize || 0) > 0
-          && Number(task?.progress?.summarize || 0) < 100
-        ))
-        batchPollTimer.value = setTimeout(() => pollBatchTasks(), hasStreamingSummary ? 320 : 1500)
-      } else {
-        await loadContentItems()
-      }
-    } catch (e) {
-      batchPollTimer.value = setTimeout(() => pollBatchTasks(), 3000)
-    }
-  }
-
   async function monitorCreatorSyncTasks({ taskIds = [], contentItemIds = [] } = {}) {
     const ids = [...new Set(taskIds.filter(Boolean))]
     const itemIds = new Set(contentItemIds.filter(Boolean))
@@ -3245,71 +3064,6 @@ export function useAppController() {
     } catch (error) {
       const message = error.response?.data?.detail || error.message || '无法读取创作者处理任务'
       ElMessage.error(typeof message === 'string' ? message : '无法读取创作者处理任务')
-    }
-  }
-
-  async function cancelBatchTask(task) {
-    try {
-      const res = await axios.post(`${API}/tasks/${task.task_id}/cancel`, {}, { timeout: 10000 })
-      mergeBatchTasks([res.data])
-      if (res.data.task_id === result.task_id) applyTaskData(res.data)
-      ElMessage.warning('已请求取消')
-      await pollBatchTasks()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '取消失败'
-      ElMessage.error(msg)
-    }
-  }
-
-  async function cancelActiveTasks() {
-    try {
-      const response = await axios.post(`${API}/tasks/cancel-active`, {}, { timeout: 10000 })
-      const cancelled = Array.isArray(response.data?.tasks) ? response.data.tasks : []
-      if (!cancelled.length) {
-        ElMessage.info('当前没有可取消的任务')
-        return
-      }
-      mergeBatchTasks(cancelled)
-      const activeResult = cancelled.find((task) => task.task_id === result.task_id)
-      if (activeResult) applyTaskData(activeResult)
-      ElMessage.warning(`已请求取消 ${response.data.cancelled_count || cancelled.length} 个任务`)
-      await pollBatchTasks()
-    } catch (error) {
-      const message = error.response?.data?.detail || error.message || '批量取消失败'
-      ElMessage.error(typeof message === 'string' ? message : '批量取消失败')
-    }
-  }
-
-  async function loadBatchTaskDetails(task) {
-    const taskId = task?.task_id
-    if (!taskId || loadingBatchTaskDetailIds.has(taskId)) return
-    if (
-      task.details_included !== false
-      && task.detail_updated_at
-      && task.detail_updated_at === task.updated_at
-    ) return
-
-    loadingBatchTaskDetailIds.add(taskId)
-    try {
-      const response = await axios.get(`${API}/tasks/${taskId}`, { timeout: 10000 })
-      mergeBatchTasks([response.data])
-    } catch {
-      // The queue summary remains usable when one historical detail request
-      // fails; a later selection or task update retries it.
-    } finally {
-      loadingBatchTaskDetailIds.delete(taskId)
-    }
-  }
-
-  async function retryBatchTask(task) {
-    try {
-      const res = await axios.post(`${API}/tasks/${task.task_id}/retry`, {}, { timeout: 10000 })
-      mergeBatchTasks([res.data])
-      ElMessage.success('已重新加入队列')
-      await pollBatchTasks()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '重试失败'
-      ElMessage.error(msg)
     }
   }
 

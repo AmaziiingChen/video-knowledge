@@ -11,7 +11,7 @@ MAX_NEW_SOURCE_LINES = 1_000
 # These are ceilings, not targets. Ratchet a value down whenever a refactor
 # shrinks the file; never raise one to make CI green.
 KNOWN_DEBT_BUDGETS = {
-    "frontend/src/composables/useAppController.js": 4_332,
+    "frontend/src/composables/useAppController.js": 4_086,
     "frontend/src/workbench/EditorHost.vue": 4_218,
     "frontend/src/App.vue": 3_130,
     "backend/services/database.py": 167,
