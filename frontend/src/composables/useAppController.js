@@ -72,6 +72,7 @@ import {
 import { useArticlePreviewController } from '../features/library/useArticlePreviewController.js'
 import { useOpenClawController } from '../features/integrations/useOpenClawController.js'
 import { useQaSessionController } from '../features/assistant/useQaSessionController.js'
+import { useSelectedTextContext } from '../features/assistant/useSelectedTextContext.js'
 import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
@@ -351,8 +352,6 @@ export function useAppController() {
   const articleSnapshotPreviewedTaskIds = new Set()
   const mediaSnapshotPreviewedTaskIds = new Set()
   const transcriptSnapshotPreviewedTaskIds = new Set()
-  const selectedTextContext = ref(null)
-  const selectedTextContextToken = '@选中文本'
   const autoQaShortcutRecognition = ref(true)
   const {
     viewedContentIds,
@@ -375,12 +374,6 @@ export function useAppController() {
   const cookieTimer = ref(null)
   let lastDouyinCookieAlertState = ''
 
-  watch(questionInput, (value) => {
-    const activeContentItemId = String(activeWorkspaceContent.value?.id || result.content_item_id || '')
-    if (selectedTextContext.value?.contentItemId === activeContentItemId && !hasSelectedTextContextToken(value)) {
-      selectedTextContext.value = null
-    }
-  })
   const cookieInput = ref('')
   const savingCookie = ref(false)
   const bilibiliCookieConfigured = ref(false)
@@ -552,46 +545,17 @@ export function useAppController() {
     return ''
   })
 
-  const activeSelectedTextContext = computed(() => {
-    const context = selectedTextContext.value
-    const contentItemId = String(activeWorkspaceContent.value?.id || result.content_item_id || '')
-    return context?.contentItemId && context.contentItemId === contentItemId ? context : null
+  const {
+    activeSelectedTextContext,
+    clearSelectedTextContext,
+    removeSelectedTextContextToken,
+    setSelectedTextContext,
+  } = useSelectedTextContext({
+    questionInput,
+    getActiveContent: () => activeWorkspaceContent.value,
+    getFallbackContentItemId: () => result.content_item_id,
+    getFallbackContentTitle: () => result.source_title,
   })
-
-  function setSelectedTextContext(context) {
-    const text = String(context?.text || '').replace(/\s+/gu, ' ').trim()
-    const contentItemId = String(context?.contentItemId || activeWorkspaceContent.value?.id || result.content_item_id || '').trim()
-    if (!text || !contentItemId) return
-    selectedTextContext.value = {
-      id: `${contentItemId}:${Date.now()}`,
-      contentItemId,
-      contentTitle: String(context?.contentTitle || activeWorkspaceContent.value?.title || result.source_title || '当前内容').trim(),
-      text: text.slice(0, 12000),
-    }
-    questionInput.value = addSelectedTextContextToken(questionInput.value)
-  }
-
-  function clearSelectedTextContext() {
-    selectedTextContext.value = null
-    questionInput.value = removeSelectedTextContextToken(questionInput.value)
-  }
-
-  function hasSelectedTextContextToken(value) {
-    return /(?:^|\s)@选中文本(?=\s|$)/u.test(String(value || ''))
-  }
-
-  function addSelectedTextContextToken(value) {
-    const current = String(value || '')
-    if (hasSelectedTextContextToken(current)) return current
-    return `${current}${current && !/\s$/u.test(current) ? ' ' : ''}${selectedTextContextToken} `
-  }
-
-  function removeSelectedTextContextToken(value) {
-    return String(value || '')
-      .replace(/(?:^|\s)@选中文本(?=\s|$)/gu, ' ')
-      .replace(/[ \t]{2,}/gu, ' ')
-      .trimStart()
-  }
 
   function workspaceTabById(tabId) {
     return workspaceTabs.value.find((tab) => tab.id === tabId) || null
