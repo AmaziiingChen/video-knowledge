@@ -135,7 +135,11 @@ External text, comments, web pages, OCR output, and model responses remain untru
 
 ## Architecture checks
 
-The repository enforces frontend source reachability with `npm run check:reachability` and initial renderer budgets during `npm run build`. Additional invariants are:
+The repository enforces frontend linting, Vue template type checks, mounted
+component coverage, source reachability, and renderer bundle budgets. The
+coverage list deliberately starts at newly extracted interactive boundaries
+and must expand as legacy responsibilities are split; thresholds may not be
+lowered to admit untested refactors. Additional invariants are:
 
 - no hard-coded renderer loopback API origins outside the canonical API module and its tests;
 - no router-to-router imports of private symbols;

@@ -10,12 +10,16 @@ const ENTRYPOINTS = [
   path.join(SOURCE_ROOT, 'public-report-site', 'archive.js'),
 ]
 
+function isProductionSource(filename) {
+  return EXTENSIONS.includes(path.extname(filename)) && !/\.(?:test|spec)\.js$/u.test(filename)
+}
+
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true })
   const files = await Promise.all(entries.map(async (entry) => {
     const target = path.join(directory, entry.name)
     if (entry.isDirectory()) return sourceFiles(target)
-    return EXTENSIONS.includes(path.extname(entry.name)) && !entry.name.endsWith('.test.js') ? [target] : []
+    return isProductionSource(entry.name) ? [target] : []
   }))
   return files.flat()
 }
