@@ -17,6 +17,10 @@ class LibraryFolderResponse(BaseModel):
     updated_at: str
 
 
+class LibraryFolderLocationResponse(BaseModel):
+    path: str
+
+
 def library_folder_response(row, *, content_count: int | None = None) -> LibraryFolderResponse:
     return LibraryFolderResponse(
         id=row["id"],

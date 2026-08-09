@@ -74,6 +74,7 @@ from services.library_folder_tree import (
     require_folder,
 )
 from services.library_folder_presentation import (
+    LibraryFolderLocationResponse,
     LibraryFolderResponse,
     library_folder_response as _folder_response,
 )
@@ -143,10 +144,6 @@ class ArticlePreviewResponse(BaseModel):
     attachments: list[dict[str, str]] = Field(default_factory=list)
     formatting_status: str = "not_applicable"
     formatting_detail: str = ""
-
-
-class LibraryFolderLocationResponse(BaseModel):
-    path: str
 
 
 class ContentStatusRequest(BaseModel):
