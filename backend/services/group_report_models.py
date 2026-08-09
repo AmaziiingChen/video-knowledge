@@ -47,18 +47,9 @@ class GroupReportGeneration:
 
 
 @dataclass(frozen=True)
-class _Event:
-    id: str
-    title: str
-    source_ids: tuple[str, ...]
-    presentation: str
-
-
-@dataclass(frozen=True)
 class _Section:
     title: str
     source_ids: tuple[str, ...]
-    events: tuple[_Event, ...] = ()
     supporting_sources: tuple["_SupportingSource", ...] = ()
     writing_brief: str = ""
 
@@ -67,12 +58,6 @@ class _Section:
 class _SupportingSource:
     source_id: str
     use_scope: str
-
-
-@dataclass(frozen=True)
-class _EventLedger:
-    event: _Event
-    facts: tuple[dict[str, object], ...]
 
 
 class _ProgressUsage:

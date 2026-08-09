@@ -60,7 +60,6 @@ def normalize_report_plan(
             _Section(
                 title=section.title,
                 source_ids=tuple(primary_ids),
-                events=section.events,
                 supporting_sources=tuple(supporting),
                 writing_brief=writing_brief,
             )
@@ -86,7 +85,6 @@ def normalize_report_plan(
                 _Section(
                     title=section.title,
                     source_ids=section.source_ids,
-                    events=section.events,
                     supporting_sources=supporting,
                     writing_brief=section.writing_brief,
                 )
