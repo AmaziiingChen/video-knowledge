@@ -71,6 +71,7 @@ from services.content_presentation import (
 from services.library_folder_tree import (
     folder_tree_ids as _folder_tree_ids,
     is_descendant_folder as _is_descendant_folder,
+    require_folder,
 )
 from services.library_folder_presentation import (
     LibraryFolderResponse,
@@ -1052,7 +1053,7 @@ def _markdown_import_title(markdown: str, filename: str) -> str:
 
 
 def _ensure_folder_exists(connection, folder_id: str):
-    row = connection.execute("SELECT * FROM library_folders WHERE id = ?", (folder_id,)).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="文件夹不存在")
-    return row
+    try:
+        return require_folder(connection, folder_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="文件夹不存在") from exc

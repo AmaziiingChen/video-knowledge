@@ -9,6 +9,7 @@ from services.content_index import ensure_content_index_ready
 from services.content_presentation import ContentItemResponse, content_item_response
 from services.database import connect, initialize_database
 from services.library_folder_presentation import LibraryFolderResponse, library_folder_response
+from services.library_folder_tree import require_folder
 from services.repository import ContentRepository
 
 
@@ -23,10 +24,10 @@ class FolderContentPageResponse(BaseModel):
 
 
 def _ensure_folder_exists(connection, folder_id: str):
-    row = connection.execute("SELECT * FROM library_folders WHERE id = ?", (folder_id,)).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="文件夹不存在")
-    return row
+    try:
+        return require_folder(connection, folder_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="文件夹不存在") from exc
 
 
 @router.get("/content/folders", response_model=list[LibraryFolderResponse])

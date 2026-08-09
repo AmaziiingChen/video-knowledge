@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 
+def require_folder(connection, folder_id: str):
+    """Return a stored folder or raise ``LookupError`` without API coupling."""
+    row = connection.execute("SELECT * FROM library_folders WHERE id = ?", (folder_id,)).fetchone()
+    if row is None:
+        raise LookupError(folder_id)
+    return row
+
+
 def folder_tree_ids(connection, folder_id: str) -> list[str]:
     """Return one folder and every descendant in tree order."""
     rows = connection.execute(
