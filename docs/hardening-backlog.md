@@ -70,8 +70,11 @@ lines.
   Markdown imports now have dedicated service/router owners. Local-file import,
   content read/update and capture endpoints remain separate follow-up cuts.
 - [ ] Add direct tests for public-tree, DMG validation and backend packaging
-  scripts; persist release measurements.  Verify jobs now have bounded
-  timeouts and repeated pull-request/main checks cancel stale in-progress runs.
+  scripts; persist release measurements. Public-tree credential/history checks
+  and unsigned-DMG layout/model-exclusion checks now have direct tests; backend
+  packaging-script coverage and persisted release measurements remain pending.
+  Verify jobs now have bounded timeouts and repeated pull-request/main checks
+  cancel stale in-progress runs.
 - [ ] Establish auditable Python dependency constraints/lock data and add an
   incremental, explicit coverage baseline for high-risk boundaries. The base
   manifest has removed its three verified-unused dependencies; reproducible
