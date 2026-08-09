@@ -71,7 +71,9 @@ lines.
   fallback, in-page find, bounded outline/progress messages and selection
   forwarding. Shared content-type, local-import preview and remote-source
   classification now lives in `workbench/editorContentKind.js` with pure
-  boundary tests. Report, article and media readers still need their own mounted
+  boundary tests. Menu-action dispatch and detail-row presentation now live in
+  `workbench/editorContentActions.js` and `workbench/editorContentDetails.js`.
+  Report, article and media readers still need their own mounted
   behavior boundaries.
 - [x] Extract report-generation SSE decoding from `App.vue`; preserve local
   capability headers, fragmented event handling and explicit server errors in
