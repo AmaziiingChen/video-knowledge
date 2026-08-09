@@ -11,6 +11,7 @@ const { directChildEnvironment } = require('./network-env.cjs')
 const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
 const { backendSpawnOptions, terminateBackendProcess } = require('./backend-process.cjs')
+const { shouldInjectBackendToken, withBackendToken } = require('./backend-request-auth.cjs')
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..')
 const BACKEND_URL = 'http://127.0.0.1:8000'
@@ -462,6 +463,23 @@ function createWindow(entryPath = 'index.html') {
       backgroundThrottling: false,
     },
   })
+
+  // Native media, iframe and image loads cannot attach the renderer's custom
+  // header. Inject the capability only for requests attributed to this exact
+  // trusted main renderer, never for remote webview partitions.
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: [`${BACKEND_URL}/api/*`] },
+    (details, callback) => {
+      if (!shouldInjectBackendToken(details, mainWindow?.webContents?.id)) {
+        callback({ cancel: false, requestHeaders: details.requestHeaders })
+        return
+      }
+      callback({
+        cancel: false,
+        requestHeaders: withBackendToken(details.requestHeaders, BACKEND_INSTANCE_TOKEN),
+      })
+    },
+  )
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show()

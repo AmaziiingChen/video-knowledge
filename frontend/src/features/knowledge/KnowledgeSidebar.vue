@@ -66,7 +66,7 @@
 import { computed, onMounted, ref } from 'vue'
 import SidebarTreeRow from '../../workbench/SidebarTreeRow.vue'
 import { libraryContentIcon } from '../../utils/contentIcons'
-import { API_BASE as API } from '../../utils/localApiAuth.js'
+import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from '../../utils/localApiAuth.js'
 
 const SIDEBAR_CACHE_MAX_AGE_MS = 30_000
 
@@ -107,7 +107,7 @@ async function refresh({ force = false, sourceSets: includeSourceSets = true, co
 
 async function refreshConversations() {
   if (!conversationCache.request) {
-    conversationCache.request = fetch(`${API}/knowledge/conversations`)
+    conversationCache.request = fetch(localApiRequestUrl(`${API}/knowledge/conversations`), { headers: await localApiAuthHeaders() })
       .then(async (response) => {
         if (!response.ok) throw Error('无法读取知识库对话')
         const payload = await response.json()
@@ -124,7 +124,7 @@ async function refreshConversations() {
 
 async function refreshSourceSets() {
   if (!sourceSetCache.request) {
-    sourceSetCache.request = fetch(`${API}/knowledge/v2/source-sets`)
+    sourceSetCache.request = fetch(localApiRequestUrl(`${API}/knowledge/v2/source-sets`), { headers: await localApiAuthHeaders() })
       .then(async (response) => {
         if (!response.ok) throw Error('无法读取知识集')
         const payload = await response.json()
@@ -216,7 +216,7 @@ async function loadDocuments(source, { reset = false } = {}) {
   loadingSourceIds.value = nextLoading
   try {
     const params = new URLSearchParams({ provider: source.provider, name: source.name, limit: '200', offset: String(offset) })
-    const response = await fetch(`${API}/knowledge/v2/source-documents?${params}`)
+    const response = await fetch(localApiRequestUrl(`${API}/knowledge/v2/source-documents?${params}`), { headers: await localApiAuthHeaders() })
     if (!response.ok) throw Error('无法读取知识集文章')
     const payload = await response.json()
     const previous = reset ? [] : (cached?.items || [])

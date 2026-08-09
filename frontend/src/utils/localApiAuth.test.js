@@ -23,3 +23,23 @@ test('desktop and non-local requests keep their original destination', async () 
   assert.equal(localApiRequestUrl('http://127.0.0.1:8000/api/tasks'), 'http://127.0.0.1:8000/api/tasks')
   assert.equal(localApiRequestUrl('https://example.com/api/tasks'), 'https://example.com/api/tasks')
 })
+
+test('axios attaches the desktop capability to local reads as well as writes', async () => {
+  installWindow('knowledgehub://app', true)
+  const { installLocalApiAuth } = await import('./localApiAuth.js')
+  let requestInterceptor = null
+  installLocalApiAuth({
+    interceptors: {
+      request: {
+        use(handler) { requestInterceptor = handler },
+      },
+    },
+  })
+
+  const readRequest = await requestInterceptor({
+    method: 'get',
+    url: 'http://127.0.0.1:8000/api/content',
+    headers: {},
+  })
+  assert.equal(readRequest.headers['X-KnowledgeHub-Token'], 'desktop-token')
+})

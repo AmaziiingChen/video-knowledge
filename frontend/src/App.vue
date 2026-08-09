@@ -832,7 +832,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SvgMaskIcon from './components/SvgMaskIcon.vue'
@@ -858,12 +858,13 @@ import { useCampusAccess } from './composables/useCampusAccess'
 import { useRuntimeSettingsController } from './features/settings/useRuntimeSettingsController.js'
 import { requestDestructiveConfirmation } from './composables/useDestructiveConfirm'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from './utils/sourceSyncTask'
-import { promptTaskContracts, promptTemplateDisplayName } from './config/promptInterface'
+import { promptTaskContracts } from './config/promptInterface'
 import { WECHAT_COVER_STYLE_OPTIONS } from './config/wechatCoverStyles'
 import { useWechatCoverController } from './features/wechat/useWechatCoverController.js'
 import { useWechatDraftController } from './features/wechat/useWechatDraftController.js'
 import { useWechatPublishingSettingsController } from './features/wechat/useWechatPublishingSettingsController.js'
 import { useWechatReportPromptController } from './features/prompts/useWechatReportPromptController.js'
+import { usePromptWorkspaceController } from './features/prompts/usePromptWorkspaceController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -1332,7 +1333,9 @@ const folderImportPath = ref('')
 async function openKnowledgeEvidence(chunkId) {
   if (!chunkId) return
   try {
-    const response = await fetch(`${API}/knowledge/v2/evidence/${encodeURIComponent(chunkId)}`)
+    const response = await fetch(localApiRequestUrl(`${API}/knowledge/v2/evidence/${encodeURIComponent(chunkId)}`), {
+      headers: await localApiAuthHeaders(),
+    })
     if (!response.ok) throw Error('引用原文已不可用')
     knowledgeEvidence.value = await response.json()
     contextSidebarOpen.value = true
@@ -1447,7 +1450,6 @@ const WECHAT_FILTER_API = `${API}/wechat-content-filters`
 const WECHAT_FEED_API = `${API}/wechat-feed`
 const WECHAT_REPORT_GROUP_API = `${API}/wechat-report-groups`
 const FOLDER_IMPORT_WATCHER_API = `${API}/folder-import-watcher`
-const WECHAT_REPORT_PROMPT_API = `${API}/wechat-report-prompts`
 const WECHAT_PUBLISHING_API = `${API}/wechat-publishing`
 const LIBRARY_SOURCE_GROUPS_API = `${API}/content/source-groups`
 const LIBRARY_LOCAL_FILE_IMPORT_API = `${API}/content/import-file`
@@ -1604,32 +1606,66 @@ let reportGenerationConfirmationResolver = null
 let reportPreflightRequest = null
 let wechatPreparingRequestId = ''
 const fixedSystemPrompts = ref([])
-const promptWorkspaceTemplates = ref([])
-const promptFolders = ref([])
-const promptWorkspaceTabs = ref([])
-const activePromptTabId = ref('')
-let promptWorkspaceActivationSequence = 0
-let promptWorkspaceEditorSyncDepth = 0
-const promptTrashEntries = ref([])
-const loadingPromptTrash = ref(false)
-// Configurable prompts live in their feature folders, where they can be edited and
-// activated.  Keep this read-only section for the small set of fixed system rules.
-const systemPromptEntries = computed(() => fixedSystemPrompts.value)
-const promptContextEntries = computed(() => wechatReportPrompts.value
-  .filter((prompt) => prompt.report_type === 'group_context')
-  .map((prompt) => ({
-    id: `context:${prompt.id}`,
-    category: `分组报告 · ${prompt.group_name || '未命名分组'}`,
-    name: String(prompt.display_name || '组别说明'),
-    description: '随每个生成阶段作为 user 任务上下文发送；不是 system prompt。',
-    template: prompt.template || '',
-  })))
-const activePromptNodeId = computed(() => {
-  const tab = promptWorkspaceTabs.value.find((item) => item.id === activePromptTabId.value)
-  if (!tab) return ''
-  if (tab.kind === 'system') return `system:${tab.systemPromptId}`
-  if (tab.kind === 'context') return `context:${tab.systemPromptId}`
-  return tab.kind === 'report' ? `report:${tab.reportPromptId}` : tab.promptId ? `prompt:${tab.promptId}` : tab.id
+const {
+  promptWorkspaceTemplates,
+  promptFolders,
+  promptWorkspaceTabs,
+  activePromptTabId,
+  promptTrashEntries,
+  loadingPromptTrash,
+  systemPromptEntries,
+  promptContextEntries,
+  activePromptNodeId,
+  loadPromptWorkspaceData,
+  loadPromptTrash,
+  activatePromptWorkspaceTab,
+  openPromptWorkspaceFile,
+  openSystemPromptWorkspaceFile,
+  openPromptContextWorkspaceFile,
+  createPromptWorkspaceFile,
+  closePromptWorkspaceTabs,
+  closePromptWorkspaceTab,
+  savePromptWorkspaceCurrent,
+  resetPromptWorkspaceCurrent,
+  createPromptWorkspaceFolder,
+  renamePromptWorkspaceFolder,
+  renamePromptWorkspaceFile,
+  renameReportPromptWorkspaceFile,
+  deletePromptWorkspaceFile,
+  deletePromptWorkspaceFolder,
+  movePromptWorkspaceNode,
+  restorePromptTrashEntry,
+  permanentlyDeletePromptTrashEntry,
+  activatePromptWorkspaceTemplate,
+} = usePromptWorkspaceController({
+  standardPrompt: {
+    taskType: promptTaskType,
+    templates: promptTemplates,
+    selectedId: selectedPromptTemplateId,
+    editorName: promptEditorName,
+    editorText: promptEditorText,
+    load: loadPromptTemplates,
+    select: selectPromptTemplate,
+    create: createPromptTemplate,
+    save: savePromptTemplate,
+    activate: activatePromptTemplate,
+    refreshQaShortcutTemplates: loadQaShortcutTemplates,
+    refreshContentAnalysisTemplates: loadContentAnalysisTemplates,
+  },
+  reportPrompt: {
+    prompts: wechatReportPrompts,
+    text: wechatReportPromptText,
+    load: loadWechatReportPrompts,
+    save: saveWechatReportPrompt,
+    selectGroup: selectWechatReportPromptGroup,
+    selectType: selectWechatReportPromptType,
+  },
+  fixedSystemPrompts,
+  activeView,
+  apiBase: PROMPT_WORKSPACE_API,
+  reportGroupApi: WECHAT_REPORT_GROUP_API,
+  confirmDestructive: requestDestructiveConfirmation,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 const savingWeChatFilter = ref(false)
 const selectedWeChatAccountId = ref('')
@@ -1948,517 +1984,6 @@ async function openOriginalFile(path) {
   } catch (error) {
     ElMessage.error(wechatErrorMessage(error, '打开原始文件失败'))
   }
-}
-
-function activePromptWorkspaceTab() {
-  return promptWorkspaceTabs.value.find((tab) => tab.id === activePromptTabId.value) || null
-}
-
-function captureActivePromptDraft() {
-  if (promptWorkspaceEditorSyncDepth > 0) return
-  const tab = activePromptWorkspaceTab()
-  if (!tab) return
-  if (tab.kind === 'system' || tab.kind === 'context') return
-  if (tab.kind === 'report') {
-    tab.draftText = wechatReportPromptText.value
-  } else {
-    tab.draftName = promptEditorName.value
-    tab.draftText = promptEditorText.value
-  }
-  tab.dirty = promptWorkspaceTabDirty(tab)
-}
-
-function promptWorkspaceTabDirty(tab) {
-  if (!tab) return false
-  if (tab.kind === 'system' || tab.kind === 'context') return false
-  if (tab.isNew) return Boolean(String(tab.draftName || '').trim() || String(tab.draftText || '').trim())
-  if (tab.kind === 'report') return tab.draftText !== tab.originalText
-  return tab.draftName !== tab.originalName || tab.draftText !== tab.originalText
-}
-
-function reconcilePromptWorkspaceTabs() {
-  const templateMap = new Map(promptWorkspaceTemplates.value.map((template) => [template.id, template]))
-  const reportMap = new Map(wechatReportPrompts.value.map((prompt) => [prompt.id, prompt]))
-  const systemMap = new Map(systemPromptEntries.value.map((prompt) => [prompt.id, prompt]))
-  const contextMap = new Map(promptContextEntries.value.map((prompt) => [prompt.id, prompt]))
-  promptWorkspaceTabs.value = promptWorkspaceTabs.value
-    .filter((tab) => tab.isNew || (
-      tab.kind === 'report'
-        ? reportMap.has(tab.reportPromptId)
-        : tab.kind === 'system'
-          ? systemMap.has(tab.systemPromptId)
-          : tab.kind === 'context'
-            ? contextMap.has(tab.systemPromptId)
-          : templateMap.has(tab.promptId)
-    ))
-    .map((tab) => {
-      const source = tab.kind === 'report'
-        ? reportMap.get(tab.reportPromptId)
-        : tab.kind === 'system'
-          ? systemMap.get(tab.systemPromptId)
-          : tab.kind === 'context'
-            ? contextMap.get(tab.systemPromptId)
-          : templateMap.get(tab.promptId)
-      if (!source) return tab
-      return {
-        ...tab,
-        title: tab.kind === 'report'
-          ? String(source.display_name || '区间报告')
-          : tab.kind === 'system'
-            ? String(source.name || '系统提示词')
-          : tab.kind === 'context'
-            ? String(source.name || '任务上下文')
-          : promptTemplateDisplayName(source),
-        originalText: ['system', 'context'].includes(tab.kind) ? String(source.template || '') : tab.originalText,
-        draftText: ['system', 'context'].includes(tab.kind) ? String(source.template || '') : tab.draftText,
-      }
-    })
-  if (!promptWorkspaceTabs.value.some((tab) => tab.id === activePromptTabId.value)) {
-    activePromptTabId.value = promptWorkspaceTabs.value[0]?.id || ''
-  }
-}
-
-async function loadPromptWorkspaceData() {
-  try {
-    const [templatesResponse, foldersResponse, systemResponse] = await Promise.all([
-      axios.get(`${PROMPT_WORKSPACE_API}/prompts`, { timeout: 10000 }),
-      axios.get(`${PROMPT_WORKSPACE_API}/prompt-folders`, { timeout: 10000 }),
-      axios.get(`${PROMPT_WORKSPACE_API}/system-prompts`, { timeout: 10000 }),
-    ])
-    promptWorkspaceTemplates.value = Array.isArray(templatesResponse.data) ? templatesResponse.data : []
-    promptFolders.value = Array.isArray(foldersResponse.data) ? foldersResponse.data : []
-    fixedSystemPrompts.value = Array.isArray(systemResponse.data) ? systemResponse.data : []
-    reconcilePromptWorkspaceTabs()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法读取提示词文件树'))
-  }
-}
-
-async function loadPromptTrash() {
-  loadingPromptTrash.value = true
-  try {
-    const response = await axios.get(`${PROMPT_WORKSPACE_API}/prompts/trash`, { timeout: 10000 })
-    promptTrashEntries.value = Array.isArray(response.data) ? response.data : []
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法读取提示词回收站'))
-  } finally {
-    loadingPromptTrash.value = false
-  }
-}
-
-async function activatePromptWorkspaceTab(tabId, { capture = true } = {}) {
-  const activationSequence = ++promptWorkspaceActivationSequence
-  if (capture) captureActivePromptDraft()
-  const tab = promptWorkspaceTabs.value.find((item) => item.id === tabId)
-  if (!tab) return
-  promptWorkspaceEditorSyncDepth += 1
-  try {
-    activePromptTabId.value = tabId
-    if (tab.kind === 'report') {
-      promptTaskType.value = 'wechat_reports'
-      selectWechatReportPromptGroup(tab.groupId)
-      selectWechatReportPromptType(tab.reportType)
-      wechatReportPromptText.value = tab.draftText
-      return
-    }
-    if (tab.kind === 'system') {
-      promptTaskType.value = 'system_prompts'
-      promptEditorName.value = tab.title
-      promptEditorText.value = tab.draftText
-      return
-    }
-    if (tab.kind === 'context') {
-      promptTaskType.value = 'prompt_contexts'
-      promptEditorName.value = tab.title
-      promptEditorText.value = tab.draftText
-      return
-    }
-    if (tab.isNew) {
-      createPromptTemplate({ taskType: tab.taskType, name: tab.draftName, folderId: tab.folderId })
-      promptEditorText.value = tab.draftText
-      return
-    }
-    promptTaskType.value = tab.taskType
-    await loadPromptTemplates()
-    if (activationSequence !== promptWorkspaceActivationSequence || activePromptTabId.value !== tabId) return
-    selectPromptTemplate(tab.promptId)
-    promptEditorName.value = tab.draftName
-    promptEditorText.value = tab.draftText
-  } finally {
-    // Flush programmatic editor writes before user-edit capture resumes.
-    await nextTick()
-    promptWorkspaceEditorSyncDepth = Math.max(0, promptWorkspaceEditorSyncDepth - 1)
-  }
-}
-
-async function openPromptWorkspaceFile({ kind, prompt }) {
-  if (!prompt?.id) return
-  const tabId = `${kind}:${prompt.id}`
-  if (!promptWorkspaceTabs.value.some((tab) => tab.id === tabId)) {
-    const isReport = kind === 'report'
-    const title = isReport
-      ? String(prompt.display_name || '区间报告')
-      : promptTemplateDisplayName(prompt)
-    promptWorkspaceTabs.value.push({
-      id: tabId,
-      title,
-      kind,
-      promptId: isReport ? null : prompt.id,
-      reportPromptId: isReport ? prompt.id : null,
-      taskType: isReport ? 'wechat_reports' : prompt.task_type,
-      groupId: isReport ? prompt.group_id : null,
-      reportType: isReport ? prompt.report_type : null,
-      originalName: title,
-      originalText: prompt.template || '',
-      draftName: title,
-      draftText: prompt.template || '',
-      isNew: false,
-      dirty: false,
-    })
-  }
-  await activatePromptWorkspaceTab(tabId)
-}
-
-async function openSystemPromptWorkspaceFile(prompt) {
-  if (!prompt?.id) return
-  const tabId = `system:${prompt.id}`
-  if (!promptWorkspaceTabs.value.some((tab) => tab.id === tabId)) {
-    promptWorkspaceTabs.value.push({
-      id: tabId,
-      title: String(prompt.name || '系统提示词'),
-      kind: 'system',
-      systemPromptId: prompt.id,
-      taskType: 'system_prompts',
-      originalName: String(prompt.name || '系统提示词'),
-      originalText: String(prompt.template || ''),
-      draftName: String(prompt.name || '系统提示词'),
-      draftText: String(prompt.template || ''),
-      isNew: false,
-      dirty: false,
-    })
-  }
-  await activatePromptWorkspaceTab(tabId)
-}
-
-async function openPromptContextWorkspaceFile(prompt) {
-  if (!prompt?.id) return
-  const tabId = `context:${prompt.id}`
-  if (!promptWorkspaceTabs.value.some((tab) => tab.id === tabId)) {
-    promptWorkspaceTabs.value.push({
-      id: tabId,
-      title: String(prompt.name || '任务上下文'),
-      kind: 'context',
-      systemPromptId: prompt.id,
-      taskType: 'prompt_contexts',
-      originalName: String(prompt.name || '任务上下文'),
-      originalText: String(prompt.template || ''),
-      draftName: String(prompt.name || '任务上下文'),
-      draftText: String(prompt.template || ''),
-      isNew: false,
-      dirty: false,
-    })
-  }
-  await activatePromptWorkspaceTab(tabId)
-}
-
-async function createPromptWorkspaceFile({ taskType, folderId = null, name }) {
-  promptWorkspaceActivationSequence += 1
-  captureActivePromptDraft()
-  const tabId = `prompt:new:${Date.now()}`
-  promptWorkspaceTabs.value.push({
-    id: tabId,
-    title: name,
-    kind: 'prompt',
-    promptId: null,
-    taskType,
-    folderId,
-    originalName: '',
-    originalText: '',
-    draftName: name,
-    draftText: '',
-    isNew: true,
-    dirty: true,
-  })
-  activePromptTabId.value = tabId
-  createPromptTemplate({ taskType, name, folderId })
-}
-
-async function closePromptWorkspaceTabs(tabIds, { force = false } = {}) {
-  captureActivePromptDraft()
-  const closingIds = new Set((Array.isArray(tabIds) ? tabIds : [tabIds]).filter(Boolean))
-  if (!closingIds.size) return
-  const closingTabs = promptWorkspaceTabs.value.filter((tab) => closingIds.has(tab.id))
-  if (!force && closingTabs.some(promptWorkspaceTabDirty)) {
-    const confirmed = await requestDestructiveConfirmation({
-      title: '关闭提示词',
-      message: '关闭后将丢失尚未保存的提示词修改。',
-      confirmLabel: '放弃修改并关闭',
-      cancelLabel: '继续编辑',
-    })
-    if (!confirmed) return
-  }
-  const activeIndex = promptWorkspaceTabs.value.findIndex((tab) => tab.id === activePromptTabId.value)
-  const activeClosed = closingIds.has(activePromptTabId.value)
-  promptWorkspaceTabs.value = promptWorkspaceTabs.value.filter((tab) => !closingIds.has(tab.id))
-  if (!activeClosed) return
-  const next = promptWorkspaceTabs.value[Math.min(Math.max(activeIndex, 0), promptWorkspaceTabs.value.length - 1)]
-  if (next) {
-    await activatePromptWorkspaceTab(next.id, { capture: false })
-  } else {
-    promptWorkspaceActivationSequence += 1
-    activePromptTabId.value = ''
-    selectedPromptTemplateId.value = ''
-    promptEditorName.value = ''
-    promptEditorText.value = ''
-    wechatReportPromptText.value = ''
-  }
-}
-
-async function closePromptWorkspaceTab(tabId) {
-  await closePromptWorkspaceTabs([tabId])
-}
-
-async function savePromptWorkspaceCurrent() {
-  const tab = activePromptWorkspaceTab()
-  if (!tab) return
-  if (tab.kind === 'system' || tab.kind === 'context') return
-  captureActivePromptDraft()
-  if (tab.kind === 'report') {
-    const saved = await saveWechatReportPrompt()
-    if (!saved) return
-    tab.originalText = wechatReportPromptText.value
-    tab.draftText = wechatReportPromptText.value
-    tab.dirty = false
-    await loadPromptWorkspaceData()
-    return
-  }
-  const savedId = await savePromptTemplate()
-  if (!savedId) return
-  const wasNew = tab.isNew
-  tab.promptId = savedId
-  tab.isNew = false
-  tab.originalName = promptEditorName.value
-  tab.originalText = promptEditorText.value
-  tab.draftName = promptEditorName.value
-  tab.draftText = promptEditorText.value
-  tab.title = promptEditorName.value
-  tab.dirty = false
-  if (wasNew) {
-    tab.id = `prompt:${savedId}`
-    activePromptTabId.value = tab.id
-  }
-  await loadPromptWorkspaceData()
-}
-
-async function resetPromptWorkspaceCurrent() {
-  const tab = activePromptWorkspaceTab()
-  if (!tab) return
-  if (tab.kind === 'system' || tab.kind === 'context') return
-  const promptName = String(tab.title || '当前提示词')
-  const confirmed = await requestDestructiveConfirmation({
-    title: '恢复内置默认',
-    message: `将“${promptName}”恢复为内置默认内容。当前修改会被替换，且无法撤销。`,
-    confirmLabel: '恢复默认',
-    cancelLabel: '取消',
-  })
-  if (!confirmed) return
-  try {
-    if (tab.kind === 'report') {
-      await axios.post(`${WECHAT_REPORT_GROUP_API}/${tab.groupId}/prompts/${tab.reportType}/reset`, {}, { timeout: 10000 })
-      await loadWechatReportPrompts()
-      const prompt = wechatReportPrompts.value.find((item) => item.id === tab.reportPromptId)
-      wechatReportPromptText.value = prompt?.template || ''
-      tab.originalText = wechatReportPromptText.value
-      tab.draftText = wechatReportPromptText.value
-    } else {
-      await axios.post(`${PROMPT_WORKSPACE_API}/prompts/${tab.promptId}/reset`, {}, { timeout: 10000 })
-      await loadPromptWorkspaceData()
-      const prompt = promptTemplates.value.find((item) => item.id === tab.promptId)
-      promptEditorText.value = prompt?.template || ''
-      tab.originalText = promptEditorText.value
-      tab.draftText = promptEditorText.value
-    }
-    tab.dirty = false
-    ElMessage.success(`已恢复“${promptName}”的内置默认内容`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '恢复默认提示词失败'))
-  }
-}
-
-watch([promptEditorName, promptEditorText, wechatReportPromptText], () => {
-  if (activeView.value !== 'prompts' || promptWorkspaceEditorSyncDepth > 0) return
-  captureActivePromptDraft()
-})
-
-async function createPromptWorkspaceFolder({ taskType, parentFolderId, name }) {
-  try {
-    await axios.post(`${PROMPT_WORKSPACE_API}/prompt-folders`, {
-      name,
-      task_type: taskType,
-      parent_folder_id: parentFolderId,
-    }, { timeout: 10000 })
-    await loadPromptWorkspaceData()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '新建提示词文件夹失败'))
-  }
-}
-
-async function renamePromptWorkspaceFolder({ folder, name }) {
-  try {
-    await axios.patch(`${PROMPT_WORKSPACE_API}/prompt-folders/${folder.id}`, { name }, { timeout: 10000 })
-    await loadPromptWorkspaceData()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '重命名提示词文件夹失败'))
-  }
-}
-
-async function renamePromptWorkspaceFile({ prompt, name }) {
-  captureActivePromptDraft()
-  try {
-    await axios.patch(`${PROMPT_WORKSPACE_API}/prompts/${prompt.id}`, { name }, { timeout: 10000 })
-    const tab = promptWorkspaceTabs.value.find((item) => item.promptId === prompt.id)
-    if (tab) {
-      tab.title = name
-      tab.originalName = name
-      tab.draftName = name
-    }
-    if (promptTaskType.value === prompt.task_type) await loadPromptTemplates()
-    if (tab?.id === activePromptTabId.value) {
-      promptEditorName.value = name
-      promptEditorText.value = tab.draftText
-      tab.dirty = promptWorkspaceTabDirty(tab)
-    }
-    await loadPromptWorkspaceData()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '重命名提示词失败'))
-  }
-}
-
-async function renameReportPromptWorkspaceFile({ prompt, name }) {
-  try {
-    await axios.put(`${WECHAT_REPORT_GROUP_API}/${prompt.group_id}/prompts/${prompt.report_type}`, {
-      display_name: name,
-    }, { timeout: 10000 })
-    const tab = promptWorkspaceTabs.value.find((item) => item.reportPromptId === prompt.id)
-    if (tab) tab.title = name
-    await loadWechatReportPrompts()
-    reconcilePromptWorkspaceTabs()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '重命名报告提示词失败'))
-  }
-}
-
-function showPromptTrashUndo(entry, message) {
-  let handle = null
-  handle = ElMessage({
-    type: 'success',
-    duration: 6500,
-    showClose: true,
-    customClass: 'vk-trash-undo-message',
-    message: h('span', { class: 'vk-trash-undo-content' }, [
-      h('span', { class: 'vk-trash-undo-label' }, message),
-      h('button', {
-        type: 'button',
-        class: 'vk-trash-undo-action',
-        'aria-label': '撤销移入提示词回收站',
-        onClick: async (event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          handle?.close?.()
-          await restorePromptTrashEntry(entry)
-        },
-      }, '撤销'),
-    ]),
-  })
-}
-
-async function deletePromptWorkspaceFile(prompt) {
-  const confirmed = await requestDestructiveConfirmation({
-    title: '移入回收站',
-    message: `将“${promptTemplateDisplayName(prompt)}”移入提示词回收站？`,
-    confirmLabel: '移入回收站',
-  })
-  if (!confirmed) return
-  try {
-    await axios.delete(`${PROMPT_WORKSPACE_API}/prompts/${prompt.id}`, { timeout: 10000 })
-    await closePromptWorkspaceTabs([`prompt:${prompt.id}`], { force: true })
-    await Promise.all([loadPromptWorkspaceData(), loadPromptTrash(), loadQaShortcutTemplates(), loadContentAnalysisTemplates()])
-    showPromptTrashUndo({ entry_type: 'prompt', id: prompt.id, name: promptTemplateDisplayName(prompt) }, `已将“${promptTemplateDisplayName(prompt)}”移入回收站`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '删除提示词失败'))
-  }
-}
-
-async function deletePromptWorkspaceFolder(folder) {
-  const confirmed = await requestDestructiveConfirmation({
-    title: '移入回收站',
-    message: `将文件夹“${folder.name}”及其内容移入提示词回收站？`,
-    confirmLabel: '移入回收站',
-  })
-  if (!confirmed) return
-  try {
-    await axios.delete(`${PROMPT_WORKSPACE_API}/prompt-folders/${folder.id}`, { timeout: 10000 })
-    await Promise.all([loadPromptWorkspaceData(), loadPromptTrash(), loadQaShortcutTemplates(), loadContentAnalysisTemplates()])
-    reconcilePromptWorkspaceTabs()
-    const nextTab = activePromptWorkspaceTab()
-    if (nextTab) await activatePromptWorkspaceTab(nextTab.id, { capture: false })
-    else {
-      selectedPromptTemplateId.value = ''
-      promptEditorName.value = ''
-      promptEditorText.value = ''
-    }
-    showPromptTrashUndo({ entry_type: 'folder', id: folder.id, name: folder.name }, `已将“${folder.name}”移入回收站`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '删除提示词文件夹失败'))
-  }
-}
-
-async function movePromptWorkspaceNode({ kind, node, folderId }) {
-  try {
-    if (kind === 'folder') {
-      await axios.patch(`${PROMPT_WORKSPACE_API}/prompt-folders/${node.id}`, {
-        parent_folder_id: folderId,
-      }, { timeout: 10000 })
-    } else {
-      await axios.patch(`${PROMPT_WORKSPACE_API}/prompts/${node.id}`, {
-        folder_id: folderId,
-      }, { timeout: 10000 })
-    }
-    await loadPromptWorkspaceData()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '移动提示词项目失败'))
-  }
-}
-
-async function restorePromptTrashEntry(entry) {
-  try {
-    await axios.post(`${PROMPT_WORKSPACE_API}/prompts/trash/${entry.entry_type}/${entry.id}/restore`, {}, { timeout: 10000 })
-    await Promise.all([loadPromptWorkspaceData(), loadPromptTrash(), loadQaShortcutTemplates(), loadContentAnalysisTemplates()])
-    ElMessage.success(`已恢复“${entry.name}”`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '恢复提示词项目失败'))
-  }
-}
-
-async function permanentlyDeletePromptTrashEntry(entry) {
-  try {
-    await axios.delete(`${PROMPT_WORKSPACE_API}/prompts/trash/${entry.entry_type}/${entry.id}`, { timeout: 10000 })
-    await loadPromptTrash()
-    ElMessage.success('已彻底删除')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '彻底删除提示词项目失败'))
-  }
-}
-
-async function activatePromptWorkspaceTemplate(templateId) {
-  captureActivePromptDraft()
-  const tab = activePromptWorkspaceTab()
-  await activatePromptTemplate(templateId)
-  if (tab?.id === activePromptTabId.value) {
-    promptEditorName.value = tab.draftName
-    promptEditorText.value = tab.draftText
-  }
-  await Promise.all([loadPromptWorkspaceData(), loadQaShortcutTemplates(), loadContentAnalysisTemplates()])
 }
 
 function stopWeChatQrPolling() {

@@ -482,7 +482,7 @@ export function useAppController() {
 
   const mediaPreviewUrl = computed(() => {
     if (!result.video_path) return ''
-    return `${API}/media?path=${encodeURIComponent(result.video_path)}`
+    return localApiRequestUrl(`${API}/media?path=${encodeURIComponent(result.video_path)}`)
   })
 
   const sidebarContentItems = computed(() => {
@@ -531,7 +531,7 @@ export function useAppController() {
   const activeWorkspaceMediaUrl = computed(() => {
     const videoPath = activeWorkspaceResult.value?.video_path || activeWorkspaceContent.value?.video_path
     if (!videoPath) return ''
-    return `${API}/media?path=${encodeURIComponent(videoPath)}`
+    return localApiRequestUrl(`${API}/media?path=${encodeURIComponent(videoPath)}`)
   })
 
   const activeWorkspaceTranscript = computed(() => {
@@ -597,14 +597,14 @@ export function useAppController() {
     const tabContent = contentForTab(tabId)
     const videoPath = tabResult?.video_path || tabContent?.video_path
     if (!videoPath) return ''
-    return `${API}/media?path=${encodeURIComponent(videoPath)}`
+    return localApiRequestUrl(`${API}/media?path=${encodeURIComponent(videoPath)}`)
   }
 
   function originalMediaUrlForTab(tabId) {
     const content = contentForTab(tabId)
     const originalPath = content?.original_file_path
     if (!originalPath) return ''
-    return `${API}/media?path=${encodeURIComponent(originalPath)}`
+    return localApiRequestUrl(`${API}/media?path=${encodeURIComponent(originalPath)}`)
   }
 
   function transcriptForTab(tabId) {

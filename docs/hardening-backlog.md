@@ -16,16 +16,21 @@ lines.
   application lifecycle.
 - [x] Remove unconditional post-first-paint loading of every lazy workspace.
   A workspace now loads when its UI is actually requested.
-- [ ] Verify that capability tokens can protect all private read endpoints
-  without breaking the packaged renderer, then enforce them for sensitive
-  reads and reject non-loopback desktop binds.
-- [ ] Validate every network fetch and redirect after DNS resolution to close
-  private-address and DNS-rebinding SSRF paths.
+- [x] Enforce capability tokens for every private API read and write, retain
+  anonymous fixed-liveness health checks, inject media headers only from the
+  trusted desktop renderer, and reject non-loopback desktop binds.
+- [x] Validate every untrusted HTTP URL and redirect hop after DNS resolution;
+  reject mixed/private/non-global answers before the request is issued.
+- [ ] Add connection-level DNS pinning (or an equivalent transport guarantee)
+  for untrusted remote fetches, so a hostname cannot rebind after validation
+  but before the HTTP client opens its socket.
 
 ## P1 — maintainability, test truthfulness, and resource control
 
-- [ ] Extract WeChat subscription and prompt-workspace controllers from
-  `App.vue`; add mock-API behavior tests and ratchet its budget down.
+- [x] Extract the prompt-workspace controller from `App.vue`; retain all four
+  tab types, draft/trash behavior and add mock-API race regression tests.
+- [ ] Extract the WeChat subscription controller from `App.vue`; add mock-API
+  behavior tests and ratchet its remaining composition-root budget down.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote

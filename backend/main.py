@@ -46,9 +46,6 @@ app.add_middleware(
 )
 
 
-_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-
-
 def _is_allowed_local_origin(request: Request) -> bool:
     """Accept only the desktop shell or loopback source UI as browser callers."""
     origin = request.headers.get("origin", "").rstrip("/")
@@ -65,13 +62,15 @@ def _allows_unauthenticated_test_api() -> bool:
 
 @app.middleware("http")
 async def require_desktop_instance_token(request: Request, call_next):
-    """Bind every local API write to the launching desktop or source-session token."""
+    """Bind private local API access to the launching desktop or source-session token."""
     expected_token = os.environ.get("KNOWLEDGEHUB_INSTANCE_TOKEN", "").strip()
-    if request.url.path.startswith("/api/") and request.method.upper() in _MUTATING_METHODS:
+    is_health_check = request.url.path == "/api/health"
+    is_preflight = request.method.upper() == "OPTIONS"
+    if request.url.path.startswith("/api/") and not is_health_check and not is_preflight:
         if not _is_allowed_local_origin(request):
             return JSONResponse(
                 status_code=403,
-                content={"detail": "本机 API 仅接受 KnowledgeHub 页面发起的写入请求"},
+                content={"detail": "本机 API 仅接受 KnowledgeHub 页面发起的请求"},
             )
         if not expected_token and not _allows_unauthenticated_test_api():
             return JSONResponse(

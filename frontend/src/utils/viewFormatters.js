@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import { localApiRequestUrl } from './localApiAuth.js'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import {
@@ -387,9 +388,13 @@ export function sanitizeHtml(html) {
         node.removeAttribute('rel')
       }
     }
-    if (node.tagName === 'IMG' && !isSafeEmbeddedImage(node.getAttribute('src') || '')) {
-      const alt = node.getAttribute('alt') || '外部图片'
-      node.replaceWith(document.createTextNode(`[${alt}：为保护隐私未加载]`))
+    if (node.tagName === 'IMG') {
+      const source = node.getAttribute('src') || ''
+      if (isSafeEmbeddedImage(source)) node.setAttribute('src', localApiRequestUrl(source))
+      else {
+        const alt = node.getAttribute('alt') || '外部图片'
+        node.replaceWith(document.createTextNode(`[${alt}：为保护隐私未加载]`))
+      }
     }
   }
   return template.innerHTML

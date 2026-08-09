@@ -4,8 +4,6 @@ const configuredApiBase = typeof import.meta.env === 'object'
   : ''
 
 export const API_BASE = (configuredApiBase || `${LOCAL_API_ORIGIN}/api`).replace(/\/+$/, '')
-const MUTATING_METHODS = new Set(['post', 'put', 'patch', 'delete'])
-
 let accessTokenPromise = null
 
 export function apiUrl(path = '') {
@@ -49,9 +47,11 @@ export async function localApiAuthHeaders(headers = {}) {
 
 export function installLocalApiAuth(axios) {
   axios.interceptors.request.use(async (config) => {
-    if (isLocalApiUrl(config.url)) config.url = localApiRequestUrl(config.url)
-    const method = String(config.method || 'get').toLowerCase()
-    if (!MUTATING_METHODS.has(method) || !isLocalApiUrl(config.url)) return config
+    // Classify before source-mode proxy rewriting: after rewriting the URL is
+    // relative, but it still represents the same protected local API.
+    const localApiRequest = isLocalApiUrl(config.url)
+    if (localApiRequest) config.url = localApiRequestUrl(config.url)
+    if (!localApiRequest) return config
     const token = await desktopAccessToken()
     if (token) {
       config.headers = config.headers || {}
