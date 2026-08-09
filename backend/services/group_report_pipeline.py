@@ -55,6 +55,7 @@ from services.group_report_plan_shape import (
     normalize_report_plan_shape as _normalize_report_plan_shape,
     parse_report_plan as _parse_report_plan,
 )
+from services.group_report_retry import is_retryable_summary_error as _is_retryable_summary_error
 from services.group_report_summary_cache import (
     _sha256,
     load_cached_summaries as _load_cached_summaries,
@@ -591,45 +592,6 @@ def _summarize_one(
             sleep(delay)
     normalized = " ".join(text.split())
     return normalized[:300] or f"{source.title}（材料未返回有效摘要）"
-
-
-def _is_retryable_summary_error(exc: Exception) -> bool:
-    """Retry only transient transport, throttling, and upstream failures."""
-    if isinstance(exc, (ConnectionError, TimeoutError)):
-        return True
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None:
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
-    try:
-        normalized_status = int(status_code)
-    except (TypeError, ValueError):
-        normalized_status = None
-    if normalized_status is not None:
-        if normalized_status in {408, 429} or 500 <= normalized_status < 600:
-            return True
-        return False
-    class_name = exc.__class__.__name__.lower()
-    if class_name in {
-        "apiconnectionerror",
-        "apitimeouterror",
-        "ratelimiterror",
-        "internalservererror",
-    }:
-        return True
-    message = (str(exc) or "").lower()
-    return any(
-        marker in message
-        for marker in (
-            "network error",
-            "connection error",
-            "connection reset",
-            "connection refused",
-            "temporarily unavailable",
-            "timed out",
-            "timeout",
-            "rate limit",
-        )
-    )
 
 
 def _plan_report_sections(
