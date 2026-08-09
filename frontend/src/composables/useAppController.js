@@ -80,6 +80,7 @@ import { useLibrarySearchController } from '../features/library/useLibrarySearch
 import { useLibraryTrashController } from '../features/library/useLibraryTrashController.js'
 import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
+import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -163,8 +164,6 @@ export function useAppController() {
     sessions: []
   })
   let aiTokenSummaryTimer = null
-  let deferredCookieProbeHandle = null
-  let deferredCookieProbeUsesIdleCallback = false
   let aiTokenSummaryLoading = false
   const contentAnalysisTemplates = ref([])
   let inputParseTimer = null
@@ -264,6 +263,22 @@ export function useAppController() {
     }
   })
   const selectedContentItem = ref(null)
+  const {
+    cookieConfigured,
+    cookieState,
+    cookieStatusText,
+    cookieStatusDetail,
+    cookieChecking,
+    bilibiliCookieConfigured,
+    bilibiliCookieState,
+    bilibiliCookieStatusText,
+    loadCookieStatus,
+    loadBilibiliCookieStatus,
+    scheduleDeferredCookieProbe,
+    cancelDeferredCookieProbe,
+    startCookieStatusPolling,
+    stopCookieStatusPolling,
+  } = useCookieStatusController({ notify: ElNotification })
   const {
     snapshotLibraryState,
     restoreLibraryState,
@@ -376,22 +391,10 @@ export function useAppController() {
   const obsidianVaultPath = ref('')
   const markdownExportPath = ref('')
   const obsidianAutoWrite = ref(false)
-  const cookieConfigured = ref(false)
-  const cookieState = ref('unknown')
-  const cookieStatusText = ref('抖音凭据待检测')
-  const cookieStatusDetail = ref('正在读取抖音下载凭据状态')
-  const cookieChecking = ref(false)
-  const cookieTimer = ref(null)
-  let lastDouyinCookieAlertState = ''
-
   const cookieInput = ref('')
   const savingCookie = ref(false)
-  const bilibiliCookieConfigured = ref(false)
-  const bilibiliCookieState = ref('loading')
-  const bilibiliCookieStatusText = ref('正在读取 B站登录态')
   const bilibiliCookieInput = ref('')
   const savingBilibiliCookie = ref(false)
-  const bilibiliCookieTimer = ref(null)
   const platformAuthConnecting = ref('')
   const platformAuthAvailable = Boolean(window.knowledgeHubDesktop?.connectPlatformAuth)
   const showSettings = ref(false)
@@ -1688,106 +1691,6 @@ export function useAppController() {
     if (!taskQueueTimer.value) return
     stopTaskQueuePolling()
     startTaskQueuePolling()
-  }
-
-  function applyCookieStatus(data) {
-    const previousState = cookieState.value
-    cookieConfigured.value = Boolean(data.configured)
-    cookieState.value = data.state || (data.configured ? 'unknown' : 'missing')
-    cookieStatusText.value = data.label || (data.configured ? '抖音凭据待确认' : '抖音凭据未配置')
-    cookieStatusDetail.value = data.detail || '暂无检测详情'
-    const needsLogin = ['missing', 'invalid', 'blocked'].includes(cookieState.value)
-    if (needsLogin && cookieState.value !== previousState && lastDouyinCookieAlertState !== cookieState.value) {
-      lastDouyinCookieAlertState = cookieState.value
-      ElNotification.warning({
-        title: '抖音登录态需要处理',
-        message: `${cookieStatusText.value}：请在设置 > 平台凭据中点击“登录并连接”。`,
-        duration: 0,
-      })
-    }
-    if (!needsLogin) lastDouyinCookieAlertState = ''
-  }
-
-  function scheduleDeferredCookieProbe() {
-    if (deferredCookieProbeHandle !== null) return
-    const runProbe = () => {
-      deferredCookieProbeHandle = null
-      deferredCookieProbeUsesIdleCallback = false
-      void loadCookieStatus(true)
-    }
-    if (typeof window.requestIdleCallback === 'function') {
-      deferredCookieProbeUsesIdleCallback = true
-      deferredCookieProbeHandle = window.requestIdleCallback(runProbe, { timeout: 5000 })
-      return
-    }
-    deferredCookieProbeHandle = window.setTimeout(runProbe, 1500)
-  }
-
-  function cancelDeferredCookieProbe() {
-    if (deferredCookieProbeHandle === null) return
-    if (deferredCookieProbeUsesIdleCallback && typeof window.cancelIdleCallback === 'function') {
-      window.cancelIdleCallback(deferredCookieProbeHandle)
-    } else {
-      window.clearTimeout(deferredCookieProbeHandle)
-    }
-    deferredCookieProbeHandle = null
-    deferredCookieProbeUsesIdleCallback = false
-  }
-
-  async function loadCookieStatus(force = false, { probe = true } = {}) {
-    if (cookieChecking.value) return
-    cookieChecking.value = true
-    try {
-      const params = {}
-      if (force) params.refresh = true
-      if (!probe) params.probe = false
-      const res = await axios.get(`${API}/cookie`, {
-        params: Object.keys(params).length ? params : undefined,
-        timeout: 30000
-      })
-      applyCookieStatus(res.data)
-    } catch (error) {
-      cookieState.value = 'unknown'
-      cookieStatusText.value = '抖音凭据待确认'
-      cookieStatusDetail.value = error.response?.data?.detail || error.message || '状态检测不可用'
-    } finally {
-      cookieChecking.value = false
-    }
-  }
-
-  async function loadBilibiliCookieStatus(force = false) {
-    bilibiliCookieState.value = 'loading'
-    try {
-      const res = await axios.get(`${API}/creator-sources/health`, {
-        params: force ? { refresh: true, probe_douyin: false } : { probe_douyin: false },
-        timeout: 15000,
-      })
-      const status = res.data?.cookies?.bilibili || {}
-      bilibiliCookieConfigured.value = Boolean(status.configured)
-      bilibiliCookieState.value = status.state || (status.configured ? 'unknown' : 'missing')
-      bilibiliCookieStatusText.value = status.detail || status.label || (status.configured ? 'B站登录态已配置' : 'B站登录态未配置')
-    } catch (error) {
-      bilibiliCookieConfigured.value = false
-      bilibiliCookieState.value = 'unknown'
-      bilibiliCookieStatusText.value = error.response?.data?.detail || error.message || 'B站登录态状态读取失败'
-    }
-  }
-
-  function startCookieStatusPolling() {
-    if (cookieTimer.value) return
-    cookieTimer.value = setInterval(() => loadCookieStatus(), 60000)
-    bilibiliCookieTimer.value = setInterval(() => loadBilibiliCookieStatus(true), 300000)
-  }
-
-  function stopCookieStatusPolling() {
-    if (cookieTimer.value) {
-      clearInterval(cookieTimer.value)
-      cookieTimer.value = null
-    }
-    if (bilibiliCookieTimer.value) {
-      clearInterval(bilibiliCookieTimer.value)
-      bilibiliCookieTimer.value = null
-    }
   }
 
   function shortLink(link) {
