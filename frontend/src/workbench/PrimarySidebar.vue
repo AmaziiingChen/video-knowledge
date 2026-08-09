@@ -275,6 +275,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contentIsUnread } from '../features/library/contentReadState.js'
+import { loadLibraryTreePreferences, loadOpenFolderIds as loadSavedOpenFolderIds, saveLibraryTreePreferences, saveOpenFolderIds as saveSavedOpenFolderIds } from '../features/library/libraryTreePreferences.js'
 import { CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import LibraryTrashPanel from './LibraryTrashPanel.vue'
@@ -441,63 +442,10 @@ const libraryContentLoadLabel = computed(() => {
 // v2 starts from a collapsed tree. The former eager tree restored every open
 // branch and expected all article rows to be present at startup; that state is
 // not compatible with the lazy per-folder loader below.
-const FOLDER_TREE_STATE_KEY = 'knowledgehub:file-tree-open-folders:v2'
-const USER_GROUP_SEPARATOR_STATE_KEY = 'knowledgehub:file-tree-separators:v2'
-const LEGACY_USER_SEPARATOR_STATE_KEY = 'knowledgehub:file-tree-user-separators:v1'
-const LEGACY_USER_GROUP_SEPARATOR_STATE_KEY = 'knowledgehub:file-tree-user-groups:v1'
-
-function loadUserGroupSeparators() {
-  try {
-    const saved = window.localStorage.getItem(USER_GROUP_SEPARATOR_STATE_KEY)
-    const legacy = window.localStorage.getItem(LEGACY_USER_SEPARATOR_STATE_KEY)
-      || window.localStorage.getItem(LEGACY_USER_GROUP_SEPARATOR_STATE_KEY)
-    const stored = JSON.parse(saved || legacy || '[]')
-    const separators = Array.isArray(stored) ? stored : stored?.separators
-    if (!Array.isArray(separators)) return { initialized: Boolean(stored?.initialized), separators: [] }
-    return {
-      initialized: saved ? Boolean(stored?.initialized) : true,
-      separators: separators
-      .filter((group) => group && typeof group === 'object' && String(group.id || '').trim())
-      .map((group) => ({
-        id: String(group.id),
-        sortOrder: Number.isFinite(Number(group.sortOrder)) ? Number(group.sortOrder) : null,
-        beforeFolderId: group.beforeFolderId ? String(group.beforeFolderId) : null,
-      })),
-    }
-  } catch {
-    return { initialized: false, separators: [] }
-  }
-}
-
-function saveUserGroupSeparators(groups) {
-  try {
-    window.localStorage.setItem(USER_GROUP_SEPARATOR_STATE_KEY, JSON.stringify({
-      version: 2,
-      initialized: true,
-      separators: groups,
-    }))
-  } catch {
-    // Group separators are presentation-only; a storage failure must not make
-    // the library tree unusable.
-  }
-}
-
-function loadOpenFolderIds() {
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(FOLDER_TREE_STATE_KEY) || '[]')
-    return new Set(Array.isArray(stored) ? stored.map(String) : [])
-  } catch {
-    return new Set()
-  }
-}
-
-function saveOpenFolderIds(folderIds) {
-  try {
-    window.localStorage.setItem(FOLDER_TREE_STATE_KEY, JSON.stringify([...folderIds]))
-  } catch {
-    // Keep the tree usable when browser storage is unavailable.
-  }
-}
+function loadUserGroupSeparators() { return loadLibraryTreePreferences() }
+function saveUserGroupSeparators(groups) { saveLibraryTreePreferences(groups) }
+function loadOpenFolderIds() { return loadSavedOpenFolderIds() }
+function saveOpenFolderIds(folderIds) { saveSavedOpenFolderIds(folderIds) }
 
 // An empty saved state deliberately means that every folder starts collapsed.
 const openFolderIds = ref(loadOpenFolderIds())
