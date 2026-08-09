@@ -69,6 +69,9 @@ lines.
   fallback, in-page find, bounded outline/progress messages and selection
   forwarding. Report, article and media readers still need their own mounted
   behavior boundaries.
+- [x] Extract report-generation SSE decoding from `App.vue`; preserve local
+  capability headers, fragmented event handling and explicit server errors in
+  `features/reports/reportEventStream.js` with protocol-level tests.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
   tree, drag, search and trash behavior at their owners.
   Local tree-preference persistence plus pure tree-node construction, unread
