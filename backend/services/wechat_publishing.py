@@ -56,7 +56,7 @@ from services.wechat_publishing_secrets import (
     QwenCoverCredentials,
     WeChatPublishingError,
 )
-from services.wechat_report_layout import ReportSource, render_wechat_report
+from services.wechat_publishing_report_rendering import render_report_html as _render_report_html
 
 __all__ = ["markdown_to_wechat_html"]
 
@@ -541,7 +541,7 @@ class WeChatPublishingService:
             "can_publish": bool(self.settings()["configured"]),
             "public_site_configured": bool(self.settings().get("public_site_base_url")),
             "latest_publication": latest_publication,
-            "preview_html": self._render_report_html(report, markdown, digest),
+            "preview_html": _render_report_html(report, markdown, digest),
             "cover_url": str(report.get("cover_url") or ""),
             "cover_status": str(report.get("cover_status") or ""),
             "cover_visual_brief": visual_brief,
@@ -816,7 +816,7 @@ class WeChatPublishingService:
             raise WeChatPublishingError("草稿标题不能超过 64 个字符")
 
         article_digest = _wechat_digest(str(digest or _default_digest(state.markdown)).strip())
-        body_html = self._render_report_html(
+        body_html = _render_report_html(
             report,
             state.markdown,
             article_digest,
@@ -1297,56 +1297,6 @@ class WeChatPublishingService:
         if report["source_provider"] != "wechat_report" and report["content_type"] != "report":
             raise WeChatPublishingError("只有日报、周报和区间报告可以存入公众号草稿箱")
         return report
-
-    def _render_report_html(
-        self,
-        report: dict[str, Any],
-        markdown: str,
-        digest: str,
-        *,
-        title: str | None = None,
-    ) -> str:
-        return render_wechat_report(
-            title=str(title or report.get("title") or "报告"),
-            markdown=markdown,
-            digest=digest,
-            report_type=str(report.get("report_type") or "range"),
-            sources=self._report_sources(report),
-        )
-
-    def _report_sources(self, report: dict[str, Any]) -> list[ReportSource]:
-        try:
-            coverage = json.loads(str(report.get("source_coverage_json") or "[]"))
-        except json.JSONDecodeError:
-            coverage = []
-        entries = [entry for entry in coverage if isinstance(entry, dict) and entry.get("citation_id") and entry.get("content_item_id")]
-        if not entries:
-            return []
-        ids = [str(entry["content_item_id"]) for entry in entries]
-        placeholders = ",".join("?" for _ in ids)
-        with connect() as connection:
-            rows = connection.execute(
-                f"""SELECT c.id, c.title, c.source_url, c.published_at,
-                           COALESCE(NULLIF(c.source_name, ''), ws.mp_name, rss.title, '') AS publisher
-                      FROM content_items c
-                      LEFT JOIN wechat_subscription_items wsi ON wsi.content_item_id=c.id
-                      LEFT JOIN wechat_subscriptions ws ON ws.id=wsi.subscription_id
-                      LEFT JOIN rss_source_items rsi ON rsi.content_item_id=c.id
-                      LEFT JOIN rss_sources rss ON rss.id=rsi.source_id
-                     WHERE c.id IN ({placeholders})""",
-                ids,
-            ).fetchall()
-        by_id = {str(row["id"]): dict(row) for row in rows}
-        return [
-            ReportSource(
-                citation_id=str(entry["citation_id"]),
-                title=str((by_id.get(str(entry["content_item_id"])) or {}).get("title") or "原始文章"),
-                url=str((by_id.get(str(entry["content_item_id"])) or {}).get("source_url") or ""),
-                publisher=str((by_id.get(str(entry["content_item_id"])) or {}).get("publisher") or ""),
-                published_at=str((by_id.get(str(entry["content_item_id"])) or {}).get("published_at") or ""),
-            )
-            for entry in entries
-        ]
 
     def _current_public_ipv4(self) -> str:
         """Return the direct IPv4 that will be used for the WeChat route."""
