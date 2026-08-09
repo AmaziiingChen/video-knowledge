@@ -44,9 +44,12 @@ lines.
   task runtime, imports and assistant sessions remain in the facade pending
   their own behavior-preserving slices.
   The independent trash transaction boundary now lives in
-  `features/library/useLibraryTrashController.js`; folder history and content
-  tree ownership remain in the facade because they share optimistic updates,
-  tab cleanup and keyboard undo/redo.
+  `features/library/useLibraryTrashController.js`; history snapshots, undo/redo
+  and shortcut handling now live in `features/library/useLibraryHistoryController.js`.
+  Article preparation, platform credential status and completion-notification
+  synchronization have their own controllers as well. Folder-tree ownership,
+  task runtime, link import and assistant sessions remain in the facade because
+  they still share optimistic updates, tab cleanup and durable queue state.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
@@ -63,12 +66,16 @@ lines.
   import and mutation domains.  Move new SQL out of routers and keep router
   registration/API paths stable.
   AI/OCR call history and daily usage now live in `routers/content_usage.py`;
-  listing, import, content mutation and capture remain separate follow-up cuts.
+  response mapping, deletion cleanup, folders, trash, source groups and
+  Markdown imports now have dedicated service/router owners. Local-file import,
+  content read/update and capture endpoints remain separate follow-up cuts.
 - [ ] Add direct tests for public-tree, DMG validation and backend packaging
   scripts; persist release measurements.  Verify jobs now have bounded
   timeouts and repeated pull-request/main checks cancel stale in-progress runs.
 - [ ] Establish auditable Python dependency constraints/lock data and add an
-  incremental, explicit coverage baseline for high-risk boundaries.
+  incremental, explicit coverage baseline for high-risk boundaries. The base
+  manifest has removed its three verified-unused dependencies; reproducible
+  Python constraint/lock data remains outstanding.
 
 ## P2 — repository hygiene and release provenance
 
