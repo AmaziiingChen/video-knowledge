@@ -78,6 +78,7 @@ import { useClipboardController } from '../features/integrations/useClipboardCon
 import { useContentReadState } from '../features/library/useContentReadState.js'
 import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
 import { useLibraryTrashController } from '../features/library/useLibraryTrashController.js'
+import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -295,26 +296,18 @@ export function useAppController() {
   } = useArticlePreviewController({
     refreshContentTextReadiness: (contentItemId) => refreshContentTextReadiness(contentItemId),
   })
-  const articlePreparationStatus = ref({
-    active_content_item_id: '',
-    active_count: 0,
-    queued_count: 0,
-    pending_count: 0,
-    capture_active_count: 0,
-    capture_queued_count: 0,
-    web_capture_active_count: 0,
-    web_capture_queued_count: 0,
-    wechat_capture_active_count: 0,
-    wechat_capture_queued_count: 0,
-    ocr_active_count: 0,
-    ocr_queued_count: 0,
-    completed_count: 0,
-    failed_count: 0,
-    next_wechat_slot_in_seconds: 0,
+  const {
+    articlePreparationStatus,
+    currentArticleOcrStatus,
+    prioritizingArticleOcr,
+    loadCurrentArticleOcrStatus,
+    prioritizeCurrentArticleOcr,
+    startArticlePreparationStatusPolling,
+    stopArticlePreparationStatusPolling,
+  } = useArticlePreparationController({
+    currentContent: () => activeWorkspaceContent.value || selectedContentItem.value,
+    notifyError: (message) => ElMessage.error(typeof message === 'string' ? message : 'OCR 优先解析失败'),
   })
-  const currentArticleOcrStatus = ref({ status: 'unavailable', has_images: false, priority: false })
-  const prioritizingArticleOcr = ref(false)
-  let articlePreparationStatusTimer = null
   const loadingContent = ref(false)
   const updatingContentId = ref(null)
   const retryingContentId = ref(null)
@@ -1590,72 +1583,6 @@ export function useAppController() {
     window.removeEventListener('keydown', handleLibraryHistoryShortcut)
     disposeLibrarySearchController()
   })
-
-  async function loadArticlePreparationStatus() {
-    try {
-      const res = await axios.get(`${API}/content/article-preparation-status`, { timeout: 5000 })
-      articlePreparationStatus.value = { ...articlePreparationStatus.value, ...(res.data || {}) }
-      void loadCurrentArticleOcrStatus()
-      return articlePreparationStatus.value
-    } catch {
-      return articlePreparationStatus.value
-    }
-  }
-
-  function currentArticleOcrContentId() {
-    const item = activeWorkspaceContent.value || selectedContentItem.value
-    return item?.content_type === 'article' ? String(item.id || '') : ''
-  }
-
-  async function loadCurrentArticleOcrStatus() {
-    const contentItemId = currentArticleOcrContentId()
-    if (!contentItemId) {
-      currentArticleOcrStatus.value = { status: 'unavailable', has_images: false, priority: false }
-      return currentArticleOcrStatus.value
-    }
-    try {
-      const res = await axios.get(`${API}/content/${contentItemId}/article-ocr-status`, { timeout: 5000 })
-      if (currentArticleOcrContentId() === contentItemId) {
-        currentArticleOcrStatus.value = { ...currentArticleOcrStatus.value, ...(res.data || {}) }
-      }
-    } catch {
-      if (currentArticleOcrContentId() === contentItemId) {
-        currentArticleOcrStatus.value = { status: 'unavailable', has_images: false, priority: false }
-      }
-    }
-    return currentArticleOcrStatus.value
-  }
-
-  async function prioritizeCurrentArticleOcr() {
-    const contentItemId = currentArticleOcrContentId()
-    if (!contentItemId || prioritizingArticleOcr.value) return
-    prioritizingArticleOcr.value = true
-    try {
-      const res = await axios.post(`${API}/content/${contentItemId}/prioritize-article-ocr`, {}, { timeout: 10000 })
-      currentArticleOcrStatus.value = { ...currentArticleOcrStatus.value, ...(res.data || {}) }
-    } catch (error) {
-      const message = error.response?.data?.detail || error.message || 'OCR 优先解析失败'
-      ElMessage.error(typeof message === 'string' ? message : 'OCR 优先解析失败')
-    } finally {
-      prioritizingArticleOcr.value = false
-    }
-  }
-
-  function startArticlePreparationStatusPolling() {
-    stopArticlePreparationStatusPolling()
-    const refresh = async () => {
-      const status = await loadArticlePreparationStatus()
-      const pending = Number(status.pending_count || 0)
-      articlePreparationStatusTimer = window.setTimeout(refresh, pending > 0 ? 3000 : 15000)
-    }
-    void refresh()
-  }
-
-  function stopArticlePreparationStatusPolling() {
-    if (!articlePreparationStatusTimer) return
-    window.clearTimeout(articlePreparationStatusTimer)
-    articlePreparationStatusTimer = null
-  }
 
   function stopPolling() {
     if (pollTimer.value) {
