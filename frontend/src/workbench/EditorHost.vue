@@ -649,7 +649,6 @@ import {
   reportBodyHtmlForCharacterCount,
 } from '../utils/reportReadingStats'
 import { remainingReadingMinutes } from './readingProgress.js'
-import { shouldClaimReaderFocus } from './readerPointerFocus.js'
 import { shouldShowArticlePreviewLoader } from '../features/library/articlePreviewLoadState.js'
 import {
   parseWechatRemoteSelectionMessage,
@@ -672,6 +671,7 @@ import { usePreviewFindController } from './usePreviewFindController.js'
 import { useMediaTranscriptWorkspaceController } from './useMediaTranscriptWorkspaceController.js'
 import { useXhsGalleryController } from './useXhsGalleryController.js'
 import { useReadingProgressController } from './useReadingProgressController.js'
+import { useReaderSelectionController } from './useReaderSelectionController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
@@ -758,13 +758,9 @@ const reportMarkdown = ref(null)
 const activeArticlePreviewFrame = ref(null)
 const activeLocalHtmlRemoteWebview = ref(null)
 const articleOutlineRoot = ref(null)
-const selectedTextAction = ref(null)
 let localHtmlRemoteFindRequestId = null
 const wechatRemoteFindRequestIds = new Map()
 let removeDesktopPreviewFindListener = null
-let articlePreviewSelectionDocument = null
-let selectedTextPointerIsDown = false
-let selectedTextActionRevealFrame = 0
 const wechatRemotePages = reactive({})
 const localHtmlRemoteFailures = reactive({})
 const remoteReadingProgressByKey = reactive({})
@@ -802,23 +798,6 @@ function wechatRemoteScrollbarCss() {
     }
   `
 }
-const selectedTextActionStyle = computed(() => {
-  const rect = selectedTextAction.value?.rect
-  if (!rect) return {}
-  const actionWidth = 64
-  const actionHeight = 32
-  const horizontalMargin = 10
-  const opensAbove = rect.top - actionHeight - 8 >= horizontalMargin
-  const left = Math.max(horizontalMargin, Math.min(window.innerWidth - actionWidth - horizontalMargin, rect.right - actionWidth))
-  const top = opensAbove ? rect.top - actionHeight - 8 : Math.min(window.innerHeight - actionHeight - horizontalMargin, rect.bottom + 8)
-  return {
-    left: `${Math.round(left)}px`,
-    top: `${Math.round(top)}px`,
-    '--reader-selection-origin': opensAbove ? 'center bottom' : 'center top',
-    '--reader-selection-tail-top': opensAbove ? 'auto' : '-4px',
-    '--reader-selection-tail-bottom': opensAbove ? '-4px' : 'auto',
-  }
-})
 const activeContentTab = computed(() => {
   if (props.activeWorkspaceTab) return props.activeWorkspaceTab
   if (!props.selectedContentItem?.id) return null
@@ -914,6 +893,24 @@ const activeLocalHtmlRemotePage = computed(() => {
   return { contentItemId: tabId, sourceUrl }
 })
 const isLocalHtmlRemoteVisible = computed(() => Boolean(activeLocalHtmlRemotePage.value))
+const {
+  selectedTextAction,
+  selectedTextActionStyle,
+  askAboutSelectedText,
+  attachArticlePreviewSelectionFrame,
+  clearSelectedTextAction,
+  disposeReaderSelectionController,
+  handleWechatRemoteSelection,
+  mountReaderSelectionController,
+} = useReaderSelectionController({
+  activeContentTab,
+  activeArticlePreviewFrame,
+  contentHero,
+  contentForTab: props.contentForTab,
+  isWechatRemoteVisible: () => isWechatRemoteVisible.value,
+  wechatRemoteWebviews,
+  onAsk: (selection) => emit('ask-about-selection', selection),
+})
 const {
   clearPreviewFindHighlights,
   closePreviewFind,
@@ -1100,21 +1097,9 @@ onBeforeUnmount(() => {
   wechatRemoteWebviews.clear()
   wechatRemoteFindRequestIds.clear()
   disposePreviewFindController()
-  if (selectedTextActionRevealFrame) {
-    window.cancelAnimationFrame(selectedTextActionRevealFrame)
-    selectedTextActionRevealFrame = 0
-  }
   disposeReadingProgressController()
+  disposeReaderSelectionController()
   window.removeEventListener('keydown', handlePreviewFindShortcut, true)
-  document.removeEventListener('selectionchange', handleDocumentSelectionChange)
-  document.removeEventListener('pointerdown', handleSelectedTextPointerDown, true)
-  document.removeEventListener('pointerup', handleSelectedTextPointerUp, true)
-  document.removeEventListener('pointercancel', handleSelectedTextPointerCancel, true)
-  articlePreviewSelectionDocument?.removeEventListener('selectionchange', handleArticlePreviewSelectionChange)
-  articlePreviewSelectionDocument?.removeEventListener('pointerdown', handleSelectedTextPointerDown, true)
-  articlePreviewSelectionDocument?.removeEventListener('pointerup', handleSelectedTextPointerUp, true)
-  articlePreviewSelectionDocument?.removeEventListener('pointercancel', handleSelectedTextPointerCancel, true)
-  articlePreviewSelectionDocument = null
   removeDesktopPreviewFindListener?.()
   removeDesktopPreviewFindListener = null
 })
@@ -1122,10 +1107,7 @@ onBeforeUnmount(() => {
 onMounted(() => {
   mountMediaTranscriptWorkspace()
   window.addEventListener('keydown', handlePreviewFindShortcut, true)
-  document.addEventListener('selectionchange', handleDocumentSelectionChange)
-  document.addEventListener('pointerdown', handleSelectedTextPointerDown, true)
-  document.addEventListener('pointerup', handleSelectedTextPointerUp, true)
-  document.addEventListener('pointercancel', handleSelectedTextPointerCancel, true)
+  mountReaderSelectionController()
   removeDesktopPreviewFindListener = window.knowledgeHubDesktop?.onPreviewFind?.(handleDesktopPreviewFindShortcut) || null
   scheduleReadingProgressRefresh()
 })
@@ -1519,29 +1501,7 @@ function handleWechatRemoteConsoleMessage(contentItemId, event) {
   }
   const selection = parseWechatRemoteSelectionMessage(event?.message)
   if (!selection) return
-  if (selection.kind === 'clear') {
-    clearSelectedTextAction()
-    return
-  }
-
-  const content = props.contentForTab(activeContentTab.value?.id)
-  if (!content?.id || String(content.id) !== String(contentItemId)) return
-  const webviewRect = webview.getBoundingClientRect?.()
-  if (!webviewRect) return
-  selectedTextAction.value = {
-    text: selection.text,
-    contentItemId: String(content.id),
-    contentTitle: content.title || activeContentTab.value?.title || '当前内容',
-    source: 'wechat-remote',
-    rect: {
-      left: webviewRect.left + selection.rect.left,
-      top: webviewRect.top + selection.rect.top,
-      right: webviewRect.left + selection.rect.right,
-      bottom: webviewRect.top + selection.rect.bottom,
-      width: selection.rect.right - selection.rect.left,
-      height: selection.rect.bottom - selection.rect.top,
-    },
-  }
+  handleWechatRemoteSelection({ contentItemId, webview, selection })
 }
 
 function applyRemoteOutlineMessage(key, message) {
@@ -1895,141 +1855,11 @@ function refreshWechatRemoteFind() {
   }
 }
 
-function handleDocumentSelectionChange() {
-  if (isWechatRemoteVisible.value) {
-    clearSelectedTextAction()
-    return
-  }
-  if (selectedTextPointerIsDown) {
-    clearSelectedTextAction()
-    return
-  }
-  captureReadableSelection(window.getSelection?.(), document)
-}
-
-function handleArticlePreviewSelectionChange(event) {
-  const frameDocument = event?.target
-  if (selectedTextPointerIsDown) {
-    clearSelectedTextAction()
-    return
-  }
-  captureReadableSelection(frameDocument?.defaultView?.getSelection?.(), frameDocument)
-}
-
-function handleSelectedTextPointerDown(event) {
-  // The floating action is teleported to ``body``. Its pointerdown therefore
-  // reaches this document-level capture listener before the button's own
-  // handler. Preserve the captured quote so its click can hand it to the
-  // assistant instead of clearing the action one event too early.
-  if (event?.target instanceof Element && event.target.closest('.reader-selection-ask')) return
-  if (shouldClaimReaderFocus(event?.target)) {
-    contentHero.value?.focus({ preventScroll: true })
-  }
-  selectedTextPointerIsDown = true
-  if (selectedTextActionRevealFrame) {
-    window.cancelAnimationFrame(selectedTextActionRevealFrame)
-    selectedTextActionRevealFrame = 0
-  }
-  clearSelectedTextAction()
-}
-
-function handleSelectedTextPointerUp(event) {
-  selectedTextPointerIsDown = false
-  const ownerDocument = event?.currentTarget?.defaultView ? event.currentTarget : document
-  if (selectedTextActionRevealFrame) window.cancelAnimationFrame(selectedTextActionRevealFrame)
-  selectedTextActionRevealFrame = window.requestAnimationFrame(() => {
-    selectedTextActionRevealFrame = 0
-    if (isWechatRemoteVisible.value) return
-    captureReadableSelection(ownerDocument.defaultView?.getSelection?.(), ownerDocument)
-  })
-}
-
-function handleSelectedTextPointerCancel() {
-  selectedTextPointerIsDown = false
-  clearSelectedTextAction()
-}
-
-function captureReadableSelection(selection, ownerDocument) {
-  if (!selection || selection.isCollapsed || !selection.rangeCount) {
-    clearSelectedTextAction()
-    return
-  }
-  const range = selection.getRangeAt(0)
-  const quote = String(selection.toString() || '').trim()
-  const text = quote.replace(/\s+/gu, ' ').trim()
-  const tab = activeContentTab.value
-  const content = tab ? props.contentForTab(tab.id) : null
-  if (!text || !content?.id || text.length < 2 || !selectionBelongsToReader(range, ownerDocument)) {
-    clearSelectedTextAction()
-    return
-  }
-  const rangeRect = range.getBoundingClientRect()
-  if (!rangeRect.width && !rangeRect.height) {
-    clearSelectedTextAction()
-    return
-  }
-  const frame = activeArticlePreviewFrame.value
-  const isFrameSelection = ownerDocument && frame?.contentDocument === ownerDocument
-  const frameRect = isFrameSelection ? frame.getBoundingClientRect() : null
-  selectedTextAction.value = {
-    text: text.slice(0, 12000),
-    contentItemId: String(content.id),
-    contentTitle: content.title || tab?.title || '当前内容',
-    rect: isFrameSelection && frameRect
-      ? {
-          left: frameRect.left + rangeRect.left,
-          top: frameRect.top + rangeRect.top,
-          width: rangeRect.width,
-          height: rangeRect.height,
-          right: frameRect.left + rangeRect.right,
-          bottom: frameRect.top + rangeRect.bottom,
-        }
-      : rangeRect,
-  }
-}
-
-function selectionBelongsToReader(range, ownerDocument) {
-  const container = range.commonAncestorContainer
-  const element = container?.nodeType === Node.ELEMENT_NODE ? container : container?.parentElement
-  if (!element || element.nodeType !== Node.ELEMENT_NODE) return false
-  if (ownerDocument && activeArticlePreviewFrame.value?.contentDocument === ownerDocument) return ownerDocument.body.contains(element)
-  return Boolean(element.closest('.report-markdown, .article-preview-body, .transcript-timeline'))
-}
-
-function clearSelectedTextAction() {
-  selectedTextAction.value = null
-}
-
-function askAboutSelectedText() {
-  const selection = selectedTextAction.value
-  if (!selection) return
-  emit('ask-about-selection', {
-    contentItemId: selection.contentItemId,
-    contentTitle: selection.contentTitle,
-    text: selection.text,
-  })
-  window.getSelection?.()?.removeAllRanges()
-  activeArticlePreviewFrame.value?.contentDocument?.defaultView?.getSelection?.()?.removeAllRanges()
-  if (selection.source === 'wechat-remote') {
-    const webview = wechatRemoteWebviews.get(selection.contentItemId)
-    void webview?.executeJavaScript?.('window.getSelection?.().removeAllRanges()').catch(() => {})
-  }
-  clearSelectedTextAction()
-}
-
 function handleArticlePreviewFrameReady(event) {
   const frameDocument = event?.target?.contentDocument
   if (!frameDocument) return
-  articlePreviewSelectionDocument?.removeEventListener('selectionchange', handleArticlePreviewSelectionChange)
-  articlePreviewSelectionDocument?.removeEventListener('pointerdown', handleSelectedTextPointerDown, true)
-  articlePreviewSelectionDocument?.removeEventListener('pointerup', handleSelectedTextPointerUp, true)
-  articlePreviewSelectionDocument?.removeEventListener('pointercancel', handleSelectedTextPointerCancel, true)
-  articlePreviewSelectionDocument = frameDocument
   attachReadingProgressFrame(frameDocument)
-  frameDocument.addEventListener('selectionchange', handleArticlePreviewSelectionChange)
-  frameDocument.addEventListener('pointerdown', handleSelectedTextPointerDown, true)
-  frameDocument.addEventListener('pointerup', handleSelectedTextPointerUp, true)
-  frameDocument.addEventListener('pointercancel', handleSelectedTextPointerCancel, true)
+  attachArticlePreviewSelectionFrame(frameDocument)
   articleOutlineRoot.value = isArticleTab(activeContentTab.value?.id) ? frameDocument.body : null
   renderArticlePreviewMath(frameDocument)
   frameDocument.removeEventListener('keydown', handleArticlePreviewFrameKeydown)

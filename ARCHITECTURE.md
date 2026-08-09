@@ -72,6 +72,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `workbench/useMediaTranscriptWorkspaceController.js` | timed-media timeline state, reader split resizing, playback-following and cleanup | content ingestion, player implementation, article rendering and source persistence |
 | `workbench/useXhsGalleryController.js` | Xiaohongshu image-gallery index, scrolling, keyboard navigation and reset | article capture state, layout selection and gallery markup |
 | `workbench/useReadingProgressController.js` | local reader scroll progress, iframe listener lifecycle and refresh-frame cleanup | remote webview progress, reader markup, content persistence and source selection |
+| `workbench/useReaderSelectionController.js` | local, iframe and WeChat-page text-selection action, listener lifecycle and assistant handoff | reader markup, remote-page bridge parsing and content persistence |
 | `workbench/libraryGroupLayout.js` | pure root-folder grouping, separator placement and legacy layout migration | tree selection, drag events, localStorage I/O and folder/content mutations |
 | `services/group_report_models.py` | immutable report inputs, outputs and progress contracts | model calls, persistence, Markdown rendering |
 | `services/creator_sync_models.py` | immutable creator-video, preview and sync-result contracts plus UI-safe sync failures | browser capture, source persistence, task creation and scheduling |
