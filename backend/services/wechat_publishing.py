@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 import subprocess
-import textwrap
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,8 +18,6 @@ from typing import Any, Callable, Literal
 from urllib.parse import quote
 
 import requests
-from bs4 import BeautifulSoup
-from markdown_it import MarkdownIt
 from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -43,7 +40,15 @@ from services.github_pages_deployment import (
     verify_github_pages_url,
 )
 from services.repository import new_id
+from services.wechat_publishing_markdown import (
+    default_digest as _default_digest,
+    markdown_to_wechat_html,
+    plain_text as _plain_text,
+    wechat_digest as _wechat_digest,
+)
 from services.wechat_report_layout import ReportSource, render_wechat_report
+
+__all__ = ["markdown_to_wechat_html"]
 
 
 WECHAT_API_BASE = "https://api.weixin.qq.com/cgi-bin"
@@ -147,10 +152,6 @@ _COVER_STYLE_BLOCK = re.compile(
     r"\[\[STYLE:([a-z_]+)\]\](.*?)\[\[/STYLE\]\]",
     re.DOTALL,
 )
-# The draft API reports the article digest as ``description`` and rejects it
-# once its UTF-8 payload exceeds this limit.  Character-count truncation is
-# unsafe for Chinese reports, because one Han character occupies three bytes.
-WECHAT_DIGEST_MAX_BYTES = 120
 
 
 class WeChatPublishingError(RuntimeError):
@@ -1625,87 +1626,6 @@ class WeChatPublishingService:
         if not media_id:
             raise WeChatPublishingError("公众号未返回封面素材标识")
         return media_id
-
-
-def markdown_to_wechat_html(markdown: str) -> str:
-    """Render the report body to conservative HTML accepted by WeChat drafts."""
-    source = _strip_report_frontmatter(markdown)
-    renderer = MarkdownIt("commonmark", {"html": False, "breaks": False}).enable("table")
-    html = renderer.render(source)
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all(["script", "style", "iframe", "form", "input", "button"]):
-        tag.decompose()
-    for tag in soup.find_all(True):
-        allowed = {"p", "br", "strong", "em", "del", "blockquote", "ul", "ol", "li", "h1", "h2", "h3", "h4", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "hr", "code", "pre"}
-        if tag.name not in allowed:
-            tag.unwrap()
-            continue
-        attributes = {}
-        if tag.name == "a" and tag.get("href"):
-            attributes["href"] = str(tag["href"])
-        if tag.name == "img" and tag.get("src"):
-            attributes["src"] = str(tag["src"])
-        if tag.name in {"img", "a"} and tag.get("title"):
-            attributes["title"] = str(tag["title"])
-        tag.attrs = attributes
-    return str(soup)
-
-
-def _strip_report_frontmatter(markdown: str) -> str:
-    source = str(markdown or "").strip()
-    source = source.replace("\r\n", "\n")
-    source = source.replace("\r", "\n")
-    if source.startswith("---\n"):
-        closing = source.find("\n---", 4)
-        if closing >= 0:
-            source = source[closing + 4 :].lstrip("\n")
-    # The reader already presents the document title. Avoid a duplicated H1 in
-    # the public article while retaining all report headings below it.
-    return _drop_first_heading(source)
-
-
-def _drop_first_heading(markdown: str) -> str:
-    lines = markdown.splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("# "):
-            return "\n".join(lines[:index] + lines[index + 1 :]).lstrip()
-        if line.strip():
-            break
-    return markdown
-
-
-def _default_digest(markdown: str) -> str:
-    # The first line in a generated report is an internal production note
-    # (group / analyzed count / citations).  It must never become the reader
-    # facing WeChat digest.
-    lines = [
-        line
-        for line in str(markdown or "").splitlines()
-        if not line.strip().startswith("> 分组：") and not line.strip().startswith("[^S")
-    ]
-    text = _plain_text("\n".join(lines))
-    return textwrap.shorten(text, width=120, placeholder="…") if text else ""
-
-
-def _wechat_digest(value: str) -> str:
-    """Keep the digest under WeChat's byte-based description limit."""
-    return _truncate_utf8(str(value or "").strip(), WECHAT_DIGEST_MAX_BYTES)
-
-
-def _truncate_utf8(value: str, max_bytes: int) -> str:
-    kept: list[str] = []
-    size = 0
-    for character in value:
-        character_size = len(character.encode("utf-8"))
-        if size + character_size > max_bytes:
-            break
-        kept.append(character)
-        size += character_size
-    return "".join(kept)
-
-
-def _plain_text(value: str) -> str:
-    return " ".join(BeautifulSoup(str(value or ""), "html.parser").get_text(" ", strip=True).split())
 
 
 def _cover_bytes(
