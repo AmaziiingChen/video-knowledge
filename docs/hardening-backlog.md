@@ -49,7 +49,10 @@ lines.
   `knowledge_v2.py` retains its existing private entry point for compatibility.
   Model stream collection and final usage/reasoning metadata reconstruction now
   live in `services/knowledge_response_transport.py`, with the original helper
-  retained as a compatibility import.
+  retained as a compatibility import. Streaming JSON extraction now lives in
+  `services/knowledge_streaming_json.py`, so only the structured ``answer``
+  field can reach the visible response stream; the existing private entry point
+  remains a compatibility import.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
