@@ -8,6 +8,14 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 
 from config import settings
 from services.content_index import ensure_creator_folder
+from services.creator_capture_status import (
+    begin_creator_browser_capture as _begin_creator_browser_capture,
+    creator_capture_status,
+    finish_creator_browser_capture as _finish_creator_browser_capture,
+    record_creator_list_check as _record_creator_list_check,
+    set_creator_capture_stage as _set_creator_capture_stage,
+    wait_for_creator_browser as _wait_for_creator_browser,
+)
 from services.creator_metadata import save_creator_work_metadata
 from services.creator_sync_models import CreatorPreview, CreatorSyncError, CreatorSyncResult, CreatorVideo
 from services.database import connect, initialize_database, utc_now_iso
@@ -40,14 +48,6 @@ _DOUYIN_COLLECTION_PATH_RE = re.compile(r"^/collection/(?P<id>\d+)(?:/(?P<positi
 _XIAOHONGSHU_PROFILE_PATH_RE = re.compile(r"^/user/profile/(?P<id>[^/?#]+)/?$")
 _CREATOR_BROWSER_LOCK = Lock()
 _CREATOR_SYNC_LOCK = Lock()
-_CREATOR_CAPTURE_STATE_LOCK = Lock()
-_CREATOR_CAPTURE_STATE = {
-    "active": False,
-    "provider": "",
-    "stage": "空闲",
-    "waiting_count": 0,
-    "last_list_checks": {"douyin": {}, "bilibili": {}, "xiaohongshu": {}},
-}
 
 
 def preview_creator_source(
@@ -574,15 +574,6 @@ def sync_due_creator_sources() -> list[str]:
             continue
         completed.append(source_id)
     return completed
-
-
-def creator_capture_status() -> dict[str, Any]:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        status = dict(_CREATOR_CAPTURE_STATE)
-        status["last_list_checks"] = {
-            provider: dict(value) for provider, value in _CREATOR_CAPTURE_STATE["last_list_checks"].items()
-        }
-        return status
 
 
 def _source_row(connection, *, source_id: str | None, source_identity: str):
@@ -1454,46 +1445,6 @@ def _should_continue_creator_capture(
         for video in _parse_page(payload, provider=provider)[0]
     }
     return len(captured_ids) < limit
-
-
-def _wait_for_creator_browser(provider: str) -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["waiting_count"] += 1
-        if not _CREATOR_CAPTURE_STATE["active"]:
-            _CREATOR_CAPTURE_STATE["provider"] = provider
-            _CREATOR_CAPTURE_STATE["stage"] = "等待内置浏览器"
-
-
-def _begin_creator_browser_capture(provider: str) -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["waiting_count"] = max(0, int(_CREATOR_CAPTURE_STATE["waiting_count"]) - 1)
-        _CREATOR_CAPTURE_STATE["active"] = True
-        _CREATOR_CAPTURE_STATE["provider"] = provider
-        _CREATOR_CAPTURE_STATE["stage"] = "准备采集"
-
-
-def _set_creator_capture_stage(stage: str) -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        if _CREATOR_CAPTURE_STATE["active"]:
-            _CREATOR_CAPTURE_STATE["stage"] = stage
-
-
-def _finish_creator_browser_capture() -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["active"] = False
-        _CREATOR_CAPTURE_STATE["provider"] = ""
-        _CREATOR_CAPTURE_STATE["stage"] = "等待内置浏览器" if _CREATOR_CAPTURE_STATE["waiting_count"] else "空闲"
-
-
-def _record_creator_list_check(provider: str, *, state: str, detail: str) -> None:
-    if provider not in {"douyin", "bilibili"}:
-        return
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["last_list_checks"][provider] = {
-            "state": state,
-            "detail": str(detail)[:300],
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        }
 
 
 def _page_reaches_watermark(payload: dict[str, Any], *, provider: str, watermark: datetime | None) -> bool:
