@@ -868,6 +868,7 @@ import { usePromptWorkspaceController } from './features/prompts/usePromptWorksp
 import { useWechatAccountController } from './features/wechat/useWechatAccountController.js'
 import { useWechatFilterController } from './features/wechat/useWechatFilterController.js'
 import { useWechatSubscriptionSyncController } from './features/wechat/useWechatSubscriptionSyncController.js'
+import { useWechatSubscriptionManagementController } from './features/wechat/useWechatSubscriptionManagementController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -1673,16 +1674,12 @@ const {
 const wechatSubscriptionInterval = ref(1440)
 const wechatAutoProcess = ref(false)
 const wechatSubscriptionStates = ref({})
-const refreshingWeChatProfileId = ref('')
-const wechatSubscriptionUpdateRevision = new Map()
 const wechatSyncIntervalOptions = [
   { label: '每 6 小时', value: 360 },
   { label: '每 12 小时', value: 720 },
   { label: '每天', value: 1440 }
 ]
 let wechatInitialSyncListPollTimer = null
-let wechatIncrementalLibraryRefreshInFlight = false
-let wechatIncrementalLibraryRefreshQueued = false
 
 function wechatErrorMessage(error, fallback = '微信公众号订阅操作失败') {
   return error?.response?.data?.detail || error?.message || fallback
@@ -1727,6 +1724,28 @@ const {
   refreshContentItems: loadContentItems,
   enqueueTask: enqueueSourceSyncTask,
   observeTask: observeSourceSyncTask,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const {
+  refreshingWeChatProfileId,
+  subscribeWeChatAccount,
+  updateWeChatSubscription,
+  bulkUpdateWeChatSubscriptions,
+  bulkAddWeChatSubscriptionGroup,
+  refreshWeChatSubscriptionProfile,
+  deleteWeChatSubscription,
+} = useWechatSubscriptionManagementController({
+  selectedAccountId: selectedWeChatAccountId,
+  subscriptions: wechatSubscriptions,
+  reportGroups: wechatReportGroups,
+  subscriptionStates: wechatSubscriptionStates,
+  syncInterval: wechatSubscriptionInterval,
+  autoProcess: wechatAutoProcess,
+  loadSubscriptions: loadWeChatSubscriptions,
+  refreshContentItems: loadContentItems,
+  observeTask: observeSourceSyncTask,
+  apiBase: WECHAT_SUBSCRIPTION_API,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 
@@ -2017,215 +2036,6 @@ async function openOriginalFile(path) {
     await openPath(String(path || ''))
   } catch (error) {
     ElMessage.error(wechatErrorMessage(error, '打开原始文件失败'))
-  }
-}
-
-function setWeChatSubscriptionState(accountId, fakeid, state = '') {
-  const normalizedAccountId = String(accountId || '')
-  const normalizedFakeid = String(fakeid || '')
-  if (!normalizedAccountId || !normalizedFakeid) return
-  const key = `${normalizedAccountId}:${normalizedFakeid}`
-  const next = { ...wechatSubscriptionStates.value }
-  if (state) next[key] = state
-  else delete next[key]
-  wechatSubscriptionStates.value = next
-}
-
-function upsertWeChatSubscription(subscription) {
-  if (!subscription?.id) return
-  const index = wechatSubscriptions.value.findIndex((item) => item.id === subscription.id)
-  if (index < 0) {
-    wechatSubscriptions.value = [subscription, ...wechatSubscriptions.value]
-    return
-  }
-  wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-    item.id === subscription.id ? { ...item, ...subscription } : item
-  ))
-}
-
-async function refreshLibraryForWeChatIncrement() {
-  if (wechatIncrementalLibraryRefreshInFlight) {
-    wechatIncrementalLibraryRefreshQueued = true
-    return
-  }
-  wechatIncrementalLibraryRefreshInFlight = true
-  try {
-    // loadContentItems also refreshes folder metadata, so the new document,
-    // its source folder, unread state, and file tree arrive together.
-    await loadContentItems()
-  } finally {
-    wechatIncrementalLibraryRefreshInFlight = false
-    if (wechatIncrementalLibraryRefreshQueued) {
-      wechatIncrementalLibraryRefreshQueued = false
-      void refreshLibraryForWeChatIncrement()
-    }
-  }
-}
-
-async function subscribeWeChatAccount(item) {
-  if (!selectedWeChatAccountId.value) return
-  const accountId = String(selectedWeChatAccountId.value)
-  const fakeid = String(item.fakeid || '')
-  const stateKey = `${accountId}:${fakeid}`
-  if (!fakeid || wechatSubscriptionStates.value[stateKey]) return
-  if (wechatSubscriptions.value.some((subscription) => (
-    String(subscription.account_id) === accountId && String(subscription.fakeid) === fakeid
-  ))) return
-  setWeChatSubscriptionState(accountId, fakeid, 'subscribing')
-  try {
-    const response = await axios.post(WECHAT_SUBSCRIPTION_API, {
-      account_id: accountId,
-      fakeid: item.fakeid,
-      mp_name: item.name,
-      biz: item.biz || '',
-      avatar_url: item.avatar_url || '',
-      description: item.description || '',
-      sync_interval_minutes: wechatSubscriptionInterval.value,
-      auto_process: wechatAutoProcess.value,
-      initial_sync: true,
-      initial_limit: 10
-    }, { timeout: 15000 })
-    const subscription = response.data?.subscription
-    if (!subscription?.id) throw new Error('订阅接口未返回公众号信息')
-    upsertWeChatSubscription(subscription)
-    await loadContentItems()
-    const sync = response.data?.sync
-    if (sync?.task_id) {
-      setWeChatSubscriptionState(accountId, fakeid, 'checking')
-      observeSourceSyncTask(sync.task_id, {
-        onSucceeded: async () => {
-          await Promise.all([loadWeChatSubscriptions(), refreshLibraryForWeChatIncrement()])
-          setWeChatSubscriptionState(accountId, fakeid)
-        },
-        onFailed: (message) => {
-          setWeChatSubscriptionState(accountId, fakeid)
-          ElMessage.warning(message || `${subscription.mp_name || '公众号'}已订阅，首次检查失败，可稍后手动检查`)
-        },
-      })
-      ElMessage.success('公众号已订阅，正在后台检查最近文章')
-    } else {
-      setWeChatSubscriptionState(accountId, fakeid)
-      ElMessage.success('公众号已订阅')
-    }
-  } catch (error) {
-    setWeChatSubscriptionState(accountId, fakeid)
-    ElMessage.error(wechatErrorMessage(error, '创建公众号订阅失败'))
-  }
-}
-
-async function updateWeChatSubscription(subscription, payload, { silent = false } = {}) {
-  const index = wechatSubscriptions.value.findIndex((item) => item.id === subscription.id)
-  if (index < 0) return false
-  const previous = wechatSubscriptions.value[index]
-  const revision = (wechatSubscriptionUpdateRevision.get(subscription.id) || 0) + 1
-  wechatSubscriptionUpdateRevision.set(subscription.id, revision)
-  wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-    item.id === subscription.id ? { ...item, ...payload } : item
-  ))
-  try {
-    const response = await axios.patch(`${WECHAT_SUBSCRIPTION_API}/${subscription.id}`, payload, { timeout: 10000 })
-    if (wechatSubscriptionUpdateRevision.get(subscription.id) === revision && response.data) {
-      wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-        item.id === subscription.id ? { ...item, ...response.data } : item
-      ))
-    }
-    return true
-  } catch (error) {
-    if (wechatSubscriptionUpdateRevision.get(subscription.id) === revision) {
-      wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-        item.id === subscription.id ? previous : item
-      ))
-    }
-    if (!silent) ElMessage.error(wechatErrorMessage(error, '更新公众号订阅失败'))
-    return false
-  }
-}
-
-async function updateWeChatSubscriptionsInParallel(subscriptions, payloadForSubscription) {
-  let cursor = 0
-  let succeeded = 0
-  let failed = 0
-  const worker = async () => {
-    while (cursor < subscriptions.length) {
-      const subscription = subscriptions[cursor]
-      cursor += 1
-      const ok = await updateWeChatSubscription(subscription, payloadForSubscription(subscription), { silent: true })
-      if (ok) succeeded += 1
-      else failed += 1
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(5, subscriptions.length) }, worker))
-  return { succeeded, failed }
-}
-
-async function bulkUpdateWeChatSubscriptions({ subscriptionIds = [], payload = {}, label = '设置' } = {}) {
-  const selectedIds = new Set(subscriptionIds.map(String))
-  const selectedSubscriptions = wechatSubscriptions.value.filter((item) => selectedIds.has(String(item.id)))
-  const allowedKeys = new Set(['sync_interval_minutes', 'auto_process', 'notify_on_new', 'enabled'])
-  const safePayload = Object.fromEntries(Object.entries(payload).filter(([key]) => allowedKeys.has(key)))
-  if (!selectedSubscriptions.length || !Object.keys(safePayload).length) {
-    ElMessage.warning('请选择公众号和要更新的设置')
-    return
-  }
-
-  const { succeeded, failed } = await updateWeChatSubscriptionsInParallel(selectedSubscriptions, () => safePayload)
-
-  if (failed) {
-    ElMessage.warning(`已更新 ${succeeded} 个公众号的${label}，${failed} 个更新失败`)
-    return
-  }
-  ElMessage.success(`已更新 ${succeeded} 个公众号的${label}`)
-}
-
-async function bulkAddWeChatSubscriptionGroup({ subscriptionIds = [], groupId } = {}) {
-  const selectedIds = new Set(subscriptionIds.map(String))
-  const group = wechatReportGroups.value.find((item) => String(item.id) === String(groupId))
-  const selectedSubscriptions = wechatSubscriptions.value.filter((item) => selectedIds.has(String(item.id)))
-  if (!group || !selectedSubscriptions.length) {
-    ElMessage.warning('请选择公众号和要添加的分组')
-    return
-  }
-
-  const eligible = selectedSubscriptions.filter((subscription) => {
-    const groupIds = subscription.group_ids || []
-    return groupIds.length < 3 && !groupIds.some((id) => String(id) === String(groupId))
-  })
-  const skipped = selectedSubscriptions.length - eligible.length
-  if (!eligible.length) {
-    ElMessage.warning('所选公众号已包含该分组，或均已达到三个分组上限')
-    return
-  }
-
-  const { succeeded, failed } = await updateWeChatSubscriptionsInParallel(eligible, (subscription) => ({
-    group_ids: [...(subscription.group_ids || []), groupId]
-  }))
-
-  const details = [`已将“${group.name}”添加到 ${succeeded} 个公众号`]
-  if (skipped) details.push(`${skipped} 个已存在该分组或已达到上限`)
-  if (failed) details.push(`${failed} 个更新失败`)
-  ElMessage[failed ? 'warning' : 'success'](details.join('；'))
-}
-
-async function refreshWeChatSubscriptionProfile(subscriptionId) {
-  refreshingWeChatProfileId.value = subscriptionId
-  try {
-    await axios.post(`${WECHAT_SUBSCRIPTION_API}/${subscriptionId}/profile`, {}, { timeout: 30000 })
-    await loadWeChatSubscriptions()
-    ElMessage.success('公众号资料已更新')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '更新公众号资料失败'))
-  } finally {
-    refreshingWeChatProfileId.value = ''
-  }
-}
-
-async function deleteWeChatSubscription(subscriptionId) {
-  try {
-    await axios.delete(`${WECHAT_SUBSCRIPTION_API}/${subscriptionId}`, { timeout: 10000 })
-    ElMessage.success('已取消公众号订阅')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '取消公众号订阅失败'))
   }
 }
 
