@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any, Literal
@@ -10,6 +9,7 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 from config import settings
 from services.content_index import ensure_creator_folder
 from services.creator_metadata import save_creator_work_metadata
+from services.creator_sync_models import CreatorPreview, CreatorSyncError, CreatorSyncResult, CreatorVideo
 from services.database import connect, initialize_database, utc_now_iso
 from services.network_policy import direct_browser_launch_options
 from services.pipeline_runner import PipelineRequest
@@ -48,54 +48,6 @@ _CREATOR_CAPTURE_STATE = {
     "waiting_count": 0,
     "last_list_checks": {"douyin": {}, "bilibili": {}, "xiaohongshu": {}},
 }
-
-
-class CreatorSyncError(ValueError):
-    """An input or upstream-response error safe to show in the UI."""
-
-
-@dataclass(frozen=True)
-class CreatorVideo:
-    provider: str
-    canonical_id: str
-    source_url: str
-    title: str
-    cover_url: str = ""
-    duration_seconds: float | None = None
-    published_at: str | None = None
-    description: str = ""
-    author_name: str = ""
-    tags: tuple[str, ...] = ()
-    stats: dict[str, int] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class CreatorPreview:
-    provider: str
-    source_kind: str
-    source_url: str
-    creator_key: str
-    creator_name: str
-    videos: list[CreatorVideo]
-    creator_avatar_url: str = ""
-    creator_description: str = ""
-    collection_id: str = ""
-    collection_name: str = ""
-
-
-@dataclass(frozen=True)
-class CreatorSyncResult:
-    source_id: str
-    provider: str
-    creator_name: str
-    folder_id: str
-    discovered_count: int
-    created_count: int
-    duplicate_count: int
-    queued_count: int
-    inbox_count: int
-    task_ids: list[str]
-    content_item_ids: list[str]
 
 
 def preview_creator_source(
