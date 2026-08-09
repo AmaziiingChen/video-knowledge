@@ -863,6 +863,7 @@ import { WECHAT_COVER_STYLE_OPTIONS } from './config/wechatCoverStyles'
 import { useWechatCoverController } from './features/wechat/useWechatCoverController.js'
 import { useWechatDraftController } from './features/wechat/useWechatDraftController.js'
 import { useWechatPublishingSettingsController } from './features/wechat/useWechatPublishingSettingsController.js'
+import { useWechatReportPromptController } from './features/prompts/useWechatReportPromptController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -1565,6 +1566,22 @@ const wechatAccounts = ref([])
 const wechatSubscriptions = ref([])
 const wechatContentFilters = ref([])
 const wechatReportGroups = ref([])
+const {
+  loadWechatReportPrompts,
+  loadingWechatReportPrompts,
+  saveWechatReportPrompt,
+  savingWechatReportPrompt,
+  selectWechatReportPromptGroup,
+  selectWechatReportPromptType,
+  selectedWechatReportPromptGroupId,
+  selectedWechatReportPromptType,
+  syncWechatReportPromptEditor,
+  wechatReportPromptText,
+  wechatReportPrompts,
+} = useWechatReportPromptController({
+  reportGroups: wechatReportGroups,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
 const librarySourceGroups = ref([])
 const sourceGroupEditor = ref(null)
 const showSourceGroupEditor = ref(false)
@@ -1586,13 +1603,7 @@ let reportGenerationRequestSequence = 0
 let reportGenerationConfirmationResolver = null
 let reportPreflightRequest = null
 let wechatPreparingRequestId = ''
-const wechatReportPrompts = ref([])
 const fixedSystemPrompts = ref([])
-const selectedWechatReportPromptGroupId = ref('')
-const selectedWechatReportPromptType = ref('group_context')
-const wechatReportPromptText = ref('')
-const loadingWechatReportPrompts = ref(false)
-const savingWechatReportPrompt = ref(false)
 const promptWorkspaceTemplates = ref([])
 const promptFolders = ref([])
 const promptWorkspaceTabs = ref([])
@@ -1936,67 +1947,6 @@ async function openOriginalFile(path) {
     await openPath(String(path || ''))
   } catch (error) {
     ElMessage.error(wechatErrorMessage(error, '打开原始文件失败'))
-  }
-}
-
-function syncWechatReportPromptEditor() {
-  if (!wechatReportGroups.value.some((group) => group.id === selectedWechatReportPromptGroupId.value)) {
-    selectedWechatReportPromptGroupId.value = wechatReportGroups.value[0]?.id || ''
-  }
-  const hasSelectedAdapter = wechatReportPrompts.value.some((item) => (
-    item.group_id === selectedWechatReportPromptGroupId.value
-    && item.report_type === selectedWechatReportPromptType.value
-  ))
-  if (!hasSelectedAdapter) selectedWechatReportPromptType.value = 'group_context'
-  const current = wechatReportPrompts.value.find((item) => (
-    item.group_id === selectedWechatReportPromptGroupId.value
-    && item.report_type === selectedWechatReportPromptType.value
-  ))
-  wechatReportPromptText.value = current?.template || ''
-}
-
-async function loadWechatReportPrompts() {
-  loadingWechatReportPrompts.value = true
-  try {
-    const response = await axios.get(WECHAT_REPORT_PROMPT_API, { timeout: 10000 })
-    wechatReportPrompts.value = Array.isArray(response.data) ? response.data : []
-    syncWechatReportPromptEditor()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法读取分组报告提示词'))
-  } finally {
-    loadingWechatReportPrompts.value = false
-  }
-}
-
-function selectWechatReportPromptGroup(groupId) {
-  selectedWechatReportPromptGroupId.value = groupId
-  syncWechatReportPromptEditor()
-}
-
-function selectWechatReportPromptType(reportType) {
-  selectedWechatReportPromptType.value = reportType
-  syncWechatReportPromptEditor()
-}
-
-async function saveWechatReportPrompt() {
-  const groupId = selectedWechatReportPromptGroupId.value
-  const reportType = selectedWechatReportPromptType.value
-  const template = wechatReportPromptText.value.trim()
-  if (!groupId || !template) {
-    ElMessage.warning('请选择分组并填写提示词')
-    return false
-  }
-  savingWechatReportPrompt.value = true
-  try {
-    await axios.put(`${WECHAT_REPORT_GROUP_API}/${groupId}/prompts/${reportType}`, { template }, { timeout: 10000 })
-    await loadWechatReportPrompts()
-    ElMessage.success('区间报告提示词已保存')
-    return true
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '保存报告提示词失败'))
-    return false
-  } finally {
-    savingWechatReportPrompt.value = false
   }
 }
 
