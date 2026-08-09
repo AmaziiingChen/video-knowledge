@@ -84,6 +84,7 @@ import { useArticlePreparationController } from '../features/library/useArticleP
 import { useContentRecoveryController } from '../features/library/useContentRecoveryController.js'
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
+import { usePlatformCredentialController } from '../features/integrations/usePlatformCredentialController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
@@ -460,13 +461,27 @@ export function useAppController() {
   const obsidianVaultPath = ref('')
   const markdownExportPath = ref('')
   const obsidianAutoWrite = ref(false)
-  const cookieInput = ref('')
-  const savingCookie = ref(false)
-  const bilibiliCookieInput = ref('')
-  const savingBilibiliCookie = ref(false)
-  const platformAuthConnecting = ref('')
-  const platformAuthAvailable = Boolean(window.knowledgeHubDesktop?.connectPlatformAuth)
   const showSettings = ref(false)
+  const {
+    cookieInput,
+    savingCookie,
+    bilibiliCookieInput,
+    savingBilibiliCookie,
+    platformAuthConnecting,
+    platformAuthAvailable,
+    saveCookie,
+    saveBilibiliCookie,
+    connectPlatformAuth,
+    disconnectPlatformAuth,
+  } = usePlatformCredentialController({
+    showSettings,
+    cookieConfigured,
+    cookieState,
+    loadCookieStatus,
+    loadBilibiliCookieStatus,
+    notify: ElMessage,
+    confirmDisconnect: requestDestructiveConfirmation,
+  })
   const selectedTheme = ref('paper')
   const markdownState = reactive({
     content_item_id: null,
@@ -2028,121 +2043,6 @@ export function useAppController() {
         openSections.value = ['logs']
       }
       pollTimer.value = setTimeout(() => pollTask(taskId), retryDelay)
-    }
-  }
-
-  async function saveCookie({ closeAfterSave = true, notify = true } = {}) {
-    if (!cookieInput.value.trim()) {
-      if (cookieConfigured.value) {
-        showSettings.value = false
-        return
-      }
-      ElMessage.warning('请粘贴 Cookie')
-      return
-    }
-    savingCookie.value = true
-    try {
-      const res = await axios.post(`${API}/cookie`, { cookie: cookieInput.value.trim() })
-      if (res.data.success) {
-        await loadCookieStatus(true)
-        if (closeAfterSave) {
-          showSettings.value = false
-        }
-        if (notify) {
-          ElMessage.success(cookieState.value === 'valid' ? 'Cookie 已保存并验证可用' : 'Cookie 已保存，正在等待抖音验证')
-        }
-        return true
-      } else {
-        ElMessage.error(res.data.message)
-      }
-    } catch (e) {
-      ElMessage.error('保存失败')
-    } finally {
-      savingCookie.value = false
-    }
-    return false
-  }
-
-  async function saveBilibiliCookie({ notify = true } = {}) {
-    if (!bilibiliCookieInput.value.trim()) return true
-    savingBilibiliCookie.value = true
-    try {
-      const res = await axios.post(
-        `${API}/bilibili-cookie`,
-        { cookie: bilibiliCookieInput.value.trim() },
-        { timeout: 10000 }
-      )
-      if (!res.data.success) {
-        ElMessage.error(res.data.message)
-        return false
-      }
-      bilibiliCookieInput.value = ''
-      await loadBilibiliCookieStatus()
-      if (notify) ElMessage.success('B站 Cookie 已保存')
-      return true
-    } catch (error) {
-      ElMessage.error(error.response?.data?.detail || error.message || 'B站 Cookie 保存失败')
-      return false
-    } finally {
-      savingBilibiliCookie.value = false
-    }
-  }
-
-  async function connectPlatformAuth(platform) {
-    const connect = window.knowledgeHubDesktop?.connectPlatformAuth
-    if (!connect) {
-      ElMessage.warning('请使用桌面版在应用内登录；浏览器版仍可手动粘贴 Cookie。')
-      return false
-    }
-    platformAuthConnecting.value = platform
-    try {
-      const status = await connect(platform)
-      if (platform === 'bilibili') {
-        await loadBilibiliCookieStatus(true)
-      } else {
-        await loadCookieStatus(true)
-      }
-      if (status?.state === 'valid') {
-        ElMessage.success(`${platform === 'bilibili' ? 'B站' : '抖音'}登录态已连接并验证可用`)
-        return true
-      }
-      if (status?.configured) {
-        ElMessage.info(`${platform === 'bilibili' ? 'B站' : '抖音'}登录态已保存，正在等待平台验证`)
-        return true
-      }
-      ElMessage.info('登录窗口已关闭；尚未检测到可用登录态。')
-      return false
-    } catch (error) {
-      ElMessage.error(error?.message || '登录状态保存失败')
-      return false
-    } finally {
-      platformAuthConnecting.value = ''
-    }
-  }
-
-  async function disconnectPlatformAuth(platform) {
-    const disconnect = window.knowledgeHubDesktop?.disconnectPlatformAuth
-    if (!disconnect) return
-    const label = platform === 'bilibili' ? 'B站' : '抖音'
-    const confirmed = await requestDestructiveConfirmation({
-      title: `断开${label}登录态`,
-      message: `这会清除本应用保存的${label}登录会话和下载凭据；之后需要重新登录才能使用受限功能。`,
-      confirmLabel: '断开登录态',
-    })
-    if (!confirmed) return
-    platformAuthConnecting.value = platform
-    try {
-      await disconnect(platform)
-      if (platform === 'bilibili') {
-        await loadBilibiliCookieStatus(true)
-      } else {
-        await loadCookieStatus(true)
-      }
-      ElMessage.success(`${label}登录态已断开`)
-    } catch (error) {
-      ElMessage.error(error?.message || '断开登录态失败')
-    } finally {
-      platformAuthConnecting.value = ''
     }
   }
 
