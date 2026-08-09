@@ -31,7 +31,7 @@ KNOWN_DEBT_BUDGETS = {
     "backend/services/wechat_reports.py": 1_480,
     "backend/services/prompt_templates.py": 1_424,
     "backend/services/knowledge_library.py": 1_387,
-    "frontend/src/workbench/ProcessLogDock.vue": 1_383,
+    "frontend/src/workbench/ProcessLogDock.vue": 1_279,
     "backend/services/wechat_discovery.py": 1_346,
     "frontend/src/components/SettingsDialog.vue": 1_308,
     "frontend/src/styles/settings.css": 1_269,
