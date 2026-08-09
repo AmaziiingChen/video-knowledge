@@ -102,57 +102,16 @@
                         </p>
                       </div>
                     </div>
-                    <figure
-                      v-if="isReportTab(activeContentTab.id) && contentForTab(activeContentTab.id)?.cover_url"
-                      class="report-cover-preview"
-                      :class="{
-                        'is-generating': isWechatCoverGenerating(activeContentTab.id),
-                        'is-switching': isWechatCoverSwitching(activeContentTab.id),
-                      }"
-                      :aria-busy="isWechatCoverSwitching(activeContentTab.id) ? 'true' : 'false'"
-                    >
-                      <img
-                        :src="reportCoverUrlForTab(activeContentTab.id)"
-                        :alt="`${reportDisplayTitle(activeContentTab.id)}封面`"
-                      />
-                      <template v-if="reportCoverVersionsForTab(activeContentTab.id).length > 1">
-                        <button
-                          type="button"
-                          class="report-cover-arrow is-previous"
-                          title="上一张封面"
-                          aria-label="上一张封面"
-                          :disabled="!canNavigateReportCover(activeContentTab.id, -1)"
-                          @click="selectAdjacentReportCover(activeContentTab.id, -1)"
-                        >
-                          <el-icon><ArrowLeft /></el-icon>
-                        </button>
-                        <button
-                          type="button"
-                          class="report-cover-arrow is-next"
-                          title="下一张封面"
-                          aria-label="下一张封面"
-                          :disabled="!canNavigateReportCover(activeContentTab.id, 1)"
-                          @click="selectAdjacentReportCover(activeContentTab.id, 1)"
-                        >
-                          <el-icon><ArrowRight /></el-icon>
-                        </button>
-                        <span class="report-cover-count" aria-live="polite">
-                          {{ reportCoverIndexForTab(activeContentTab.id) + 1 }}
-                          /
-                          {{ reportCoverVersionsForTab(activeContentTab.id).length }}
-                        </span>
-                      </template>
-                      <figcaption v-if="isWechatCoverGenerating(activeContentTab.id)">
-                        正在重新生成封面，当前图片会保留到新版本完成
-                      </figcaption>
-                    </figure>
-                    <div
-                      v-else-if="isReportTab(activeContentTab.id) && isWechatCoverGenerating(activeContentTab.id)"
-                      class="report-cover-preview is-empty is-generating"
-                      role="status"
-                    >
-                      正在生成公众号封面…
-                    </div>
+                    <ReportCoverPreview
+                      v-if="isReportTab(activeContentTab.id)"
+                      :content-item-id="String(contentForTab(activeContentTab.id)?.id || '')"
+                      :title="reportDisplayTitle(activeContentTab.id)"
+                      :cover-url="contentForTab(activeContentTab.id)?.cover_url || ''"
+                      :history="reportCoverHistoryForTab(activeContentTab.id)"
+                      :generating="isWechatCoverGenerating(activeContentTab.id)"
+                      :switching="isWechatCoverSwitching(activeContentTab.id)"
+                      @select="$emit('select-wechat-cover', $event)"
+                    />
                     <div
                       v-if="selectedMarkdownPreview"
                       ref="reportMarkdown"
@@ -715,6 +674,7 @@ import {
 import PreviewFindBar from './PreviewFindBar.vue'
 import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
+import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
 
@@ -1750,45 +1710,6 @@ function reportCoverHistoryForTab(tabId) {
     active_cover_id: '',
     covers: [],
   }
-}
-
-function reportCoverVersionsForTab(tabId) {
-  const covers = reportCoverHistoryForTab(tabId).covers
-  return Array.isArray(covers) ? covers : []
-}
-
-function reportCoverIndexForTab(tabId) {
-  const history = reportCoverHistoryForTab(tabId)
-  const covers = reportCoverVersionsForTab(tabId)
-  const index = covers.findIndex((item) => item.id === history.active_cover_id)
-  return index >= 0 ? index : Math.max(0, covers.length - 1)
-}
-
-function reportCoverUrlForTab(tabId) {
-  const covers = reportCoverVersionsForTab(tabId)
-  const selected = covers[reportCoverIndexForTab(tabId)]
-  return selected?.url || props.contentForTab(tabId)?.cover_url || ''
-}
-
-function canNavigateReportCover(tabId, direction) {
-  if (
-    isWechatCoverGenerating(tabId)
-    || isWechatCoverSwitching(tabId)
-  ) return false
-  const nextIndex = reportCoverIndexForTab(tabId) + Number(direction || 0)
-  return nextIndex >= 0 && nextIndex < reportCoverVersionsForTab(tabId).length
-}
-
-function selectAdjacentReportCover(tabId, direction) {
-  if (!canNavigateReportCover(tabId, direction)) return
-  const contentItemId = String(props.contentForTab(tabId)?.id || '')
-  const nextIndex = reportCoverIndexForTab(tabId) + Number(direction || 0)
-  const cover = reportCoverVersionsForTab(tabId)[nextIndex]
-  if (!contentItemId || !cover?.id) return
-  emit('select-wechat-cover', {
-    contentItemId,
-    coverId: cover.id,
-  })
 }
 
 function requestWechatCoverGeneration(tabId) {
@@ -3313,124 +3234,6 @@ function exportVideoSubtitles(tabId) {
   min-height: 0;
   border: 0;
   background: var(--vk-bg-center);
-}
-
-.report-cover-preview {
-  position: relative;
-  display: grid;
-  width: 100%;
-  aspect-ratio: 900 / 383;
-  margin: 0 0 28px;
-  overflow: hidden;
-  border: 1px solid var(--vk-divider-subtle);
-  border-radius: var(--vk-radius-surface);
-  background: var(--vk-bg-center);
-}
-
-.report-cover-preview img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.report-cover-arrow,
-.report-cover-count {
-  position: absolute;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity var(--vk-motion-fast) var(--vk-ease-out);
-}
-
-.report-cover-arrow {
-  top: 50%;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--vk-action-fg) 36%, transparent);
-  border-radius: var(--vk-radius-pill);
-  background: color-mix(in srgb, var(--vk-text) 76%, transparent);
-  color: var(--vk-action-fg);
-  cursor: pointer;
-  transform: translateY(-50%);
-}
-
-.report-cover-arrow.is-previous {
-  left: var(--vk-space-cluster);
-}
-
-.report-cover-arrow.is-next {
-  right: var(--vk-space-cluster);
-}
-
-.report-cover-arrow:focus-visible {
-  opacity: 1;
-  outline: none;
-  box-shadow: var(--vk-focus-ring);
-}
-
-.report-cover-arrow:disabled {
-  cursor: default;
-}
-
-.report-cover-count {
-  right: var(--vk-space-cluster);
-  top: var(--vk-space-cluster);
-  padding: var(--vk-space-xs) var(--vk-space-control);
-  border-radius: var(--vk-radius-pill);
-  background: color-mix(in srgb, var(--vk-text) 72%, transparent);
-  color: var(--vk-action-fg);
-  font-size: var(--vk-type-meta-size);
-  line-height: var(--vk-leading-label);
-}
-
-.report-cover-preview:hover .report-cover-arrow,
-.report-cover-preview:hover .report-cover-count,
-.report-cover-preview:focus-within .report-cover-arrow,
-.report-cover-preview:focus-within .report-cover-count {
-  opacity: 1;
-}
-
-.report-cover-preview:hover .report-cover-arrow:disabled,
-.report-cover-preview:focus-within .report-cover-arrow:disabled {
-  opacity: 0.34;
-}
-
-.report-cover-preview.is-switching img {
-  opacity: 0.72;
-}
-
-.report-cover-preview.is-empty {
-  place-items: center;
-  color: var(--vk-muted);
-  font-size: var(--vk-type-label-size);
-}
-
-.report-cover-preview figcaption {
-  position: absolute;
-  right: var(--vk-space-cluster);
-  bottom: var(--vk-space-cluster);
-  left: var(--vk-space-cluster);
-  padding: var(--vk-space-control) var(--vk-space-cluster);
-  border-radius: var(--vk-radius-control);
-  background: color-mix(in srgb, var(--vk-text) 82%, transparent);
-  color: var(--vk-action-fg);
-  font-size: var(--vk-type-meta-size);
-  line-height: var(--vk-leading-label);
-  text-align: center;
-}
-
-@media (hover: none) {
-  .report-cover-arrow,
-  .report-cover-count {
-    opacity: 1;
-  }
-
-  .report-cover-arrow:disabled {
-    opacity: 0.34;
-  }
 }
 
 .capture-reader-inner {

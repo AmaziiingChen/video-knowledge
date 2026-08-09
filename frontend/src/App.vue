@@ -1347,7 +1347,7 @@ async function openKnowledgeEvidence(chunkId) {
     knowledgeEvidence.value = await response.json()
     contextSidebarOpen.value = true
   } catch (error) {
-    showToast(error.message || '无法打开引用原文', 'error')
+    ElMessage.error(error.message || '无法打开引用原文')
   }
 }
 

@@ -12,12 +12,12 @@ MAX_NEW_SOURCE_LINES = 1_000
 # shrinks the file; never raise one to make CI green.
 KNOWN_DEBT_BUDGETS = {
     "frontend/src/composables/useAppController.js": 5_395,
-    "frontend/src/workbench/EditorHost.vue": 4_818,
+    "frontend/src/workbench/EditorHost.vue": 4_621,
     "frontend/src/App.vue": 4_272,
-    "backend/services/database.py": 3_077,
+    "backend/services/database.py": 167,
     "backend/services/group_report_pipeline.py": 2_915,
     "frontend/src/styles/app.css": 2_410,
-    "frontend/src/workbench/PrimarySidebar.vue": 2_513,
+    "frontend/src/workbench/PrimarySidebar.vue": 2_307,
     "backend/services/wechat_publishing.py": 2_075,
     "backend/routers/content.py": 1_989,
     "backend/services/wechat_subscription.py": 1_964,

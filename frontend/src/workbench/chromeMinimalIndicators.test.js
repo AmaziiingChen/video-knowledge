@@ -6,6 +6,7 @@ const appSource = await readFile(new URL('../App.vue', import.meta.url), 'utf8')
 const chromeSource = await readFile(new URL('./WorkspaceChromeActions.vue', import.meta.url), 'utf8')
 const treeRowSource = await readFile(new URL('./SidebarTreeRow.vue', import.meta.url), 'utf8')
 const sidebarSource = await readFile(new URL('./PrimarySidebar.vue', import.meta.url), 'utf8')
+const contextMenuSource = await readFile(new URL('./LibraryContextMenu.vue', import.meta.url), 'utf8')
 
 test('keeps quick open keyboard-accessible without a permanent topbar trigger', () => {
   assert.doesNotMatch(appSource, /topbar-command-trigger/)
@@ -20,7 +21,7 @@ test('does not render notification badges outside the file tree', () => {
 test('keeps unread state scoped to the file tree', () => {
   assert.match(treeRowSource, /sidebar-tree-row-unread/)
   assert.match(sidebarSource, /unread-root|unread-content/)
-  assert.match(sidebarSource, /标记为已读/)
-  assert.match(sidebarSource, /标记为未读/)
+  assert.match(contextMenuSource, /标记为已读/)
+  assert.match(contextMenuSource, /标记为未读/)
   assert.match(sidebarSource, /set-content-viewed/)
 })

@@ -264,70 +264,11 @@
       @permanently-delete-trash="$emit('permanently-delete-prompt-trash', $event)"
     />
 
-    <Teleport to="body">
-      <Transition name="sidebar-context-menu">
-        <div
-          v-if="contentContextMenu"
-          ref="contentContextMenuRef"
-          class="sidebar-context-menu"
-          :style="contentContextMenuStyle"
-          role="menu"
-          :aria-label="contentContextMenu.node?.name ? `${contentContextMenu.node.name} 操作菜单` : '文件树菜单'"
-          @pointerdown.stop
-          @contextmenu.prevent
-          @keydown="handleContentContextMenuKeydown"
-        >
-          <template v-if="contentContextMenu.kind === 'blank'">
-            <button type="button" role="menuitem" class="sidebar-context-menu-item" @click="createUserGroupSeparator">
-              <span class="sidebar-context-menu-divider-icon" aria-hidden="true"></span>
-              <span>新建分割线</span>
-            </button>
-          </template>
-          <template v-else-if="contentContextMenu.node?.type === 'user-group-separator'">
-            <button type="button" role="menuitem" class="sidebar-context-menu-item is-danger" @click="deleteUserGroupSeparator">
-              <SvgMaskIcon :src="trashIcon" :size="16" />
-              <span>删除分割线</span>
-            </button>
-          </template>
-          <template v-else>
-            <button type="button" role="menuitem" class="sidebar-context-menu-item" @click="revealContextMenuLocation">
-              <SvgMaskIcon :src="finderIcon" :size="16" />
-              <span>在 Finder 中显示</span>
-            </button>
-            <button type="button" role="menuitem" class="sidebar-context-menu-item" @click="renameContextMenuNode">
-              <SvgMaskIcon :src="highlighterIcon" :size="16" />
-              <span>{{ contentContextMenu.node?.type === 'folder' ? '编辑文件夹名称' : '编辑文件名' }}</span>
-            </button>
-            <button
-              v-if="contentContextMenu.node?.type === 'folder'"
-              type="button"
-              role="menuitem"
-              class="sidebar-context-menu-item"
-              @click="toggleFolderPin"
-            >
-              <SvgMaskIcon :src="folderPinIcon" :size="16" />
-              <span>{{ contentContextMenu.node.raw?.is_pinned ? '取消置顶文件夹' : '置顶文件夹' }}</span>
-            </button>
-            <template v-if="isContentNode(contentContextMenu.node)">
-              <div class="sidebar-context-menu-separator" role="separator"></div>
-              <button type="button" role="menuitem" class="sidebar-context-menu-item" @click="setSelectedContentViewed(true)">
-                <SvgMaskIcon :src="markReadIcon" :size="16" />
-                <span>标记为已读</span>
-              </button>
-              <button type="button" role="menuitem" class="sidebar-context-menu-item" @click="setSelectedContentViewed(false)">
-                <SvgMaskIcon :src="markUnreadIcon" :size="16" />
-                <span>标记为未读</span>
-              </button>
-            </template>
-            <div class="sidebar-context-menu-separator" role="separator"></div>
-            <button type="button" role="menuitem" class="sidebar-context-menu-item is-danger" @click="deleteContextMenuNode">
-              <SvgMaskIcon :src="trashIcon" :size="16" />
-              <span>{{ contentContextMenu.node?.type === 'folder' ? '删除文件夹' : '删除文件' }}</span>
-            </button>
-          </template>
-        </div>
-      </Transition>
-    </Teleport>
+    <LibraryContextMenu
+      :menu="contentContextMenu"
+      @close="closeContentContextMenu($event)"
+      @select="handleContextMenuSelect"
+    />
   </aside>
 </template>
 
@@ -337,16 +278,13 @@ import { contentIsUnread } from '../features/library/contentReadState.js'
 import { CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import LibraryTrashPanel from './LibraryTrashPanel.vue'
+import LibraryContextMenu from './LibraryContextMenu.vue'
 import PromptFileTree from './PromptFileTree.vue'
 import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 const folderIcon = 'folder'
 const highlighterIcon = 'highlighter'
 const trashIcon = 'trash'
-const folderPinIcon = 'arrow.up.to.line'
-const finderIcon = 'finder'
-const markReadIcon = 'checkmark.circle'
-const markUnreadIcon = 'x.circle'
 const folderAddIcon = 'folder.badge.plus'
 const markdownImportIcon = 'square.and.arrow.down'
 const magnifyingglassIcon = 'magnifyingglass'
@@ -580,7 +518,6 @@ const treeIsScrolling = ref(false)
 const selectionBox = ref(null)
 const selectionStart = ref(null)
 const contentContextMenu = ref(null)
-const contentContextMenuRef = ref(null)
 const separatorLayoutState = loadUserGroupSeparators()
 const userGroupSeparators = ref(separatorLayoutState.separators)
 const separatorLayoutInitialized = ref(separatorLayoutState.initialized)
@@ -968,15 +905,6 @@ const selectedNodes = computed(() => {
 })
 const selectedContentNodes = computed(() => selectedNodes.value.filter(isContentNode))
 
-const contentContextMenuStyle = computed(() => {
-  if (!contentContextMenu.value) return {}
-  return {
-    left: `${contentContextMenu.value.x}px`,
-    top: `${contentContextMenu.value.y}px`,
-    visibility: contentContextMenu.value.positioned ? 'visible' : 'hidden',
-  }
-})
-
 function isRootLayoutNode(node) {
   return node?.type === 'user-group-separator' || (node?.type === 'folder' && node.depth === 0)
 }
@@ -1215,8 +1143,6 @@ onMounted(() => {
     treeViewportHeight.value = tree.clientHeight
   })
   treeResizeObserver.observe(tree)
-  window.addEventListener('pointerdown', closeContentContextMenu)
-  window.addEventListener('keydown', closeContentContextMenuOnEscape)
 })
 
 onBeforeUnmount(() => {
@@ -1225,8 +1151,6 @@ onBeforeUnmount(() => {
   treeResizeObserver = null
   window.clearTimeout(treeScrollEndTimer)
   treeScrollEndTimer = null
-  window.removeEventListener('pointerdown', closeContentContextMenu)
-  window.removeEventListener('keydown', closeContentContextMenuOnEscape)
 })
 
 function isFolderOpen(id) {
@@ -1426,22 +1350,7 @@ function openContentContextMenu(menu, event) {
     ...menu,
     ...contextMenuPosition(event, trigger),
     trigger,
-    positioned: false,
   }
-  nextTick(positionContentContextMenu)
-}
-
-function positionContentContextMenu() {
-  const menu = contentContextMenu.value
-  const element = contentContextMenuRef.value
-  if (!menu || !element) return
-  const margin = 8
-  const x = Math.max(margin, Math.min(menu.x, window.innerWidth - element.offsetWidth - margin))
-  const y = Math.max(margin, Math.min(menu.y, window.innerHeight - element.offsetHeight - margin))
-  contentContextMenu.value = { ...menu, x, y, positioned: true }
-  nextTick(() => {
-    contentContextMenuRef.value?.querySelector('[role="menuitem"]:not(:disabled)')?.focus()
-  })
 }
 
 function openTreeContextMenu(event) {
@@ -1482,33 +1391,6 @@ function closeContentContextMenu({ restoreFocus = false } = {}) {
   const trigger = contentContextMenu.value?.trigger
   contentContextMenu.value = null
   if (restoreFocus && trigger) nextTick(() => trigger.focus())
-}
-
-function closeContentContextMenuOnEscape(event) {
-  if (event.key !== 'Escape' || !contentContextMenu.value) return
-  event.preventDefault()
-  closeContentContextMenu({ restoreFocus: true })
-}
-
-function handleContentContextMenuKeydown(event) {
-  if (event.key === 'Tab') {
-    event.preventDefault()
-    closeContentContextMenu({ restoreFocus: true })
-    return
-  }
-  const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End']
-  if (!keys.includes(event.key)) return
-  const menuItems = Array.from(contentContextMenuRef.value?.querySelectorAll('[role="menuitem"]:not(:disabled)') || [])
-  if (!menuItems.length) return
-  event.preventDefault()
-  const focusedIndex = menuItems.indexOf(document.activeElement)
-  const currentIndex = focusedIndex >= 0 ? focusedIndex : 0
-  let nextIndex = currentIndex
-  if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1 + menuItems.length) % menuItems.length
-  if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + menuItems.length) % menuItems.length
-  if (event.key === 'Home') nextIndex = 0
-  if (event.key === 'End') nextIndex = menuItems.length - 1
-  menuItems[nextIndex]?.focus()
 }
 
 function setSelectedContentViewed(viewed) {
@@ -1565,6 +1447,18 @@ function deleteUserGroupSeparator() {
   const groups = userGroupSeparators.value.filter((group) => group.id !== groupId)
   userGroupSeparators.value = groups
   saveUserGroupSeparators(groups)
+}
+
+function handleContextMenuSelect({ id, payload } = {}) {
+  switch (id) {
+    case 'create-separator': createUserGroupSeparator(); break
+    case 'delete-separator': deleteUserGroupSeparator(); break
+    case 'reveal': revealContextMenuLocation(); break
+    case 'rename': renameContextMenuNode(); break
+    case 'toggle-pin': toggleFolderPin(); break
+    case 'set-viewed': setSelectedContentViewed(Boolean(payload)); break
+    case 'delete': deleteContextMenuNode(); break
+  }
 }
 
 function markFolderViewed(folderNode) {
@@ -2303,102 +2197,6 @@ function cancelBoxSelection() {
   background: var(--vk-drag-fill);
 }
 
-.sidebar-context-menu {
-  position: fixed;
-  z-index: 3200;
-  display: grid;
-  width: max-content;
-  min-width: 196px;
-  max-width: min(280px, calc(100vw - 16px));
-  padding: 5px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--vk-border) 78%, transparent);
-  border-radius: var(--vk-radius-surface);
-  background: var(--vk-bg-panel);
-  box-shadow: 0 10px 26px color-mix(in srgb, var(--vk-text) 12%, transparent);
-  transform-origin: top left;
-}
-
-.sidebar-context-menu-item {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  min-height: 32px;
-  gap: var(--vk-space-control);
-  width: 100%;
-  padding: 0 9px;
-  border: 0;
-  border-radius: var(--vk-radius-control);
-  background: transparent;
-  color: var(--vk-text);
-  font: inherit;
-  font-size: var(--vk-type-label-size);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sidebar-context-menu-item > span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-context-menu-item :deep(.svg-mask-icon) { opacity: .72; }
-
-.sidebar-context-menu-item:hover,
-.sidebar-context-menu-item:focus-visible {
-  outline: none;
-  background: color-mix(in srgb, var(--vk-bg-hover) 78%, var(--vk-bg-panel));
-}
-
-.sidebar-context-menu-item:hover :deep(.svg-mask-icon),
-.sidebar-context-menu-item:focus-visible :deep(.svg-mask-icon) { opacity: 1; }
-
-.sidebar-context-menu-item.is-danger {
-  color: var(--vk-danger, var(--vk-error-text));
-}
-
-.sidebar-context-menu-item.is-danger:hover,
-.sidebar-context-menu-item.is-danger:focus-visible {
-  background: color-mix(in srgb, var(--vk-danger, var(--vk-error-text)) 8%, var(--vk-bg-panel));
-}
-
-.sidebar-context-menu-separator {
-  height: 1px;
-  margin: 5px 4px;
-  background: color-mix(in srgb, var(--vk-border) 72%, transparent);
-}
-
-.sidebar-context-menu-divider-icon {
-  position: relative;
-  display: block;
-  width: 16px;
-  height: 16px;
-}
-
-.sidebar-context-menu-divider-icon::after {
-  position: absolute;
-  top: 50%;
-  right: 1px;
-  left: 1px;
-  height: 1px;
-  background: currentColor;
-  content: '';
-  opacity: .66;
-}
-
-.sidebar-context-menu-enter-active,
-.sidebar-context-menu-leave-active {
-  transition: opacity 120ms var(--vk-ease-out), transform 120ms var(--vk-ease-out);
-}
-
-.sidebar-context-menu-enter-from,
-.sidebar-context-menu-leave-to {
-  opacity: 0;
-  transform: scale(0.97);
-}
-
 .sidebar-inline-input {
   width: 100%;
   min-width: 0;
@@ -2435,9 +2233,7 @@ function cancelBoxSelection() {
   .sidebar-selection-bar-enter-active,
   .sidebar-selection-bar-leave-active,
   .sidebar-trash-list-enter-active,
-  .sidebar-trash-list-leave-active,
-  .sidebar-context-menu-enter-active,
-  .sidebar-context-menu-leave-active {
+  .sidebar-trash-list-leave-active {
     transition: opacity var(--vk-motion-fast) ease;
   }
 
@@ -2446,9 +2242,7 @@ function cancelBoxSelection() {
   .sidebar-selection-bar-enter-from,
   .sidebar-selection-bar-leave-to,
   .sidebar-trash-list-enter-from,
-  .sidebar-trash-list-leave-to,
-  .sidebar-context-menu-enter-from,
-  .sidebar-context-menu-leave-to {
+  .sidebar-trash-list-leave-to {
     transform: none;
   }
 }
