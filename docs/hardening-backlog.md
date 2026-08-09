@@ -37,9 +37,10 @@ lines.
   readers; each reader receives a mounted behavior test.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
   tree, drag, search and trash behavior at their owners.
-- [ ] Replace the idle one-second full Markdown scan with a deterministic
-  directory fingerprint/backoff strategy; measure idle CPU, I/O and network
-  requests before setting a budget.
+- [x] Replace the idle one-second Markdown scan with deterministic adaptive
+  backoff: changes stay on a two-second cadence, while an unchanged library
+  backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network
+  path and its cadence is covered by a deterministic wait-budget test.
 - [ ] Split `routers/content.py` into transport schemas, listing, analytics,
   import and mutation domains.  Move new SQL out of routers and keep router
   registration/API paths stable.

@@ -22,6 +22,7 @@ class SearchIndexSchedulerTests(unittest.TestCase):
         scheduler._stop_event.set()
 
         with patch.object(scheduler, "sync_once") as sync_once:
+            sync_once.return_value = {"updated_count": 0, "pending_count": 0}
             scheduler._run()
 
         sync_once.assert_called_once_with()
@@ -84,3 +85,37 @@ class SearchIndexSchedulerTests(unittest.TestCase):
 
         self.assertEqual([first["updated_count"], second["updated_count"], third["updated_count"]], [2, 2, 1])
         self.assertEqual(index_document.call_count, 5)
+
+    def test_idle_scans_back_off_but_pending_changes_reset_to_the_short_cadence(self):
+        scheduler = SearchIndexScheduler(interval_seconds=0.5, max_idle_interval_seconds=4)
+
+        self.assertEqual(scheduler._schedule_next_sync({"updated_count": 0, "pending_count": 0}), 1)
+        self.assertEqual(scheduler._schedule_next_sync({"updated_count": 0, "pending_count": 0}), 2)
+        self.assertEqual(scheduler._schedule_next_sync({"updated_count": 0, "pending_count": 0}), 4)
+        self.assertEqual(scheduler._schedule_next_sync({"updated_count": 0, "pending_count": 0}), 4)
+        self.assertEqual(scheduler._schedule_next_sync({"updated_count": 0, "pending_count": 1}), 0.5)
+
+    def test_run_uses_the_backoff_cadence_and_resets_after_detecting_work(self):
+        class RecordingEvent:
+            def __init__(self):
+                self.waits: list[float] = []
+
+            def wait(self, timeout):
+                self.waits.append(timeout)
+                return len(self.waits) >= 4
+
+        scheduler = SearchIndexScheduler(interval_seconds=0.5, max_idle_interval_seconds=4)
+        scheduler._stop_event = RecordingEvent()
+        with patch.object(
+            scheduler,
+            "sync_once",
+            side_effect=[
+                {"updated_count": 0, "pending_count": 0},
+                {"updated_count": 0, "pending_count": 0},
+                {"updated_count": 0, "pending_count": 0},
+                {"updated_count": 1, "pending_count": 0},
+            ],
+        ):
+            scheduler._run()
+
+        self.assertEqual(scheduler._stop_event.waits, [1, 2, 4, 0.5])
