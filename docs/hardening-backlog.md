@@ -73,8 +73,10 @@ lines.
   registration/API paths stable.
   AI/OCR call history and daily usage now live in `routers/content_usage.py`;
   response mapping, deletion cleanup, folders, trash, source groups and
-  Markdown imports now have dedicated service/router owners. Local-file import,
-  content read/update and capture endpoints remain separate follow-up cuts.
+  Markdown imports now have dedicated service/router owners. Article
+  preparation/OCR queue endpoints now live in `routers/content_preparation.py`.
+  Local-file import, content read/update and capture endpoints remain separate
+  follow-up cuts.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now
