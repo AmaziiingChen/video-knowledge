@@ -275,8 +275,18 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contentIsUnread } from '../features/library/contentReadState.js'
-import { buildLibraryTreeNodes, compareLibraryTreeNodes, sortLibraryNodes } from '../features/library/libraryTreeModel.js'
+import { buildLibraryTreeNodes, sortLibraryNodes } from '../features/library/libraryTreeModel.js'
 import { loadLibraryTreePreferences, loadOpenFolderIds as loadSavedOpenFolderIds, saveLibraryTreePreferences, saveOpenFolderIds as saveSavedOpenFolderIds } from '../features/library/libraryTreePreferences.js'
+import {
+  createDefaultSeparators,
+  isRootLayoutNode,
+  layoutSortOrder,
+  migrateUserGroupSeparators,
+  presentLibraryNodesWithSeparators,
+  rootFolderNodes,
+  separatorSortOrder,
+  sortOrderBetween,
+} from './libraryGroupLayout.js'
 import { CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import LibraryTrashPanel from './LibraryTrashPanel.vue'
@@ -474,13 +484,6 @@ const unreadRootOpen = ref(false)
 const pinnedRootOpen = ref(true)
 const TREE_ROW_HEIGHT = 26
 const TREE_VIRTUAL_OVERSCAN = 12
-const ROOT_LIBRARY_GROUPS = {
-  inbox: new Set(['待整理收藏']),
-  video: new Set(['抖音', 'B站']),
-  sources: new Set(['微信公众号', '微信小程序', '校园官网', 'RSS订阅', '外部导入']),
-  reports: new Set(['日报', '周报', '月报', '区间汇总', '报告']),
-}
-const ROOT_LIBRARY_GROUP_ORDER = ['inbox', 'video', 'sources', 'reports', 'other']
 const searchScopeOptions = [
   { value: 'all', label: '全部内容', description: '标题、摘要与正文' },
   { value: 'title', label: '文件名', description: '只匹配资料标题' },
@@ -600,50 +603,7 @@ const visibleLibraryNodes = computed(() => buildLibraryTreeNodes({
 
 const presentationLibraryNodes = computed(() => {
   if (searchActive.value || !userGroupSeparators.value.length) return visibleLibraryNodes.value
-  const rootsById = new Map(
-    visibleLibraryNodes.value
-      .filter((node) => node.type === 'folder' && node.depth === 0)
-      .map((node) => [String(node.id), node]),
-  )
-  const separators = userGroupSeparators.value
-    .map((separator) => ({
-      ...separator,
-      sortOrder: separatorSortOrder(separator, rootsById),
-    }))
-    .sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id))
-  const result = []
-  let separatorIndex = 0
-  const appendBefore = (sortOrder) => {
-    while (separatorIndex < separators.length && separators[separatorIndex].sortOrder <= sortOrder) {
-      const separator = separators[separatorIndex]
-      result.push({
-        type: 'user-group-separator',
-        id: separator.id,
-        name: '',
-        depth: 0,
-        sortOrder: separator.sortOrder,
-        raw: separator,
-      })
-      separatorIndex += 1
-    }
-  }
-  for (const node of visibleLibraryNodes.value) {
-    if (node.type === 'folder' && node.depth === 0) appendBefore(Number(node.sortOrder || 0))
-    result.push(node)
-  }
-  while (separatorIndex < separators.length) {
-    const separator = separators[separatorIndex]
-    result.push({
-      type: 'user-group-separator',
-      id: separator.id,
-      name: '',
-      depth: 0,
-      sortOrder: separator.sortOrder,
-      raw: separator,
-    })
-    separatorIndex += 1
-  }
-  return result
+  return presentLibraryNodesWithSeparators(visibleLibraryNodes.value, userGroupSeparators.value)
 })
 
 const renderedLibraryNodes = computed(() => {
@@ -695,23 +655,6 @@ const selectedNodes = computed(() => {
 })
 const selectedContentNodes = computed(() => selectedNodes.value.filter(isContentNode))
 
-function isRootLayoutNode(node) {
-  return node?.type === 'user-group-separator' || (node?.type === 'folder' && node.depth === 0)
-}
-
-function layoutSortOrder(node) {
-  return Number(node?.sortOrder ?? node?.raw?.sortOrder ?? 0)
-}
-
-function sortOrderBetween(previous, next) {
-  const before = previous ? layoutSortOrder(previous) : null
-  const after = next ? layoutSortOrder(next) : null
-  if (before !== null && after !== null && after > before) return (before + after) / 2
-  if (before !== null) return before + 1
-  if (after !== null) return after - 1
-  return 0
-}
-
 function rootLayoutEntries({ excludeFolderIds = new Set(), excludeSeparatorIds = new Set() } = {}) {
   const folders = visibleLibraryNodes.value.filter((node) => (
     node.type === 'folder' && node.depth === 0 && !excludeFolderIds.has(String(node.id))
@@ -721,7 +664,7 @@ function rootLayoutEntries({ excludeFolderIds = new Set(), excludeSeparatorIds =
     .map((separator) => ({
       type: 'user-group-separator',
       id: separator.id,
-      sortOrder: separatorSortOrder(separator),
+      sortOrder: separatorSortOrder(separator, rootFolderNodes(props.libraryFolders)),
       raw: separator,
     }))
   return [...folders, ...separators].sort((left, right) => (
@@ -778,90 +721,18 @@ const selectionBoxStyle = computed(() => {
   }
 })
 
-function compareRootTreeNode(left, right) {
-  const groupOrder = ROOT_LIBRARY_GROUP_ORDER.indexOf(rootLibraryGroup(left))
-  const otherGroupOrder = ROOT_LIBRARY_GROUP_ORDER.indexOf(rootLibraryGroup(right))
-  if (groupOrder !== otherGroupOrder) return groupOrder - otherGroupOrder
-  return compareLibraryTreeNodes(left, right)
-}
-
-function rootLibraryGroup(node) {
-  if (node?.type !== 'folder') return 'other'
-  const presentationGroup = String(node.raw?.presentation_group || '')
-  if (presentationGroup === 'manual:default') return 'inbox'
-  if (presentationGroup.startsWith('provider:')) {
-    const provider = presentationGroup.slice('provider:'.length)
-    if (provider === 'douyin' || provider === 'bilibili') return 'video'
-    if (['wechat', 'campus', 'wechat_miniprogram', 'rss', 'xiaohongshu'].includes(provider)) return 'sources'
-  }
-  if (presentationGroup === 'external') return 'sources'
-  // Legacy folders may not have a stable binding until the next backend
-  // refresh. Retain the old name fallback for those existing rows only.
-  const name = String(node.name || '').trim()
-  if (ROOT_LIBRARY_GROUPS.inbox.has(name)) return 'inbox'
-  if (ROOT_LIBRARY_GROUPS.video.has(name)) return 'video'
-  if (ROOT_LIBRARY_GROUPS.sources.has(name)) return 'sources'
-  if (ROOT_LIBRARY_GROUPS.reports.has(name)) return 'reports'
-  return 'other'
-}
-
-function rootFolderNodes() {
-  return props.libraryFolders
-    .filter((folder) => !folder.parent_folder_id && !folder.is_pinned)
-    .map((folder) => ({
-      type: 'folder',
-      id: folder.id,
-      name: folder.name,
-      sortOrder: Number(folder.sort_order || 0),
-      raw: folder,
-    }))
-}
-
-function separatorSortOrder(separator, rootsById = null) {
-  const saved = Number(separator?.sortOrder)
-  if (Number.isFinite(saved)) return saved
-  const roots = rootsById || new Map(rootFolderNodes().map((node) => [String(node.id), node]))
-  const anchor = roots.get(String(separator?.beforeFolderId || ''))
-  if (anchor) return Number(anchor.sortOrder || 0) - 0.5
-  const last = [...roots.values()].sort(compareLibraryTreeNodes).at(-1)
-  return last ? Number(last.sortOrder || 0) + 1 : 0
-}
-
-function createDefaultSeparators() {
-  const roots = rootFolderNodes().sort(compareRootTreeNode)
-  const separators = []
-  let previous = null
-  for (const node of roots) {
-    if (previous && rootLibraryGroup(node) !== rootLibraryGroup(previous)) {
-      const before = Number(previous.sortOrder || 0)
-      const after = Number(node.sortOrder || 0)
-      separators.push({
-        id: window.crypto?.randomUUID?.() || `separator-${Date.now()}-${separators.length}`,
-        sortOrder: after > before ? (before + after) / 2 : after - 0.5,
-      })
-    }
-    previous = node
-  }
-  return separators
-}
-
 watch(
   () => props.libraryFolders.map((folder) => `${folder.id}:${folder.parent_folder_id || ''}:${folder.sort_order}:${folder.is_pinned ? 1 : 0}`).join('|'),
   () => {
-    const roots = rootFolderNodes()
+    const roots = rootFolderNodes(props.libraryFolders)
     if (!roots.length) return
     if (!separatorLayoutInitialized.value) {
-      userGroupSeparators.value = createDefaultSeparators()
+      userGroupSeparators.value = createDefaultSeparators(props.libraryFolders)
       separatorLayoutInitialized.value = true
       saveUserGroupSeparators(userGroupSeparators.value)
       return
     }
-    const rootsById = new Map(roots.map((node) => [String(node.id), node]))
-    const migrated = userGroupSeparators.value.map((separator) => ({
-      ...separator,
-      sortOrder: separatorSortOrder(separator, rootsById),
-      beforeFolderId: undefined,
-    }))
+    const migrated = migrateUserGroupSeparators(userGroupSeparators.value, props.libraryFolders)
     if (migrated.some((separator, index) => separator.sortOrder !== userGroupSeparators.value[index]?.sortOrder || userGroupSeparators.value[index]?.beforeFolderId)) {
       userGroupSeparators.value = migrated
       saveUserGroupSeparators(migrated)
