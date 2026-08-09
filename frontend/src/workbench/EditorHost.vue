@@ -662,6 +662,7 @@ import { useReadingProgressController } from './useReadingProgressController.js'
 import { useReaderSelectionController } from './useReaderSelectionController.js'
 import { useRemoteArticlePreviewController } from './useRemoteArticlePreviewController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
+import { articleOutlineHeadingSelector, createArticleOutlineModel } from './articleOutlineModel.js'
 import { dispatchEditorContentAction } from './editorContentActions.js'
 import { editorContentDetailRows } from './editorContentDetails.js'
 import { createEditorContentKind } from './editorContentKind.js'
@@ -795,6 +796,12 @@ const {
 } = createEditorReportPresentation({
   contentForTab: props.contentForTab,
   workspaceTabById: props.workspaceTabById,
+})
+const {
+  articleOutlineHeadingLevel,
+  isArticleOutlineHeading,
+} = createArticleOutlineModel({
+  activeArticleTitle: () => props.contentForTab(activeContentTab.value?.id)?.title,
 })
 
 const {
@@ -1277,31 +1284,6 @@ function requestWechatCoverGeneration(tabId) {
   const content = props.contentForTab(tabId)
   if (!content) return
   emit(content.cover_url ? 'regenerate-wechat-cover' : 'generate-wechat-cover', content)
-}
-
-const articleOutlineHeadingSelector = 'h1, h2, h3, h4, .article-section-heading'
-
-function normalizedOutlineText(value) {
-  return String(value || '').replace(/\s+/gu, ' ').trim()
-}
-
-function isArticleOutlineHeading(element, text) {
-  const normalized = normalizedOutlineText(text)
-  if (normalized.length < 2 || normalized.length > 84) return false
-  // The reader already renders the article title and metadata above the
-  // iframe. Do not make a duplicated page H1 into a navigation waypoint.
-  const title = normalizedOutlineText(props.contentForTab(activeContentTab.value?.id)?.title)
-  if (title && normalized === title) return false
-  if (/^(?:原文内容|图片文字\s*\d*|微信公众号|微信公众平台|校园论坛)$/u.test(normalized)) return false
-  if (element.closest('table, figure, figcaption, [data-wechat-image-ocr]')) return false
-  return true
-}
-
-function articleOutlineHeadingLevel(element) {
-  const tag = String(element?.tagName || '').toUpperCase()
-  // The rail intentionally communicates two levels. Treat captured H1/H2 as
-  // primary sections and H3/H4 or recovered numbered text as children.
-  return ['H1', 'H2'].includes(tag) ? 2 : 3
 }
 
 function isMiniProgramCaptureTab(tabId) {
