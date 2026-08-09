@@ -48,7 +48,10 @@ lines.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
-  now live in `services/campus_digest_identity.py`; the remaining generation
+  now live in `services/campus_digest_identity.py`. Embedding API selection,
+  local-model loading and deterministic fallback vectors now live in
+  `services/campus_digest_embeddings.py`; the shared progress-event contract
+  now lives in `services/campus_digest_progress.py`. The remaining generation
   and persistence flow will be separated in behavior-preserving slices.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
