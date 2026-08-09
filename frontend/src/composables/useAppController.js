@@ -81,6 +81,7 @@ import { useLibraryTrashController } from '../features/library/useLibraryTrashCo
 import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
+import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -130,8 +131,6 @@ export function useAppController() {
   } = useQaSessionController()
 
   const activeView = ref('library')
-  const completionNotifications = ref([])
-  let completionNotificationTimer = null
   const aiCallsByContentId = reactive({})
   const dailyAiTokenUsage = ref({
     period_start: '',
@@ -263,6 +262,18 @@ export function useAppController() {
     }
   })
   const selectedContentItem = ref(null)
+  const {
+    loadCompletionNotifications,
+    openCompletionNotification,
+    startCompletionNotificationPolling,
+    stopCompletionNotificationPolling,
+  } = useCompletionNotificationController({
+    allContentItems,
+    getContentItemDetail,
+    openContentTab,
+    activeView,
+    ribbonItems,
+  })
   const {
     cookieConfigured,
     cookieState,
@@ -1120,44 +1131,6 @@ export function useAppController() {
 
   function openContentFromSidebar(item) {
     openContentTab(item)
-  }
-
-  async function loadCompletionNotifications() {
-    try {
-      const response = await axios.get(`${API}/completion-notifications`, { params: { limit: 20 }, timeout: 10000 })
-      completionNotifications.value = Array.isArray(response.data) ? response.data : []
-      const pushToTray = window.knowledgeHubDesktop?.setPendingNotifications
-      if (typeof pushToTray === 'function') await pushToTray(completionNotifications.value)
-    } catch {
-      // This auxiliary refresh must not interrupt the workbench.
-    }
-  }
-
-  async function openCompletionNotification(notification) {
-    const id = String(notification?.id || '')
-    const contentItemId = String(notification?.content_item_id || '')
-    if (contentItemId) {
-      const content = allContentItems.value.find((item) => String(item.id) === contentItemId) || await getContentItemDetail(contentItemId)
-      if (content) await openContentTab(content)
-    } else if (notification?.target_view) {
-      const targetView = String(notification.target_view)
-      activeView.value = ribbonItems.some((item) => item.view === targetView) ? targetView : 'library'
-    }
-    if (id) {
-      await axios.post(`${API}/completion-notifications/seen`, { ids: [id] }, { timeout: 10000 }).catch(() => {})
-      await loadCompletionNotifications()
-    }
-  }
-
-  function startCompletionNotificationPolling() {
-    if (completionNotificationTimer) return
-    completionNotificationTimer = window.setInterval(loadCompletionNotifications, 15000)
-  }
-
-  function stopCompletionNotificationPolling() {
-    if (!completionNotificationTimer) return
-    window.clearInterval(completionNotificationTimer)
-    completionNotificationTimer = null
   }
 
   function openSearchResult(item) {
