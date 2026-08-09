@@ -74,6 +74,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `services/group_report_models.py` | immutable report inputs, outputs and progress contracts | model calls, persistence, Markdown rendering |
 | `services/creator_sync_models.py` | immutable creator-video, preview and sync-result contracts plus UI-safe sync failures | browser capture, source persistence, task creation and scheduling |
 | `services/creator_capture_status.py` | thread-safe creator-browser capture status and bounded provider diagnostics | browser automation, source persistence and task execution |
+| `services/creator_sync_policy.py` | creator subscription validation, processing-mode resolution and retry classification | browser capture, SQLite I/O and task creation |
 | `services/group_report_markdown.py` | deterministic citation and Markdown normalization | report planning, provider calls, summary cache, task state |
 | `routers/content_usage.py` | AI/OCR call history and daily usage observability HTTP transport | library content mutation, capture, folder or import behavior |
 

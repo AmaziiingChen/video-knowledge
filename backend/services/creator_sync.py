@@ -18,6 +18,14 @@ from services.creator_capture_status import (
 )
 from services.creator_metadata import save_creator_work_metadata
 from services.creator_sync_models import CreatorPreview, CreatorSyncError, CreatorSyncResult, CreatorVideo
+from services.creator_sync_policy import (
+    creator_error_category as _creator_error_category,
+    creator_retry_minutes as _creator_retry_minutes,
+    effective_processing_mode as _effective_processing_mode,
+    valid_interval as _valid_interval,
+    valid_processing_mode as _valid_processing_mode,
+    valid_queue_limit as _valid_queue_limit,
+)
 from services.database import connect, initialize_database, utc_now_iso
 from services.network_policy import direct_browser_launch_options
 from services.pipeline_runner import PipelineRequest
@@ -30,8 +38,6 @@ PAGE_SIZE = 20
 CREATOR_PAGE_RESPONSE_WAIT_MS = 5_000
 MAX_CREATOR_LOAD_ATTEMPTS = 3
 MAX_CREATOR_CAPTURE_RESPONSE_PAGES = 60
-ALLOWED_SYNC_INTERVAL_MINUTES = {30, 60, 180, 360, 720, 1440}
-CREATOR_PROCESSING_MODES = {"metadata", "transcript", "full"}
 DEFAULT_CREATOR_QUEUE_LIMIT = 1
 # Only the first subscription has a user-visible discovery breadth. Scheduled
 # checks scan back from the newest item until they reach an item already linked
@@ -650,47 +656,6 @@ def _creator_capture_url(source_url: str, *, provider: str, source_kind: str, cr
     return _canonical_creator_url(provider, source_kind, creator_key)
 
 
-def _valid_interval(value: object) -> int:
-    try:
-        interval = int(value)
-    except (TypeError, ValueError) as exc:
-        raise CreatorSyncError("检查频率无效") from exc
-    if interval not in ALLOWED_SYNC_INTERVAL_MINUTES:
-        choices = "、".join(str(item) for item in sorted(ALLOWED_SYNC_INTERVAL_MINUTES))
-        raise CreatorSyncError(f"检查频率必须是 {choices} 分钟之一")
-    return interval
-
-
-def _valid_processing_mode(value: object) -> str:
-    mode = str(value or "").strip().lower()
-    if mode not in CREATOR_PROCESSING_MODES:
-        raise CreatorSyncError("处理方式必须是 metadata、transcript 或 full")
-    return mode
-
-
-def _valid_queue_limit(value: object) -> int:
-    try:
-        limit = int(value)
-    except (TypeError, ValueError) as exc:
-        raise CreatorSyncError("每轮入队上限无效") from exc
-    if not 1 <= limit <= MAX_CREATOR_SCAN_ITEMS:
-        raise CreatorSyncError(f"每轮入队上限必须在 1 到 {MAX_CREATOR_SCAN_ITEMS} 之间")
-    return limit
-
-
-def _effective_processing_mode(source_row, requested_mode: str | None, requested_auto_process: bool | None) -> str:
-    if requested_mode is not None:
-        return _valid_processing_mode(requested_mode)
-    if requested_auto_process is not None:
-        return "full" if requested_auto_process else "metadata"
-    if source_row:
-        stored_mode = source_row["processing_mode"] if "processing_mode" in source_row.keys() else None
-        if stored_mode:
-            return _valid_processing_mode(stored_mode)
-        return "full" if bool(source_row["auto_process"]) else "metadata"
-    return "full"
-
-
 def _selected_preview_videos(videos: list[CreatorVideo], selected_video_ids: list[str] | None) -> list[CreatorVideo]:
     if selected_video_ids is None:
         return videos
@@ -803,30 +768,6 @@ def _record_sync_error(source_id: str, message: str) -> None:
             (new_id(), source_id, category, str(message or "同步失败")[:500], now.isoformat()),
         )
         connection.commit()
-
-
-def _creator_error_category(message: str) -> str:
-    text = str(message or "").lower()
-    # -352 is Bilibili's risk-control response.  The combined browser/WBI
-    # error can also mention the saved login state, but that does not mean the
-    # session is expired.  Treat it as a transient remote failure so the UI
-    # gives an accurate diagnosis and the source retries on the normal path.
-    if any(token in text for token in ("错误码 -352", "error code -352", "风控", "风险校验", "risk control")):
-        return "remote"
-    if any(token in text for token in ("cookie", "登录", "403", "412", "授权")):
-        return "authorization"
-    if any(token in text for token in ("timeout", "超时", "暂时", "网络", "拒绝")):
-        return "remote"
-    if any(token in text for token in ("chromium", "浏览器组件", "内置浏览器")):
-        return "runtime"
-    return "unknown"
-
-
-def _creator_retry_minutes(category: str, failures: int, configured_interval: int) -> int:
-    if category == "authorization":
-        return max(configured_interval, 360)
-    base = 30 if category == "remote" else 60
-    return min(720, max(configured_interval, base * (2 ** min(max(0, failures - 1), 4))))
 
 
 def _parse_creator_url(source_url: str) -> tuple[str, str, str]:
