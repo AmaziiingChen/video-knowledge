@@ -4,7 +4,6 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import logging
-from pathlib import Path
 from threading import Event, Lock, Thread
 import time
 from typing import Any

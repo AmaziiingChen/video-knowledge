@@ -2,7 +2,6 @@ import subprocess
 import json
 import re
 import time
-import shutil
 import threading
 import httpx
 from pathlib import Path

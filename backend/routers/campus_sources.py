@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from config import settings
 from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_article_html
 from services.cache import cache_dir_for_url, write_cache_meta
 from services.campus_sources import CAMPUS_SOURCES, CampusArticle, discover_campus_articles, get_campus_source

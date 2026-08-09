@@ -10,7 +10,7 @@ import httpx
 from config import settings
 from services.clipboard_watcher import extract_supported_links
 from services.pipeline_runner import PipelineRequest
-from services.task_manager import TaskRecord, task_manager
+from services.task_manager import task_manager
 from services.telegram_settings import load_telegram_settings, save_telegram_watcher_checkpoint
 from services.manual_collection_settings import manual_collection_settings
 

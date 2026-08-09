@@ -4,7 +4,6 @@ from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
 import hashlib
 import json
 import math
@@ -28,7 +27,6 @@ from services.database import connect, initialize_database, utc_now_iso
 from services.llm_provider import LLMMessage, LLMProvider, LLMResponse, LLMUsage, default_llm_provider
 from services.llm_settings import campus_embedding_enabled
 from services.prompt_file_store import managed_prompt_text
-from services.repository import new_id
 
 
 FACT_PROMPT_VERSION = "campus-publishing-card-v2"

@@ -13,7 +13,7 @@ from services.content_deletion import (
 )
 from services.database import connect, initialize_database, utc_now_iso
 from services.library_folder_tree import folder_tree_ids
-from services.repository import ContentRepository, new_id
+from services.repository import ContentRepository
 
 
 router = APIRouter()

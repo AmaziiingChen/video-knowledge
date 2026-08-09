@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from pathlib import Path
 import uuid
 from services.downloader import download_video, get_video_info
 from config import settings
@@ -24,7 +23,7 @@ def download(req: DownloadRequest):
     output_dir = settings.data_dir / task_id
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    video_info = get_video_info(req.url, req.platform)
+    get_video_info(req.url, req.platform)
     
     result = download_video(req.url, req.platform, output_dir)
     if result.success:

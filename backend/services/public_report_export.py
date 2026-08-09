@@ -59,7 +59,6 @@ def export_report(content_item_id: str, *, public_base_url: str = "") -> dict[st
     slug = public_report_slug(report)
     period_start = str(report.get("period_start") or "")
     period_end = str(report.get("period_end") or "")
-    source_coverage = _json_list(report.get("source_coverage_json"))
     cited_source_count = len(re.findall(r"(?m)^\[\^[A-Za-z0-9_-]+\]:", markdown))
     payload = {
         "id": content_item_id,

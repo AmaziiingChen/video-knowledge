@@ -117,7 +117,7 @@ class PromptWorkspaceRepository:
         return self.get_folder(folder_id)
 
     def trash_folder(self, folder_id: str) -> str:
-        target = self.get_folder(folder_id)
+        self.get_folder(folder_id)
         folder_ids = self._descendant_folder_ids(folder_id)
         template_rows = self._templates_in_folders(folder_ids)
         self._ensure_templates_remain(template_rows)

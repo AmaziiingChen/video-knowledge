@@ -10,7 +10,6 @@ import subprocess
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
 from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
