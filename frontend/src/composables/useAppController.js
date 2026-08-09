@@ -77,6 +77,7 @@ import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
 import { useContentReadinessController } from '../features/library/useContentReadinessController.js'
+import { useLibraryFolderController } from '../features/library/useLibraryFolderController.js'
 import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
 import { useLibraryTrashController } from '../features/library/useLibraryTrashController.js'
 import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
@@ -309,6 +310,18 @@ export function useAppController() {
     updateLocalContentItem,
     loadContentItems,
     notify: ElMessage,
+  })
+  const {
+    loadLibraryFolders,
+    createLibraryFolder,
+    renameLibraryFolder,
+    setLibraryFolderPinned,
+  } = useLibraryFolderController({
+    libraryFolders,
+    snapshotLibraryState,
+    restoreLibraryState,
+    nextSortOrder,
+    recordLibraryHistory,
   })
 
   const {
@@ -2427,17 +2440,6 @@ export function useAppController() {
     return { items, total: items.length, offset: 0, has_more: false }
   }
 
-  async function loadLibraryFolders({ throwOnError = false } = {}) {
-    try {
-      const res = await axios.get(`${API}/content/folders`, { timeout: 10000 })
-      libraryFolders.value = res.data || []
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '读取文件夹失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '读取文件夹失败')
-      if (throwOnError) throw e
-    }
-  }
-
   function applyContentFilter() {
     contentItems.value = allContentItems.value
   }
@@ -2466,69 +2468,6 @@ export function useAppController() {
     applyContentFilter()
     if (selectedContentItem.value?.id === id) {
       selectedContentItem.value = allContentItems.value.find((item) => item.id === id) || selectedContentItem.value
-    }
-  }
-
-  async function createLibraryFolder(payload) {
-    const snapshot = snapshotLibraryState()
-    const tempId = `tmp-${Date.now()}`
-    const tempFolder = {
-      id: tempId,
-      name: payload.name,
-      parent_folder_id: payload.parent_folder_id || null,
-      sort_order: nextSortOrder(payload.parent_folder_id || null),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    libraryFolders.value = [...libraryFolders.value, tempFolder]
-    try {
-      const res = await axios.post(`${API}/content/folders`, {
-        name: payload.name,
-        parent_folder_id: payload.parent_folder_id || null,
-        sort_order: tempFolder.sort_order,
-      }, { timeout: 10000 })
-      libraryFolders.value = libraryFolders.value.map((folder) => folder.id === tempId ? res.data : folder)
-    } catch (e) {
-      restoreLibraryState(snapshot)
-      ElMessage.error(e.response?.data?.detail || e.message || '新建失败')
-    }
-  }
-
-  async function renameLibraryFolder(payload) {
-    const snapshot = snapshotLibraryState()
-    const currentFolder = snapshot.folders.find((folder) => folder.id === payload.id)
-    if (!currentFolder || currentFolder.name === payload.name) return
-    libraryFolders.value = libraryFolders.value.map((folder) => {
-      return folder.id === payload.id ? { ...folder, name: payload.name } : folder
-    })
-    try {
-      const res = await axios.patch(`${API}/content/folders/${payload.id}`, {
-        name: payload.name,
-      }, { timeout: 10000 })
-      libraryFolders.value = libraryFolders.value.map((folder) => folder.id === payload.id ? { ...folder, ...res.data } : folder)
-      recordLibraryHistory('重命名文件夹', snapshot, snapshotLibraryState(), [{ type: 'folder', id: payload.id }])
-    } catch (e) {
-      restoreLibraryState(snapshot)
-      ElMessage.error(e.response?.data?.detail || e.message || '重命名失败')
-    }
-  }
-
-  async function setLibraryFolderPinned({ folder, pinned }) {
-    if (!folder?.id || Boolean(folder.is_pinned) === Boolean(pinned)) return
-    const snapshot = snapshotLibraryState()
-    libraryFolders.value = libraryFolders.value.map((current) => (
-      current.id === folder.id ? { ...current, is_pinned: Boolean(pinned) } : current
-    ))
-    try {
-      const res = await axios.patch(`${API}/content/folders/${folder.id}`, {
-        is_pinned: Boolean(pinned),
-      }, { timeout: 10000 })
-      libraryFolders.value = libraryFolders.value.map((current) => current.id === folder.id ? { ...current, ...res.data } : current)
-      recordLibraryHistory(pinned ? '置顶文件夹' : '取消置顶文件夹', snapshot, snapshotLibraryState(), [{ type: 'folder', id: folder.id }])
-      ElMessage.success(pinned ? '文件夹已置顶' : '文件夹已取消置顶')
-    } catch (e) {
-      restoreLibraryState(snapshot)
-      ElMessage.error(e.response?.data?.detail || e.message || '更新文件夹置顶状态失败')
     }
   }
 
