@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from services.database import connect, initialize_database
 from services.content_index import ensure_content_index_ready, ensure_external_markdown_folder
-from services.library_source_groups import list_library_source_groups, remove_library_source_group_member
 from services.content_source_text import inspect_content_text_readiness, load_content_source_text
 from services.article_ingest_preparation import (
     article_image_ocr_status,
@@ -556,22 +555,6 @@ def list_library_folder_history(
         has_more=offset + len(responses) < total,
         history_before=cutoff,
     )
-
-
-@router.get("/content/source-groups")
-async def list_source_groups():
-    return list_library_source_groups()
-
-
-@router.delete("/content/source-groups/{group_id}/sources/{source_kind}/{source_id}")
-async def remove_source_group_member(group_id: str, source_kind: str, source_id: str):
-    """Unlink a source from a virtual library group, retaining all content."""
-    try:
-        return remove_library_source_group_member(group_id, source_kind, source_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/content/import-file", response_model=LocalFileImportResponse)
