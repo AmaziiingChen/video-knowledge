@@ -665,6 +665,7 @@ import { createContentActionMenuModel } from './contentActionMenuModel.js'
 import { dispatchEditorContentAction } from './editorContentActions.js'
 import { editorContentDetailRows } from './editorContentDetails.js'
 import { createEditorContentKind } from './editorContentKind.js'
+import { createEditorReportPresentation } from './editorReportPresentation.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
@@ -786,6 +787,14 @@ const {
 } = createEditorContentKind({
   contentForTab: props.contentForTab,
   articlePreviewForTab: props.articlePreviewForTab,
+})
+const {
+  reportDateLabel,
+  reportDisplayTitle,
+  reportGeneratedLabel,
+} = createEditorReportPresentation({
+  contentForTab: props.contentForTab,
+  workspaceTabById: props.workspaceTabById,
 })
 
 const {
@@ -1299,40 +1308,6 @@ function isMiniProgramCaptureTab(tabId) {
   const content = props.contentForTab(tabId)
   return content?.source_provider === 'wechat_miniprogram'
     && ['forum_capture', 'report'].includes(content?.content_type)
-}
-
-function reportTypeLabel(tabId) {
-  const title = props.contentForTab(tabId)?.title || ''
-  return title.includes('周报') ? '周报' : '日报'
-}
-
-function reportDisplayTitle(tabId) {
-  const rawTitle = props.contentForTab(tabId)?.title || props.workspaceTabById(tabId)?.title || ''
-  const groupName = rawTitle.includes('｜') ? rawTitle.split('｜').pop()?.trim() : ''
-  return groupName ? `${groupName}${reportTypeLabel(tabId)}` : rawTitle
-}
-
-function reportDateLabel(tabId) {
-  const title = props.contentForTab(tabId)?.title || props.workspaceTabById(tabId)?.title || ''
-  const dates = title.match(/\d{4}-\d{2}-\d{2}/g) || []
-  if (!dates.length) return '生成报告'
-  const formatDate = (value, showYear) => {
-    const [year, month, day] = value.split('-').map(Number)
-    return `${showYear ? `${year}年` : ''}${month}月${day}日`
-  }
-  if (dates.length === 1) return formatDate(dates[0], true)
-  const sameYear = dates[0].slice(0, 4) === dates[1].slice(0, 4)
-  return `${formatDate(dates[0], true)}—${formatDate(dates[1], !sameYear)}`
-}
-
-function reportGeneratedLabel(tabId) {
-  const timestamp = props.contentForTab(tabId)?.created_at || props.workspaceTabById(tabId)?.opened_at
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return ''
-  const hour = String(date.getHours()).padStart(2, '0')
-  const minute = String(date.getMinutes()).padStart(2, '0')
-  return `生成于 ${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${hour}:${minute}`
 }
 
 function articleTextForTab(tabId) {

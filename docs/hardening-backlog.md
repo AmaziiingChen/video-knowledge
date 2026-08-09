@@ -73,8 +73,9 @@ lines.
   classification now lives in `workbench/editorContentKind.js` with pure
   boundary tests. Menu-action dispatch and detail-row presentation now live in
   `workbench/editorContentActions.js` and `workbench/editorContentDetails.js`.
-  Report, article and media readers still need their own mounted
-  behavior boundaries.
+  Report title, date-window and generated-time presentation now live in
+  `workbench/editorReportPresentation.js` with pure formatting tests. Report,
+  article and media readers still need their own mounted behavior boundaries.
 - [x] Extract report-generation SSE decoding from `App.vue`; preserve local
   capability headers, fragmented event handling and explicit server errors in
   `features/reports/reportEventStream.js` with protocol-level tests.
