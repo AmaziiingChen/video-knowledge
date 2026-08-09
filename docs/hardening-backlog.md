@@ -77,8 +77,9 @@ lines.
   preparation/OCR queue endpoints now live in `routers/content_preparation.py`;
   text-readiness and explicit source refresh now live in
   `routers/content_source_text.py`; content status, rename/move and soft-delete
-  mutations now live in `routers/content_mutations.py`. Local-file import and
-  capture endpoints remain separate follow-up cuts.
+  mutations now live in `routers/content_mutations.py`; local-file import and
+  reprocessing now live beside Markdown imports in `routers/local_imports.py`.
+  Article capture remains a separate follow-up cut.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now

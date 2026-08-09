@@ -654,7 +654,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 initialize_database()
                 client = TestClient(app)
                 created = SimpleNamespace(task_id="external-task")
-                with patch("routers.content.task_manager.create", return_value=created):
+                with patch("routers.local_imports.task_manager.create", return_value=created):
                     pdf_result = client.post(
                         "/api/content/import-file",
                         files={"file": ("扫描件.pdf", b"%PDF-1.4\nplaceholder", "application/pdf")},
@@ -689,7 +689,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 settings.obsidian_vault = root / "vault"
                 initialize_database()
                 client = TestClient(app)
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
                     audio = client.post(
                         "/api/content/import-file",
                         files={"file": ("访谈.mp3", b"audio-bytes", "audio/mpeg")},
@@ -705,7 +705,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 image_item = image.json()["item"]
                 self.assertEqual(image_item["content_type"], "image")
                 self.assertTrue(image_item["original_file_path"].endswith("original--扫描图.png"))
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="retry-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="retry-task")):
                     retried = client.post(f"/api/content/{image_item['id']}/reprocess-local-source")
                 self.assertEqual(retried.status_code, 200)
                 self.assertEqual(retried.json()["task_id"], "retry-task")
@@ -724,7 +724,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 settings.obsidian_vault = root / "vault"
                 initialize_database()
                 client = TestClient(app)
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
                     imported = client.post(
                         "/api/content/import-file",
                         files={"file": ("扫描件.pdf", b"%PDF-1.4\nplaceholder", "application/pdf")},
@@ -757,7 +757,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 settings.obsidian_vault = root / "vault"
                 initialize_database()
                 client = TestClient(app)
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
                     imported = client.post(
                         "/api/content/import-file",
                         files={"file": ("扫描件.pdf", b"%PDF-1.4\npending", "application/pdf")},
