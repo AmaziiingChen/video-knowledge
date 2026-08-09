@@ -681,8 +681,6 @@ export function useAppController() {
     activeWorkspaceTab,
     activeWorkspaceContent,
     activeWorkspaceResult,
-    activeWorkspaceStatus,
-    activeWorkspaceMediaUrl,
     activeWorkspaceTranscript,
   } = useWorkspaceTabProjectionController({
     workspaceTabs,

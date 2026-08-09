@@ -99,15 +99,6 @@ export function useWorkspaceTabProjectionController({
     return tab?.content_item_id ? resultForTab(tab.id) : null
   })
 
-  const activeWorkspaceStatus = computed(() => (
-    activeWorkspaceContent.value?.status || activeWorkspaceResult.value?.status || activeWorkspaceTab.value?.status || 'inbox'
-  ))
-
-  const activeWorkspaceMediaUrl = computed(() => {
-    const videoPath = activeWorkspaceResult.value?.video_path || activeWorkspaceContent.value?.video_path
-    return videoPath ? localApiRequestUrl(`${apiBase}/media?path=${encodeURIComponent(videoPath)}`) : ''
-  })
-
   const activeWorkspaceTranscript = computed(() => {
     if (activeWorkspaceResult.value?.transcript) return activeWorkspaceResult.value.transcript
     if (['article', 'forum_post', 'forum_capture'].includes(activeWorkspaceContent.value?.content_type)
@@ -133,8 +124,6 @@ export function useWorkspaceTabProjectionController({
     activeWorkspaceTab,
     activeWorkspaceContent,
     activeWorkspaceResult,
-    activeWorkspaceStatus,
-    activeWorkspaceMediaUrl,
     activeWorkspaceTranscript,
   }
 }
