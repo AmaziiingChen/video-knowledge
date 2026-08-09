@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from urllib.parse import quote
 
 from config import settings
-from routers import content as content_router
+from routers import content_preview as content_router
 from services.cache import cache_dir_for_url, write_cache_meta
 from services.xiaohongshu_cache import xiaohongshu_cache_dir
 
