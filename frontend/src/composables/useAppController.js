@@ -86,6 +86,7 @@ import { useLibraryHistoryController } from '../features/library/useLibraryHisto
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
+import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -145,7 +146,14 @@ export function useAppController() {
     startAiTokenUsagePolling,
     stopAiTokenUsagePolling,
   } = useAiUsageController()
-  const contentAnalysisTemplates = ref([])
+  const {
+    contentAnalysisTemplates,
+    loadContentAnalysisTemplates,
+    runContentAnalysis,
+  } = useContentAnalysisController({
+    sortTemplates: sortPromptTemplates,
+    askQuestion,
+  })
   let inputParseTimer = null
   let inputParseRequestId = 0
   const openSections = ref(['source', 'timings'])
@@ -1885,28 +1893,6 @@ export function useAppController() {
     }
     session.historyLoaded = false
     await loadContentQaHistory(contentItemId, session)
-  }
-
-  async function loadContentAnalysisTemplates() {
-    try {
-      const res = await axios.get(`${API}/prompts`, {
-        params: { task_type: 'content_analysis' },
-        timeout: 10000
-      })
-      contentAnalysisTemplates.value = sortPromptTemplates(res.data || [])
-        .filter((template) => template.is_active && template.template?.trim())
-    } catch {
-      contentAnalysisTemplates.value = []
-    }
-  }
-
-  function runContentAnalysis() {
-    const customTemplate = contentAnalysisTemplates.value[0]
-    if (!customTemplate?.template?.trim()) {
-      ElMessage.error('未找到可用的自定义按钮提示词')
-      return
-    }
-    return askQuestion('', { customTemplate })
   }
 
   function resetRunState() {
