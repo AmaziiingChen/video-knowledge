@@ -648,10 +648,7 @@ import {
   readableCharacterCount,
   reportBodyHtmlForCharacterCount,
 } from '../utils/reportReadingStats'
-import {
-  readingProgressFromScroll,
-  remainingReadingMinutes,
-} from './readingProgress.js'
+import { remainingReadingMinutes } from './readingProgress.js'
 import { shouldClaimReaderFocus } from './readerPointerFocus.js'
 import { shouldShowArticlePreviewLoader } from '../features/library/articlePreviewLoadState.js'
 import {
@@ -674,6 +671,7 @@ import ReportOutlineRail from './ReportOutlineRail.vue'
 import { usePreviewFindController } from './usePreviewFindController.js'
 import { useMediaTranscriptWorkspaceController } from './useMediaTranscriptWorkspaceController.js'
 import { useXhsGalleryController } from './useXhsGalleryController.js'
+import { useReadingProgressController } from './useReadingProgressController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
@@ -761,16 +759,12 @@ const activeArticlePreviewFrame = ref(null)
 const activeLocalHtmlRemoteWebview = ref(null)
 const articleOutlineRoot = ref(null)
 const selectedTextAction = ref(null)
-const readingProgress = ref(0)
-const readingCharacterCount = ref(0)
 let localHtmlRemoteFindRequestId = null
 const wechatRemoteFindRequestIds = new Map()
 let removeDesktopPreviewFindListener = null
 let articlePreviewSelectionDocument = null
 let selectedTextPointerIsDown = false
 let selectedTextActionRevealFrame = 0
-let readingProgressRefreshFrame = 0
-let readingProgressFrameDocument = null
 const wechatRemotePages = reactive({})
 const localHtmlRemoteFailures = reactive({})
 const remoteReadingProgressByKey = reactive({})
@@ -991,6 +985,23 @@ const activeReadingProgress = computed(() => (
 const activeReadingCharacterCount = computed(() => (
   activeRemoteReadingProgress.value?.characterCount ?? readingCharacterCount.value
 ))
+const {
+  readingProgress,
+  readingCharacterCount,
+  handleReadingScroll,
+  attachReadingProgressFrame,
+  scheduleReadingProgressRefresh,
+  resetReadingProgress,
+  disposeReadingProgressController,
+} = useReadingProgressController({
+  activeContentTab,
+  activeArticlePreviewFrame,
+  reportReader,
+  isArticleTab,
+  supportsReadingProgress,
+  isRemoteReadingVisible: () => isWechatRemoteVisible.value || isLocalHtmlRemoteVisible.value,
+  readerTextForMetadata,
+})
 const wechatRemoteActionLabel = computed(() => {
   if (isWechatRemoteVisible.value) return '查看缓存正文'
   if (activeWechatRemotePage.value?.status === 'ready') return '在软件内打开原文'
@@ -1026,9 +1037,7 @@ watch(
   () => {
     resetActiveMediaState()
     clearSelectedTextAction()
-    detachReadingProgressFrame()
-    readingProgress.value = 0
-    readingCharacterCount.value = 0
+    resetReadingProgress()
     scheduleReadingProgressRefresh()
   }
 )
@@ -1095,11 +1104,7 @@ onBeforeUnmount(() => {
     window.cancelAnimationFrame(selectedTextActionRevealFrame)
     selectedTextActionRevealFrame = 0
   }
-  if (readingProgressRefreshFrame) {
-    window.cancelAnimationFrame(readingProgressRefreshFrame)
-    readingProgressRefreshFrame = 0
-  }
-  detachReadingProgressFrame()
+  disposeReadingProgressController()
   window.removeEventListener('keydown', handlePreviewFindShortcut, true)
   document.removeEventListener('selectionchange', handleDocumentSelectionChange)
   document.removeEventListener('pointerdown', handleSelectedTextPointerDown, true)
@@ -2010,57 +2015,6 @@ function askAboutSelectedText() {
     void webview?.executeJavaScript?.('window.getSelection?.().removeAllRanges()').catch(() => {})
   }
   clearSelectedTextAction()
-}
-
-function handleReadingScroll(event) {
-  refreshReadingProgress(event?.currentTarget)
-}
-
-function handleArticlePreviewFrameScroll() {
-  refreshReadingProgress(readingProgressFrameDocument?.scrollingElement || null)
-}
-
-function detachReadingProgressFrame() {
-  if (!readingProgressFrameDocument) return
-  readingProgressFrameDocument.defaultView?.removeEventListener('scroll', handleArticlePreviewFrameScroll)
-  readingProgressFrameDocument = null
-}
-
-function attachReadingProgressFrame(frameDocument) {
-  if (readingProgressFrameDocument === frameDocument) return
-  detachReadingProgressFrame()
-  readingProgressFrameDocument = frameDocument
-  frameDocument.defaultView?.addEventListener('scroll', handleArticlePreviewFrameScroll, { passive: true })
-}
-
-function activeReadingScrollRoot() {
-  const tab = activeContentTab.value
-  if (!tab || !supportsReadingProgress.value) return null
-  if (isArticleTab(tab.id)) return activeArticlePreviewFrame.value?.contentDocument?.scrollingElement || null
-  return reportReader.value
-}
-
-function refreshReadingProgress(scrollRoot = null) {
-  const tab = activeContentTab.value
-  if (!tab || !supportsReadingProgress.value) {
-    readingProgress.value = 0
-    readingCharacterCount.value = 0
-    return
-  }
-  if (isWechatRemoteVisible.value || isLocalHtmlRemoteVisible.value) return
-  const root = scrollRoot || activeReadingScrollRoot()
-  if (root) {
-    readingProgress.value = readingProgressFromScroll(root)
-  }
-  readingCharacterCount.value = readableCharacterCount(readerTextForMetadata(tab.id))
-}
-
-function scheduleReadingProgressRefresh() {
-  if (readingProgressRefreshFrame) window.cancelAnimationFrame(readingProgressRefreshFrame)
-  readingProgressRefreshFrame = window.requestAnimationFrame(() => {
-    readingProgressRefreshFrame = 0
-    refreshReadingProgress()
-  })
 }
 
 function handleArticlePreviewFrameReady(event) {
