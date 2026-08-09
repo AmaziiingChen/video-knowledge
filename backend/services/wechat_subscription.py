@@ -6,9 +6,7 @@ import html
 import json
 import random
 import re
-import shutil
 import sqlite3
-import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -24,7 +22,13 @@ from services.content_index import ensure_wechat_subscription_folder
 from services.database import connect, initialize_database, utc_now_iso
 from services.inbox import capture_link_to_inbox, process_inbox_item
 from services.article_ingest_preparation import enqueue_article_source_preparation
-from services.repository import ContentRepository, new_id
+from services.repository import new_id
+from services.wechat_subscription_secrets import (
+    MacOSKeychainSessionStore,
+    SessionCredentials,
+    WeChatAuthorizationError,
+    WeChatSubscriptionError,
+)
 
 
 WECHAT_MP_BASE_URL = "https://mp.weixin.qq.com"
@@ -36,7 +40,6 @@ WECHAT_CHECK_DELAY_RANGE = (15.0, 30.0)
 WECHAT_REMOTE_CONNECT_TIMEOUT_SECONDS = 10
 WECHAT_REMOTE_READ_TIMEOUT_SECONDS = 10
 WECHAT_REMOTE_TOTAL_TIMEOUT_SECONDS = 35
-WECHAT_KEYCHAIN_TIMEOUT_SECONDS = 12
 WECHAT_INITIAL_SYNC_TIMEOUT_SECONDS = 75
 WECHAT_SESSION_VALIDATION_TTL_SECONDS = 60 * 60
 WECHAT_ACCOUNT_REQUEST_WINDOW_HOURS = 24
@@ -83,14 +86,6 @@ SUBSCRIPTION_SELECT = """
 """
 
 
-class WeChatSubscriptionError(RuntimeError):
-    category = "wechat_subscription"
-
-
-class WeChatAuthorizationError(WeChatSubscriptionError):
-    category = "authorization"
-
-
 class WeChatRemoteError(WeChatSubscriptionError):
     category = "remote"
 
@@ -101,12 +96,6 @@ class WeChatRateLimitError(WeChatRemoteError):
     def __init__(self, message: str, *, retry_at: str | None = None) -> None:
         super().__init__(message)
         self.retry_at = retry_at
-
-
-@dataclass(frozen=True)
-class SessionCredentials:
-    token: str
-    cookie: str
 
 
 @dataclass(frozen=True)
@@ -216,100 +205,6 @@ def _published_at(value: Any) -> str | None:
         return None
     china_standard_time = timezone(timedelta(hours=8))
     return datetime.fromtimestamp(timestamp, china_standard_time).strftime("%Y-%m-%d %H:%M")
-
-
-class MacOSKeychainSessionStore:
-    """Keep WeChat session secrets out of SQLite and application logs."""
-
-    service_name = "Video Knowledge WeChat Subscriptions"
-
-    def _security_command(self) -> str:
-        command = shutil.which("security")
-        if not command:
-            raise WeChatSubscriptionError("当前系统未提供 macOS Keychain，无法保存微信登录态")
-        return command
-
-    def save(self, keychain_ref: str, credentials: SessionCredentials) -> None:
-        payload = json.dumps(
-            {"token": credentials.token, "cookie": credentials.cookie},
-            ensure_ascii=False,
-        )
-        try:
-            result = subprocess.run(
-                [
-                    self._security_command(),
-                    "add-generic-password",
-                    "-U",
-                    "-a",
-                    keychain_ref,
-                    "-s",
-                    self.service_name,
-                    "-w",
-                    payload,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=WECHAT_KEYCHAIN_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise WeChatSubscriptionError("写入微信登录态超时，请检查钥匙串访问权限") from exc
-        if result.returncode != 0:
-            raise WeChatSubscriptionError("无法写入 macOS Keychain，请检查钥匙串访问权限")
-
-    def load(self, keychain_ref: str) -> SessionCredentials:
-        try:
-            result = subprocess.run(
-                [
-                    self._security_command(),
-                    "find-generic-password",
-                    "-a",
-                    keychain_ref,
-                    "-s",
-                    self.service_name,
-                    "-w",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=WECHAT_KEYCHAIN_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise WeChatAuthorizationError("读取微信登录态超时，请检查钥匙串访问权限") from exc
-        if result.returncode != 0:
-            raise WeChatAuthorizationError("未找到微信登录态，请重新授权")
-        try:
-            payload = json.loads(result.stdout)
-            credentials = SessionCredentials(
-                token=str(payload.get("token") or "").strip(),
-                cookie=str(payload.get("cookie") or "").strip(),
-            )
-        except (json.JSONDecodeError, TypeError) as exc:
-            raise WeChatAuthorizationError("微信登录态损坏，请重新授权") from exc
-        if not credentials.token or not credentials.cookie:
-            raise WeChatAuthorizationError("微信登录态不完整，请重新授权")
-        return credentials
-
-    def delete(self, keychain_ref: str) -> None:
-        try:
-            result = subprocess.run(
-                [
-                    self._security_command(),
-                    "delete-generic-password",
-                    "-a",
-                    keychain_ref,
-                    "-s",
-                    self.service_name,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=WECHAT_KEYCHAIN_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise WeChatSubscriptionError("删除微信登录态超时，请检查钥匙串访问权限") from exc
-        if result.returncode not in {0, 44}:  # 44 means no matching keychain item.
-            raise WeChatSubscriptionError("无法从 macOS Keychain 删除微信登录态")
 
 
 class WeChatAdminClient:
