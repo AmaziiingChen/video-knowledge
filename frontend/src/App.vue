@@ -866,6 +866,7 @@ import { useWechatPublishingSettingsController } from './features/wechat/useWech
 import { useWechatReportPromptController } from './features/prompts/useWechatReportPromptController.js'
 import { usePromptWorkspaceController } from './features/prompts/usePromptWorkspaceController.js'
 import { useWechatAccountController } from './features/wechat/useWechatAccountController.js'
+import { useWechatFilterController } from './features/wechat/useWechatFilterController.js'
 import { useWechatSubscriptionSyncController } from './features/wechat/useWechatSubscriptionSyncController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
@@ -1669,7 +1670,6 @@ const {
   confirmDestructive: requestDestructiveConfirmation,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
-const savingWeChatFilter = ref(false)
 const wechatSubscriptionInterval = ref(1440)
 const wechatAutoProcess = ref(false)
 const wechatSubscriptionStates = ref({})
@@ -1727,6 +1727,16 @@ const {
   refreshContentItems: loadContentItems,
   enqueueTask: enqueueSourceSyncTask,
   observeTask: observeSourceSyncTask,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const {
+  savingWeChatFilter,
+  createWeChatFilter,
+  deleteWeChatFilter,
+} = useWechatFilterController({
+  filterApi: WECHAT_FILTER_API,
+  loadSubscriptions: loadWeChatSubscriptions,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 
@@ -2216,30 +2226,6 @@ async function deleteWeChatSubscription(subscriptionId) {
     await loadWeChatSubscriptions()
   } catch (error) {
     ElMessage.error(wechatErrorMessage(error, '取消公众号订阅失败'))
-  }
-}
-
-async function createWeChatFilter(payload, done) {
-  savingWeChatFilter.value = true
-  try {
-    await axios.post(WECHAT_FILTER_API, payload, { timeout: 10000 })
-    done?.()
-    ElMessage.success('正文清洗规则已添加')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '添加正文清洗规则失败'))
-  } finally {
-    savingWeChatFilter.value = false
-  }
-}
-
-async function deleteWeChatFilter(ruleId) {
-  try {
-    await axios.delete(`${WECHAT_FILTER_API}/${ruleId}`, { timeout: 10000 })
-    ElMessage.success('正文清洗规则已删除')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '删除正文清洗规则失败'))
   }
 }
 

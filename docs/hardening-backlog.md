@@ -30,13 +30,14 @@ lines.
 
 - [x] Extract the prompt-workspace controller from `App.vue`; retain all four
   tab types, draft/trash behavior and add mock-API race regression tests.
-- [ ] Extract the WeChat subscription controller from `App.vue`; add mock-API
-  behavior tests and ratchet its remaining composition-root budget down.
-  Account authorization, QR polling, transfer and account-search state now live
-  in `features/wechat/useWechatAccountController.js`; the remaining sync,
-  filters and report-group state machine remains deliberately in `App.vue` for
-  the next behavior-preserving slice.  Single/bulk sync task ownership now
-  lives in `features/wechat/useWechatSubscriptionSyncController.js`.
+- [x] Extract the WeChat subscription controller from `App.vue`; retain
+  single/bulk task behavior with mock-API regression tests and ratchet the
+  remaining composition-root budget down. Account authorization, QR polling,
+  transfer and account-search state live in
+  `features/wechat/useWechatAccountController.js`; body-cleaning filter CRUD
+  now lives in `features/wechat/useWechatFilterController.js`. Report-group
+  state remains deliberately in `App.vue` for a separate behavior-preserving
+  slice.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
   The first library boundary, debounced global search and result hydration, now
