@@ -15,11 +15,7 @@ from pydantic import BaseModel, Field
 from services.database import connect, initialize_database
 from services.content_index import ensure_content_index_ready, ensure_external_markdown_folder
 from services.library_source_groups import list_library_source_groups, remove_library_source_group_member
-from services.content_source_text import (
-    ContentTextReadiness,
-    inspect_content_text_readiness,
-    load_content_source_text,
-)
+from services.content_source_text import inspect_content_text_readiness, load_content_source_text
 from services.article_ingest_preparation import (
     article_image_ocr_status,
     article_source_preparation_status,
@@ -41,7 +37,6 @@ from services.cache import (
     cache_dir_for_url,
     cache_entry_for_url,
     read_cache_meta,
-    read_cached_transcript_segments,
 )
 from services.database import utc_now_iso
 from services.repository import new_id
@@ -55,7 +50,6 @@ from services.local_file_imports import (
     persist_original_attachment,
     persist_original_attachment_from_file,
     original_attachment_path,
-    local_file_metadata,
     safe_import_filename,
     save_imported_document,
     validate_import_upload,
@@ -65,24 +59,20 @@ from services.task_manager import task_manager
 from services.search_index import upsert_source_text_document
 from services.knowledge_library import (
     ensure_library_folder_directory,
-    markdown_document_path,
     relocate_managed_documents,
     remove_empty_library_folder_directory,
+)
+from services.content_presentation import (
+    ContentItemResponse,
+    ContentTextReadinessResponse,
+    content_item_response as _item_to_response,
+    readiness_response as _readiness_response,
 )
 
 
 router = APIRouter()
 
 CONTENT_STATUSES = {"inbox", "processing", "to_read", "distilled", "archived", "failed"}
-
-class ContentTextReadinessResponse(BaseModel):
-    status: str
-    label: str
-    detail: str
-    source_kind: str | None = None
-    can_ask_ai: bool
-    retryable: bool = False
-
 
 @router.get("/content/article-preparation-status", response_model=dict)
 async def get_article_preparation_status():
@@ -103,38 +93,6 @@ async def prioritize_article_ocr(content_item_id: str):
     if status["status"] == "unavailable":
         raise HTTPException(status_code=404, detail="未找到可识别图片的文章")
     return status
-
-
-class ContentItemResponse(BaseModel):
-    id: str
-    content_type: str
-    source_provider: str
-    source_url: str | None = None
-    canonical_source_id: str | None = None
-    title: str
-    cover_url: str | None = None
-    video_path: str | None = None
-    original_file_path: str | None = None
-    source_metadata: dict[str, object] = Field(default_factory=dict)
-    video_cache_status: str = "missing"
-    video_cache_expires_at: str | None = None
-    video_cache_expired_at: str | None = None
-    thumbnail_vtt_url: str | None = None
-    cache_size_bytes: int = 0
-    markdown_draft_path: str | None = None
-    markdown_size_bytes: int = 0
-    duration_seconds: float | None = None
-    transcript_segments: list[dict] = Field(default_factory=list)
-    text_readiness: ContentTextReadinessResponse
-    status: str
-    series_id: str | None = None
-    library_folder_id: str | None = None
-    sort_order: float = 0
-    created_at: str
-    updated_at: str
-    published_at: str | None = None
-    source_name: str | None = None
-    source_section: str | None = None
 
 
 class ContentPageResponse(BaseModel):
@@ -224,125 +182,6 @@ class FolderUpdateRequest(BaseModel):
     parent_folder_id: str | None = None
     sort_order: float | None = None
     is_pinned: bool | None = None
-
-
-def _item_to_response(
-    item: ContentItemRecord,
-    cache_entry: dict | None = None,
-    *,
-    include_runtime_details: bool = True,
-) -> ContentItemResponse:
-    cache_entry = cache_entry or {}
-    imported_original = original_attachment_path(item.id) if item.source_provider == "local_file" else None
-    imported_video = imported_original if item.content_type in {"video", "audio"} else None
-    source_metadata = local_file_metadata(imported_original) if imported_original and include_runtime_details else {}
-    markdown_draft_path, markdown_size_bytes = _content_markdown_metadata(item.id) if include_runtime_details else (None, 0)
-    duration = item.duration_seconds
-    if duration is None and include_runtime_details:
-        cache_duration = cache_entry.get("duration")
-        duration = float(cache_duration) if cache_duration else None
-    if duration is None:
-        metadata_duration = source_metadata.get("duration_seconds")
-        try:
-            duration = float(metadata_duration) if metadata_duration else None
-        except (TypeError, ValueError):
-            duration = None
-    return ContentItemResponse(
-        id=item.id,
-        content_type=item.content_type,
-        source_provider=item.source_provider,
-        source_url=item.source_url,
-        canonical_source_id=item.canonical_source_id,
-        title=item.title,
-        cover_url=item.cover_url,
-        video_path=cache_entry.get("video_path") or (str(imported_video) if imported_video else None),
-        original_file_path=str(imported_original) if imported_original else None,
-        source_metadata=source_metadata,
-        video_cache_status=("available" if imported_video else str(cache_entry.get("video_cache_status") or "missing")),
-        video_cache_expires_at=cache_entry.get("video_cache_expires_at"),
-        video_cache_expired_at=cache_entry.get("video_cache_expired_at"),
-        thumbnail_vtt_url=cache_entry.get("thumbnail_vtt_url"),
-        cache_size_bytes=int(cache_entry.get("size_bytes") or (imported_video.stat().st_size if imported_video else 0)),
-        markdown_draft_path=markdown_draft_path,
-        markdown_size_bytes=markdown_size_bytes,
-        duration_seconds=duration,
-        transcript_segments=(
-            _segments_for_cache_entry(cache_entry, duration)
-            if include_runtime_details
-            else []
-        ),
-        text_readiness=(
-            _readiness_response(inspect_content_text_readiness(item))
-            if include_runtime_details
-            else _listing_text_readiness()
-        ),
-        status=item.status,
-        series_id=item.series_id,
-        library_folder_id=item.library_folder_id,
-        sort_order=item.sort_order,
-        created_at=item.created_at,
-        updated_at=item.updated_at,
-        published_at=item.published_at,
-        source_name=item.source_name,
-        source_section=item.source_section,
-    )
-
-
-def _content_markdown_metadata(content_item_id: str) -> tuple[str | None, int]:
-    """Return the canonical Markdown path and its actual on-disk byte size.
-
-    The file is the source of truth here: file length must not be inferred
-    from an HTML preview, a summary, or a stale database hash.  Canonical
-    source documents cover WeChat article body text and OCR, while the legacy
-    sync path remains a fallback for older content that has not migrated yet.
-    """
-    canonical_path = markdown_document_path(content_item_id)
-    candidates = [canonical_path] if canonical_path is not None else []
-    with connect() as connection:
-        row = connection.execute(
-            """SELECT markdown_draft_path FROM obsidian_sync
-               WHERE content_item_id = ?
-               ORDER BY rowid DESC LIMIT 1""",
-            (content_item_id,),
-        ).fetchone()
-    if row and row["markdown_draft_path"]:
-        candidates.append(Path(str(row["markdown_draft_path"])))
-
-    for path in candidates:
-        try:
-            if path.is_file():
-                return str(path), path.stat().st_size
-        except OSError:
-            continue
-    return None, 0
-
-
-def _readiness_response(readiness: ContentTextReadiness) -> ContentTextReadinessResponse:
-    return ContentTextReadinessResponse(
-        status=readiness.status,
-        label=readiness.label,
-        detail=readiness.detail,
-        source_kind=readiness.source_kind,
-        can_ask_ai=readiness.can_ask_ai,
-        retryable=readiness.retryable,
-    )
-
-
-def _listing_text_readiness() -> ContentTextReadinessResponse:
-    """Return a cheap placeholder for the library tree.
-
-    Reading readiness for a video can involve opening cache metadata and its
-    transcript; doing that for every row makes the first library paint scale
-    with the entire local archive.  The client fetches the exact state once a
-    user opens a specific item.
-    """
-    return ContentTextReadinessResponse(
-        status="pending",
-        label="打开后检查",
-        detail="打开内容后加载正文、字幕和转写状态。",
-        source_kind=None,
-        can_ask_ai=False,
-    )
 
 
 @router.get("/content", response_model=list[ContentItemResponse])
@@ -1307,22 +1146,6 @@ def _cache_entries_by_source_url(source_urls) -> dict[str, dict]:
         if entry:
             entries[source_url] = entry
     return entries
-
-
-def _segments_for_cache_entry(cache_entry: dict, duration: float | None) -> list[dict]:
-    cache_key = cache_entry.get("cache_key")
-    if not cache_key:
-        return []
-    cache_dir = settings.data_dir / "cache" / str(cache_key)
-    if not cache_dir.exists():
-        return []
-    transcripts = cache_entry.get("transcripts") or []
-    preferred = transcripts[-1] if transcripts else None
-    return read_cached_transcript_segments(
-        Path(cache_dir),
-        preferred_model=preferred,
-        duration=duration,
-    )
 
 
 def _folder_response(row, *, content_count: int | None = None) -> LibraryFolderResponse:
