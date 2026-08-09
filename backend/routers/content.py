@@ -30,7 +30,7 @@ from services.xiaohongshu_cache import xiaohongshu_cache_dir
 from services.campus_sources import is_campus_attachment_blacklisted, render_document_markdown_html
 from services.document_formatter import request_document_formatting
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
-
+from services.knowledge_library import relocate_managed_documents
 from config import settings
 from services.cache import (
     cache_dir_for_url,
