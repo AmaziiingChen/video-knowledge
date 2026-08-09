@@ -41,6 +41,10 @@ lines.
   lives in `features/library/useLibrarySearchController.js`; tree presentation,
   task runtime, imports and assistant sessions remain in the facade pending
   their own behavior-preserving slices.
+  The independent trash transaction boundary now lives in
+  `features/library/useLibraryTrashController.js`; folder history and content
+  tree ownership remain in the facade because they share optimistic updates,
+  tab cleanup and keyboard undo/redo.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
