@@ -30,6 +30,14 @@ from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_artic
 from services.bilibili_context import fetch_bilibili_source_context
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
 from services.paddle_ocr import is_paddle_ocr_configured
+from services.pipeline_asr_policy import (
+    ASR_MODEL_STRATEGIES,
+    WHISPER_MODELS,  # noqa: F401 - public compatibility re-export
+    duration_from_info as _duration_from_info,
+    normalize_asr_options as _normalize_asr_options,
+    resolve_asr_model as _resolve_asr_model,
+    valid_whisper_model as _valid_whisper_model,
+)
 from services.pipeline_contracts import (
     AICallInfo,
     DownloadTransferInfo,
@@ -59,10 +67,7 @@ from services.url_parser import parse_share_text, redact_sensitive_url
 from services.video_download_settings import should_auto_download_bilibili_video
 
 
-WHISPER_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 LOCAL_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".opus"}
-ASR_MODEL_STRATEGIES = {"smart", "manual"}
-SMART_SHORT_VIDEO_SECONDS = 180
 PROGRESS_STAGES = ["parse", "info", "download", "extract_audio", "transcribe", "summarize", "save"]
 PROGRESS_WEIGHTS = {
     "parse": 4,
@@ -125,69 +130,6 @@ def _is_managed_local_media(path: Path, *, content_item_id: str | None = None) -
         return row is not None
     except Exception:
         return False
-
-
-def _valid_whisper_model(model_name: str | None) -> bool:
-    return bool(model_name and model_name in WHISPER_MODELS)
-
-
-def _duration_from_info(video_info: dict | None) -> float | None:
-    if not video_info:
-        return None
-    value = video_info.get("duration") or video_info.get("duration_seconds")
-    try:
-        duration = float(value)
-    except (TypeError, ValueError):
-        return None
-    return duration if duration > 0 else None
-
-
-def _resolve_asr_model(
-    *,
-    whisper_model: str | None,
-    strategy: str,
-    short_model: str,
-    long_model: str,
-    duration_seconds: float | None,
-) -> str:
-    if strategy == "manual":
-        return whisper_model or settings.whisper_model
-    if duration_seconds is not None and duration_seconds <= SMART_SHORT_VIDEO_SECONDS:
-        return short_model
-    return long_model
-
-
-def _normalize_asr_options(
-    *,
-    whisper_model: str | None,
-    asr_backend: str | None,
-    asr_model_strategy: str | None,
-    asr_short_video_model: str | None,
-    asr_long_video_model: str | None,
-    asr_beam_size: int | None,
-    asr_vad_filter: bool | None,
-    asr_fallback_enabled: bool | None,
-) -> dict:
-    backend = (asr_backend or settings.asr_backend or "auto").strip()
-    if asr_model_strategy:
-        strategy = asr_model_strategy.strip()
-    elif whisper_model and not (asr_short_video_model or asr_long_video_model):
-        strategy = "manual"
-    else:
-        strategy = (settings.asr_model_strategy or "smart").strip()
-    short_model = asr_short_video_model or settings.asr_short_video_model or "base"
-    long_model = asr_long_video_model or settings.asr_long_video_model or "small"
-    beam_size = max(1, min(8, int(asr_beam_size or settings.asr_beam_size or 1)))
-    return {
-        "backend": backend,
-        "strategy": strategy,
-        "short_model": short_model,
-        "long_model": long_model,
-        "beam_size": beam_size,
-        "vad_filter": settings.asr_vad_filter if asr_vad_filter is None else bool(asr_vad_filter),
-        "fallback_enabled": settings.asr_fallback_enabled if asr_fallback_enabled is None else bool(asr_fallback_enabled),
-        "initial_model": whisper_model or settings.whisper_model,
-    }
 
 
 def _level_from_message(message: str) -> str:

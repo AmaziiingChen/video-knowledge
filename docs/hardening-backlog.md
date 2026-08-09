@@ -145,6 +145,8 @@ lines.
   error taxonomy and cancellation marker now live in
   `services/pipeline_contracts.py`; `pipeline_runner.py` keeps its original
   import surface while retaining all runtime orchestration.
+  ASR configuration normalization and automatic short/long-model selection now
+  live in `services/pipeline_asr_policy.py`.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now
