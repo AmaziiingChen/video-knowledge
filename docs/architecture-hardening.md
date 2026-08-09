@@ -57,6 +57,11 @@ without giving guest pages access to local content. The corresponding legacy
 ceilings now match the smaller files; CI will reject putting those
 responsibilities back into the composition roots.
 
+Cover-style selection, negative prompts, runtime prompt inputs and cover-task
+presentation now live in `services/wechat_publishing_cover_policy.py`; the
+publishing service retains its existing public imports while concentrating on
+credentials, persistence and remote API orchestration.
+
 ## Exit criteria
 
 - No Vue or JavaScript production file exceeds 1,000 lines without a documented
