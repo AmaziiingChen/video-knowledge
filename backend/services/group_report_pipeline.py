@@ -7,17 +7,11 @@ plan defects in code, and records unplanned sources without rerunning the model.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
 from time import perf_counter, sleep
-
-from config import settings
 
 from services.ai_call_logger import tracked_llm_provider
 from services.database import utc_now_iso
@@ -51,6 +45,21 @@ from services.group_report_plan_shape import (
 )
 from services.group_report_plan_shape import (
     parse_report_plan as _parse_report_plan,
+)
+from services.group_report_json import (
+    decode_json_payload as _decode_json_payload,
+)
+from services.group_report_json import (
+    is_json_payload as _is_json_payload,  # noqa: F401 - legacy private import
+)
+from services.group_report_json import (
+    parse_json as _parse_json,  # noqa: F401 - legacy private import
+)
+from services.group_report_json import (
+    save_failed_json_output as _save_failed_json_output,
+)
+from services.group_report_json import (
+    save_planner_trace as _save_planner_trace,
 )
 from services.group_report_retry import (
     is_retryable_summary_error as _is_retryable_summary_error,
@@ -1359,79 +1368,6 @@ def _chat_json(
             "未发起重复模型调用"
         )
     return parsed
-
-
-def _is_json_payload(value: str) -> bool:
-    _, is_valid, _ = _decode_json_payload(value)
-    return is_valid
-
-
-def _save_failed_json_output(label: str, value: str) -> Path:
-    """Persist the exact invalid model payload locally for diagnosis."""
-    raw = str(value or "")
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
-    timestamp = re.sub(r"[^0-9]", "", utc_now_iso())[:20]
-    safe_label = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "-", label).strip("-") or "json"
-    directory = settings.data_dir / "diagnostics" / "group-report-plans"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{timestamp}-{safe_label}-{digest}.invalid.json"
-    path.write_text(raw, encoding="utf-8")
-    path.chmod(0o600)
-    return path
-
-
-def _save_planner_trace(label: str, payload: dict[str, object]) -> Path:
-    """Persist a complete local-only planner reasoning and timing trace."""
-    fingerprint = (
-        str(payload.get("reasoning_content") or "")
-        + "\n"
-        + str(payload.get("content") or "")
-    )
-    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:12]
-    timestamp = re.sub(r"[^0-9]", "", utc_now_iso())[:20]
-    safe_label = re.sub(
-        r"[^0-9A-Za-z\u4e00-\u9fff_-]+",
-        "-",
-        label,
-    ).strip("-") or "json"
-    directory = settings.data_dir / "diagnostics" / "group-report-plans"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{timestamp}-{safe_label}-{digest}.thinking.json"
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    path.chmod(0o600)
-    return path
-
-
-def _parse_json(value: str) -> object:
-    parsed, is_valid, _ = _decode_json_payload(value)
-    return parsed if is_valid else {}
-
-
-def _decode_json_payload(value: str) -> tuple[object, bool, bool]:
-    """Decode JSON, tolerating only unescaped control characters in strings."""
-    text = str(value or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`").removeprefix("json").strip()
-    candidates = [text]
-    start, end = text.find("{"), text.rfind("}")
-    if start >= 0 and end > start:
-        extracted = text[start : end + 1]
-        if extracted != text:
-            candidates.append(extracted)
-    for candidate in candidates:
-        try:
-            return json.loads(candidate), True, False
-        except json.JSONDecodeError as exc:
-            if not exc.msg.startswith("Invalid control character"):
-                continue
-            try:
-                return json.loads(candidate, strict=False), True, True
-            except json.JSONDecodeError:
-                continue
-    return {}, False, False
 
 
 def group_report_summary_cache_status(
