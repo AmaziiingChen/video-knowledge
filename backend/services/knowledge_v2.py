@@ -33,6 +33,12 @@ from services.knowledge_chunking import (
     estimate_tokens,
     structural_chunks,
 )
+from services.knowledge_conversation_context import (
+    CONVERSATION_CONTEXT_ANSWER_MAX_CHARS,  # noqa: F401 - compatibility re-export
+    CONVERSATION_CONTEXT_MAX_EXCHANGES,  # noqa: F401 - compatibility re-export
+    CONVERSATION_CONTEXT_QUESTION_MAX_CHARS,  # noqa: F401 - compatibility re-export
+    conversation_context_messages as _conversation_context_messages,
+)
 from services.llm_provider import (
     LLMMessage,
     LLMResponse,
@@ -476,9 +482,6 @@ def scope_readiness(*, source_specs: Iterable[tuple[str, str]]) -> ScopeReadines
     return ScopeReadiness(*(int(row[key] or 0) for key in ("document_count", "ready_document_count", "child_chunk_count", "embedded_child_count")))
 
 
-CONVERSATION_CONTEXT_MAX_EXCHANGES = 4
-CONVERSATION_CONTEXT_QUESTION_MAX_CHARS = 500
-CONVERSATION_CONTEXT_ANSWER_MAX_CHARS = 1_200
 KNOWLEDGE_REWRITE_MODEL = "deepseek-v4-flash:enabled"
 KNOWLEDGE_DEFAULT_ANSWER_MODEL = "deepseek-v4-pro:enabled"
 CONVERSATION_CONTEXT_GUARDRAIL = (
@@ -979,55 +982,6 @@ def _answer_model_response(
         finish_reason=finish_reason,
         reasoning_content="".join(reasoning_parts),
     )
-
-
-def _conversation_context_messages(
-    messages: Iterable[dict[str, object]] | None,
-) -> list[LLMMessage]:
-    """Return a bounded, deterministic conversation prefix for knowledge Q&A.
-
-    Each prior question is represented the same way it was in its rewrite
-    request. As a conversation grows, the next rewrite request extends this
-    prefix instead of rebuilding an unrelated history blob, which leaves an
-    automatic provider prompt cache a useful chance to match.
-    """
-    if not messages:
-        return []
-    exchanges: list[tuple[str, str]] = []
-    pending_question = ""
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        role = str(message.get("role") or "")
-        content = str(message.get("content") or "").strip()
-        if role == "user":
-            pending_question = content
-        elif role == "assistant" and pending_question:
-            if content:
-                exchanges.append((pending_question, content))
-            pending_question = ""
-    context: list[LLMMessage] = []
-    for prior_question, prior_answer in exchanges[-CONVERSATION_CONTEXT_MAX_EXCHANGES:]:
-        context.append(
-            LLMMessage(
-                role="user",
-                content=f"用户问题：{_truncate_conversation_context(prior_question, CONVERSATION_CONTEXT_QUESTION_MAX_CHARS)}",
-            )
-        )
-        context.append(
-            LLMMessage(
-                role="assistant",
-                content=_truncate_conversation_context(prior_answer, CONVERSATION_CONTEXT_ANSWER_MAX_CHARS),
-            )
-        )
-    return context
-
-
-def _truncate_conversation_context(value: str, limit: int) -> str:
-    compact = str(value or "").strip()
-    if len(compact) <= limit:
-        return compact
-    return compact[: max(1, limit - 1)].rstrip() + "…"
 
 
 def _evidence_payload(results: list[RetrievedChunk], *, question: str = "") -> list[dict[str, object]]:

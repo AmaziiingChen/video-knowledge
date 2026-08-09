@@ -44,7 +44,9 @@ lines.
   token estimation and parent/child structural chunking now live in
   `services/knowledge_chunking.py`; `knowledge_v2.py` re-exports the former
   public chunking symbols so existing router, script and test imports remain
-  compatible.
+  compatible. Bounded prior-turn pairing, truncation and role-preserving
+  message construction now live in `services/knowledge_conversation_context.py`;
+  `knowledge_v2.py` retains its existing private entry point for compatibility.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
