@@ -79,6 +79,7 @@ import { useContentReadState } from '../features/library/useContentReadState.js'
 import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
 import { useLibraryTrashController } from '../features/library/useLibraryTrashController.js'
 import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
+import { useContentRecoveryController } from '../features/library/useContentRecoveryController.js'
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
@@ -345,9 +346,33 @@ export function useAppController() {
     currentContent: () => activeWorkspaceContent.value || selectedContentItem.value,
     notifyError: (message) => ElMessage.error(typeof message === 'string' ? message : 'OCR 优先解析失败'),
   })
+  const {
+    retryingContentId,
+    retryContentSourceText,
+    retryContentProcessing,
+    reprocessLocalSource,
+    retranscribeContentVideo,
+    fetchExternalSubtitleForContent,
+    refreshContentSourceContext,
+    saveVideoDownloadSettings,
+    redownloadContentVideo,
+  } = useContentRecoveryController({
+    autoDownloadBilibiliVideo,
+    douyinVideoQuality,
+    mergeContentTextReadiness,
+    resetArticlePreview,
+    loadArticlePreview,
+    refreshContentTextReadiness,
+    applyTaskData,
+    registerBatchTask: registerContentRecoveryBatchTask,
+    loadContentItems,
+    pollTask,
+    pollBatchTasks,
+    getContentItemDetail,
+    notify: ElMessage,
+  })
   const loadingContent = ref(false)
   const updatingContentId = ref(null)
-  const retryingContentId = ref(null)
   const showMarkdownDialog = ref(false)
   const currentMarkdownItem = ref(null)
   const loadingMarkdown = ref(false)
@@ -2918,169 +2943,6 @@ export function useAppController() {
     }
   }
 
-  async function retryContentSourceText(item) {
-    if (!item?.id) return
-    try {
-      const res = await axios.post(`${API}/content/${item.id}/source-text/refresh`, {}, { timeout: 30000 })
-      mergeContentTextReadiness(item.id, res.data)
-      resetArticlePreview(item.id)
-      await loadArticlePreview({ ...item, text_readiness: res.data })
-      ElMessage.success('正文已重新抓取')
-    } catch (error) {
-      await refreshContentTextReadiness(item.id)
-      const msg = error.response?.data?.detail || error.message || '正文重新抓取失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '正文重新抓取失败')
-    }
-  }
-
-  async function retryContentProcessing(item) {
-    if (!item?.id || retryingContentId.value) return
-    retryingContentId.value = item.id
-    try {
-      const res = await axios.post(`${API}/content/${item.id}/retry-processing`, {}, { timeout: 10000 })
-      applyTaskData(res.data)
-      await loadContentItems()
-      pollTask(res.data.task_id)
-      ElMessage.success('已重新加入处理队列')
-    } catch (error) {
-      const msg = error.response?.data?.detail || error.message || '重新处理失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '重新处理失败')
-    } finally {
-      retryingContentId.value = null
-    }
-  }
-
-  async function reprocessLocalSource(item) {
-    if (!item?.id || retryingContentId.value) return
-    retryingContentId.value = item.id
-    try {
-      const res = await axios.post(`${API}/content/${item.id}/reprocess-local-source`, {}, { timeout: 10000 })
-      const taskId = res.data?.task_id
-      if (taskId) {
-        batchTaskNames.value[taskId] = item.title || `任务 ${taskId}`
-        batchTaskIds.value = [...new Set([...batchTaskIds.value, taskId])]
-        void pollBatchTasks()
-      }
-      await loadContentItems()
-      ElMessage.success(taskId ? '已重新加入处理队列' : '已重新提取原文件')
-    } catch (error) {
-      const msg = error.response?.data?.detail || error.message || '重新处理原文件失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '重新处理原文件失败')
-    } finally {
-      retryingContentId.value = null
-    }
-  }
-
-  async function retranscribeContentVideo(item) {
-    if (!item?.id || retryingContentId.value) return
-    retryingContentId.value = item.id
-    try {
-      const res = await axios.post(`${API}/content/${item.id}/retranscribe`, {}, { timeout: 10000 })
-      const task = res.data
-      if (task?.task_id) {
-        batchTaskNames.value[task.task_id] = item.title || item.source_url || `任务 ${task.task_id}`
-        batchTaskIds.value = [...new Set([...batchTaskIds.value, task.task_id])]
-        mergeBatchTasks([task])
-      }
-      applyTaskData(task)
-      await loadContentItems()
-      if (task?.task_id) void pollTask(task.task_id)
-      ElMessage.success(item.content_type === 'audio' ? '已使用本地音频重新开始转写' : '已使用本地视频重新开始转写')
-    } catch (error) {
-      const msg = error.response?.data?.detail || error.message || '重新转写失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '重新转写失败')
-    } finally {
-      retryingContentId.value = null
-    }
-  }
-
-  async function fetchExternalSubtitleForContent(item) {
-    if (!item?.id || retryingContentId.value) return
-    retryingContentId.value = item.id
-    ElMessage.info('正在检查 B站播放器外挂字幕…')
-    try {
-      const res = await axios.post(`${API}/content/${item.id}/fetch-external-subtitle`, {}, { timeout: 10000 })
-      const task = res.data
-      if (task?.task_id) {
-        batchTaskNames.value[task.task_id] = item.title || item.source_url || `任务 ${task.task_id}`
-        batchTaskIds.value = [...new Set([...batchTaskIds.value, task.task_id])]
-        mergeBatchTasks([task])
-      }
-      applyTaskData(task)
-      await loadContentItems()
-      if (task?.task_id) void pollTask(task.task_id)
-      ElMessage.success('已开始尝试获取外挂字幕；不会下载视频或进行语音识别')
-    } catch (error) {
-      const msg = error.response?.data?.detail || error.message || '获取外挂字幕失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '获取外挂字幕失败')
-    } finally {
-      retryingContentId.value = null
-    }
-  }
-
-  async function refreshContentSourceContext(item) {
-    if (!item?.id || retryingContentId.value) return
-    retryingContentId.value = item.id
-    try {
-      const res = await axios.post(`${API}/content/${item.id}/refresh-source-context`, {}, { timeout: 10000 })
-      const task = res.data
-      if (task?.task_id) {
-        batchTaskNames.value[task.task_id] = item.title || item.source_url || `任务 ${task.task_id}`
-        batchTaskIds.value = [...new Set([...batchTaskIds.value, task.task_id])]
-        mergeBatchTasks([task])
-        void pollTask(task.task_id)
-      }
-      ElMessage.success('已开始补采互动指标与评论；完成后会用于总结、追问和搜索')
-    } catch (error) {
-      const msg = error.response?.data?.detail || error.message || '互动与评论补采失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '互动与评论补采失败')
-    } finally {
-      retryingContentId.value = null
-    }
-  }
-
-  async function saveVideoDownloadSettings() {
-    try {
-      const res = await axios.put(`${API}/video-download-settings`, {
-        auto_download_bilibili_video: Boolean(autoDownloadBilibiliVideo.value),
-        douyin_video_quality: douyinVideoQuality.value
-      })
-      autoDownloadBilibiliVideo.value = Boolean(res.data?.auto_download_bilibili_video)
-      douyinVideoQuality.value = ['low', 'standard', 'high'].includes(res.data?.douyin_video_quality)
-        ? res.data.douyin_video_quality
-        : 'standard'
-      ElMessage.success('视频下载设置已保存')
-    } catch (error) {
-      ElMessage.error(error.response?.data?.detail || '视频下载设置保存失败')
-    }
-  }
-
-  async function redownloadContentVideo(item) {
-    if (!item?.id || retryingContentId.value) return
-    retryingContentId.value = item.id
-    ElMessage.info('正在创建视频下载任务…')
-    try {
-      const res = await axios.post(`${API}/content/${item.id}/redownload-video`, {}, { timeout: 10000 })
-      const task = res.data
-      if (task?.task_id) {
-        batchTaskNames.value[task.task_id] = item.title || item.source_url || `任务 ${task.task_id}`
-        batchTaskIds.value = [...new Set([...batchTaskIds.value, task.task_id])]
-        mergeBatchTasks([task])
-      }
-      applyTaskData(task)
-      await getContentItemDetail(item.id)
-      if (task?.task_id) void pollTask(task.task_id)
-      ElMessage.success(item.source_provider === 'bilibili'
-        ? '已开始优先获取外挂字幕并生成总结，视频预览将同步下载'
-        : '已开始重新下载本地预览视频')
-    } catch (error) {
-      const msg = error.response?.data?.detail || error.message || '重新下载视频失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '重新下载视频失败')
-    } finally {
-      retryingContentId.value = null
-    }
-  }
-
   async function loadContentAiCalls(contentItemId) {
     if (!contentItemId) return
     try {
@@ -3544,6 +3406,14 @@ export function useAppController() {
       parts.push('优先')
     }
     return parts.join(' · ')
+  }
+
+  function registerContentRecoveryBatchTask(task, item, { merge = true, allowSourceUrlFallback = true } = {}) {
+    const taskId = task?.task_id
+    if (!taskId) return
+    batchTaskNames.value[taskId] = item?.title || (allowSourceUrlFallback ? item?.source_url : '') || `任务 ${taskId}`
+    batchTaskIds.value = [...new Set([...batchTaskIds.value, taskId])]
+    if (merge) mergeBatchTasks([task])
   }
 
   async function pollBatchTasks() {
