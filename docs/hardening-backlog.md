@@ -64,6 +64,10 @@ lines.
   queue state. The active-reader EventSource lifecycle now lives in
   `features/tasks/useActiveTaskEventStreamController.js`, retaining task-ID
   validation, terminal cleanup and polling fallback behavior.
+  Task status, status-bar, progress, log-level and display-label presentation
+  now live in `features/tasks/taskDisplayPresentation.js` with pure boundary
+  tests; queue transport and durable task mutation remain in their existing
+  controllers.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it
