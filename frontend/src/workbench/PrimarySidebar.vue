@@ -276,6 +276,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contentIsUnread } from '../features/library/contentReadState.js'
 import {
+  canDropOnUserSeparator,
+  externalImportTargetFolderId,
+  hasExternalFiles,
+  libraryTreeDropPosition,
+  separatorDropPosition,
+} from '../features/library/libraryTreeDragPolicy.js'
+import {
   buildLibraryTreeNodes,
   libraryFolderPaths,
   libraryTreeNodeTitle,
@@ -1179,27 +1186,9 @@ function onDragStart(event, node) {
   event.dataTransfer.setData('text/plain', dragNodes.value.map((item) => item.name).join(', '))
 }
 
-function hasExternalFiles(event) {
-  return Array.from(event.dataTransfer?.types || []).includes('Files')
-}
-
-function externalImportTargetFolderId(node) {
-  let folderId = node.type === 'folder' ? node.id : node.parentId
-  const folders = new Map(props.libraryFolders.map((folder) => [String(folder.id), folder]))
-  const visited = new Set()
-  while (folderId && !visited.has(String(folderId))) {
-    const folder = folders.get(String(folderId))
-    if (!folder) return null
-    if (folder.name === '外部导入') return String(node.type === 'folder' ? node.id : node.parentId)
-    visited.add(String(folderId))
-    folderId = folder.parent_folder_id ? String(folder.parent_folder_id) : null
-  }
-  return null
-}
-
 function handleNodeDragOver(event, node) {
-  if (hasExternalFiles(event)) {
-    const folderId = externalImportTargetFolderId(node)
+  if (hasExternalFiles(event.dataTransfer)) {
+    const folderId = externalImportTargetFolderId(node, props.libraryFolders)
     if (!folderId) return
     event.dataTransfer.dropEffect = 'copy'
     dropState.value = { targetType: node.type, targetId: node.id, position: 'inside' }
@@ -1213,9 +1202,9 @@ function handleNodeDragOver(event, node) {
 }
 
 function handleNodeDrop(event, node) {
-  if (hasExternalFiles(event)) {
+  if (hasExternalFiles(event.dataTransfer)) {
     const files = Array.from(event.dataTransfer?.files || [])
-    const libraryFolderId = externalImportTargetFolderId(node)
+    const libraryFolderId = externalImportTargetFolderId(node, props.libraryFolders)
     clearDragState()
     if (files.length && libraryFolderId) emit('import-markdown', { files, libraryFolderId })
     return
@@ -1229,28 +1218,16 @@ function handleNodeDrop(event, node) {
   }
 }
 
-function canDropOnUserSeparator() {
-  if (dragNode.value?.type === 'user-group-separator') return true
-  const candidates = dragNodes.value.length ? dragNodes.value : [dragNode.value]
-  return candidates.length > 0 && candidates.every((node) => (
-    node?.type === 'folder' && !node.parentId
-  ))
-}
-
 function onSeparatorDragOver(event, node) {
-  if (searchActive.value || !dragNode.value || !canDropOnUserSeparator()) return
+  if (searchActive.value || !dragNode.value || !canDropOnUserSeparator(dragNode.value, dragNodes.value)) return
   const rect = event.currentTarget.getBoundingClientRect()
-  const position = event.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
+  const position = separatorDropPosition({ clientY: event.clientY, rect })
   event.dataTransfer.dropEffect = 'move'
   dropState.value = { targetType: node.type, targetId: node.id, position }
 }
 
-function separatorDropTarget(node) {
-  return node
-}
-
 function onSeparatorDrop(node) {
-  if (searchActive.value || !dragNode.value || !dropState.value || !canDropOnUserSeparator()) {
+  if (searchActive.value || !dragNode.value || !dropState.value || !canDropOnUserSeparator(dragNode.value, dragNodes.value)) {
     clearDragState()
     return
   }
@@ -1259,12 +1236,11 @@ function onSeparatorDrop(node) {
     clearDragState()
     return
   }
-  const target = separatorDropTarget(node)
   const sortOrder = sortOrderNearSeparator(node, dropState.value.position, dragNodes.value)
   const payload = {
     drag: dragNode.value,
     drags: dragNodes.value.length ? dragNodes.value : [dragNode.value],
-    target,
+    target: node,
     position: dropState.value.position,
     parentId: null,
     sortOrder,
@@ -1288,12 +1264,12 @@ function onDragOver(event, node) {
   if (!dragNode.value || dragNodes.value.some((item) => item.type === node.type && item.id === node.id)) return
   if (dragNode.value.type === 'user-group-separator' && (node.type !== 'folder' || node.depth !== 0)) return
   const rect = event.currentTarget.getBoundingClientRect()
-  const y = event.clientY - rect.top
-  const ratio = rect.height ? y / rect.height : 0.5
-  let position = 'inside'
-  if (ratio < 0.28) position = 'before'
-  else if (ratio > 0.72) position = 'after'
-  else if (node.type !== 'folder' || dragNode.value.type === 'user-group-separator') position = 'after'
+  const position = libraryTreeDropPosition({
+    clientY: event.clientY,
+    rect,
+    node,
+    dragNode: dragNode.value,
+  })
   dropState.value = { targetType: node.type, targetId: node.id, position }
 }
 

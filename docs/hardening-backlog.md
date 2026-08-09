@@ -68,8 +68,9 @@ lines.
   `features/library/libraryTreePreferences.js` and
   `features/library/libraryTreeModel.js`; marquee selection and virtual-row
   lifecycle now live in `workbench/useTreeBoxSelectionController.js` and
-  `workbench/useVirtualLibraryTreeController.js`. Drag/drop stays in the
-  sidebar until it has its own behavior boundary.
+  `workbench/useVirtualLibraryTreeController.js`. Drag/drop policy now lives
+  in `features/library/libraryTreeDragPolicy.js`; event dispatch and move
+  transactions stay in the sidebar until they have their own behavior boundary.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
   backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network
