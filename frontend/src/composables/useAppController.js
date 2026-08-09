@@ -260,18 +260,6 @@ export function useAppController() {
   })
   const selectedContentItem = ref(null)
   const {
-    loadCompletionNotifications,
-    openCompletionNotification,
-    startCompletionNotificationPolling,
-    stopCompletionNotificationPolling,
-  } = useCompletionNotificationController({
-    allContentItems,
-    getContentItemDetail,
-    openContentTab,
-    activeView,
-    ribbonItems,
-  })
-  const {
     cookieConfigured,
     cookieState,
     cookieStatusText,
@@ -386,6 +374,18 @@ export function useAppController() {
     allContentItems,
     selectedContentItem,
     applyContentFilter,
+  })
+  const {
+    loadCompletionNotifications,
+    openCompletionNotification,
+    startCompletionNotificationPolling,
+    stopCompletionNotificationPolling,
+  } = useCompletionNotificationController({
+    allContentItems,
+    getContentItemDetail,
+    openContentTab,
+    activeView,
+    ribbonItems,
   })
   const loadingContent = ref(false)
   const updatingContentId = ref(null)
