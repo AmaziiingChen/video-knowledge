@@ -39,6 +39,12 @@ lines.
   creation, deletion and schedule changes now live in
   `features/wechat/useWechatReportGroupController.js`, retaining prompt
   selection and refresh ordering.
+- [ ] Split `knowledge_v2.py` by structural chunking, source scope, retrieval,
+  embedding and grounded-answer responsibilities. Pure source Markdown cleanup,
+  token estimation and parent/child structural chunking now live in
+  `services/knowledge_chunking.py`; `knowledge_v2.py` re-exports the former
+  public chunking symbols so existing router, script and test imports remain
+  compatible.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
   The first library boundary, debounced global search and result hydration, now
