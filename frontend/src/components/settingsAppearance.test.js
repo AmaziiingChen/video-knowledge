@@ -6,6 +6,7 @@ const source = await readFile(new URL('./SettingsDialog.vue', import.meta.url), 
 const appSource = await readFile(new URL('../App.vue', import.meta.url), 'utf8')
 const chromeSource = await readFile(new URL('../workbench/WorkspaceChromeActions.vue', import.meta.url), 'utf8')
 const controllerSource = await readFile(new URL('../composables/useAppController.js', import.meta.url), 'utf8')
+const appSettingsControllerSource = await readFile(new URL('../features/settings/useAppSettingsController.js', import.meta.url), 'utf8')
 const desktopPresentationSource = await readFile(new URL('../config/desktopPresentation.js', import.meta.url), 'utf8')
 
 test('appearance settings show theme choices without a redundant heading', () => {
@@ -27,7 +28,8 @@ test('local processing fixes ASR to the native small-model baseline', () => {
   assert.match(desktopPresentationSource, /whisper_model: 'small'/)
   assert.match(desktopPresentationSource, /asr_model_strategy: 'manual'/)
   assert.match(desktopPresentationSource, /asr_backend: 'auto'/)
-  assert.match(controllerSource, /localStorage\.removeItem\(ASR_SETTINGS_KEY\)/)
+  assert.match(controllerSource, /useAppSettingsController/)
+  assert.match(appSettingsControllerSource, /localStorage\.removeItem\(ASR_SETTINGS_KEY\)/)
 })
 
 test('settings omit retired cache, conversation-mirror, and Telegram controls', () => {

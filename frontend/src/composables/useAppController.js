@@ -14,7 +14,6 @@ import {
   timingOrder
 } from '../config/workbenchOptions'
 import { promptTemplateDisplayName, promptTemplatePersistedName } from '../config/promptInterface'
-import { appearanceThemes, DESKTOP_ASR_POLICY, normalizeAppearanceTheme } from '../config/desktopPresentation'
 import {
   makeContentTab,
   tabIdForContent
@@ -87,6 +86,7 @@ import { useMarkdownOutputSettingsController } from '../features/library/useMark
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { usePlatformCredentialController } from '../features/integrations/usePlatformCredentialController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
+import { useAppSettingsController } from '../features/settings/useAppSettingsController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
 import { useActiveTaskEventStreamController } from '../features/tasks/useActiveTaskEventStreamController.js'
@@ -95,11 +95,19 @@ import { createTaskDisplayPresentation } from '../features/tasks/taskDisplayPres
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
-  const ASR_SETTINGS_KEY = 'video-knowledge.asr-settings.v1'
-  const AI_SETTINGS_KEY = 'video-knowledge.ai-settings.v1'
-  const ASSISTANT_SETTINGS_KEY = 'video-knowledge.assistant-settings.v1'
-  const APPEARANCE_SETTINGS_KEY = 'video-knowledge.appearance-settings.v1'
-  const themeOptions = appearanceThemes
+  const {
+    selectedAiModel,
+    assistantAiModel,
+    autoQaShortcutRecognition,
+    selectedTheme,
+    themeOptions,
+    selectedThemeOption,
+    asrRequestOptions,
+    aiRequestOptions,
+    normalizeAiModelValue,
+    startSettingsPersistence,
+    restoreSettings,
+  } = useAppSettingsController()
   const {
     workspaceTabs,
     activeWorkspaceTabId,
@@ -191,11 +199,6 @@ export function useAppController() {
   const asrBeamSize = ref(1)
   const asrVadFilter = ref(true)
   const asrFallbackEnabled = ref(false)
-  // The global selection is used for ingestion and all background work.
-  // The reading-side assistant starts from it but may be changed temporarily
-  // without unexpectedly making later batch jobs use a more expensive model.
-  const selectedAiModel = ref('deepseek-v4-flash:enabled')
-  const assistantAiModel = ref(selectedAiModel.value)
   const availableAiModels = ref([
     { value: 'deepseek-v4-flash:enabled', label: 'deepseek-v4-flash' },
     { value: 'deepseek-v4-pro:enabled', label: 'deepseek-v4-pro' }
@@ -490,7 +493,6 @@ export function useAppController() {
     getContentItemDetail,
     notify: ElMessage,
   })
-  const autoQaShortcutRecognition = ref(true)
   const {
     viewedContentIds,
     explicitlyUnreadContentIds,
@@ -529,7 +531,6 @@ export function useAppController() {
     notify: ElMessage,
     confirmDisconnect: requestDestructiveConfirmation,
   })
-  const selectedTheme = ref('paper')
   const markdownState = reactive({
     content_item_id: null,
     markdown_draft_path: null,
@@ -570,10 +571,6 @@ export function useAppController() {
 
   const renderedSummary = computed(() => {
     return renderMarkdown(result.summary)
-  })
-
-  const selectedThemeOption = computed(() => {
-    return themeOptions.find((item) => item.value === selectedTheme.value) || themeOptions[0]
   })
 
   const selectedMarkdownPreview = computed(() => {
@@ -1398,15 +1395,6 @@ export function useAppController() {
     transcriptSnapshotPreviewedTaskIds.add(task.task_id)
   }
 
-  // Audio and video share one predictable desktop baseline.  The runtime
-  // resolves `auto` to the host-native implementation; no user preference or
-  // stale localStorage value can change a new task's ASR configuration.
-  const asrRequestOptions = () => ({ ...DESKTOP_ASR_POLICY })
-
-  const aiRequestOptions = () => ({
-    ai_model: selectedAiModel.value
-  })
-
   const {
     clipboardWatching,
     clipboardScanning,
@@ -1426,42 +1414,6 @@ export function useAppController() {
     useCache
   })
 
-  const appearanceRequestOptions = () => ({ theme: selectedTheme.value })
-
-  const persistAiSettings = () => {
-    try {
-      localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(aiRequestOptions()))
-    } catch {
-      // 本地存储失败不影响处理流程。
-    }
-  }
-
-  const persistAssistantSettings = () => {
-    try {
-      localStorage.setItem(ASSISTANT_SETTINGS_KEY, JSON.stringify({
-        auto_qa_shortcut_recognition: Boolean(autoQaShortcutRecognition.value)
-      }))
-    } catch {
-      // 本地存储失败不影响追问功能。
-    }
-  }
-
-  const applyTheme = () => {
-    if (typeof document === 'undefined') return
-    document.documentElement.dataset.theme = selectedThemeOption.value.value
-    delete document.documentElement.dataset.readingTheme
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', selectedThemeOption.value.background)
-  }
-
-  const persistAppearanceSettings = () => {
-    applyTheme()
-    try {
-      localStorage.setItem(APPEARANCE_SETTINGS_KEY, JSON.stringify(appearanceRequestOptions()))
-    } catch {
-      // 本地存储失败不影响界面切换。
-    }
-  }
-
   watch(
     () => [
       activeWorkspaceContent.value?.id || '',
@@ -1473,17 +1425,9 @@ export function useAppController() {
     }),
     { flush: 'post' }
   )
-  watch(selectedAiModel, (model) => {
-    assistantAiModel.value = model
-    persistAiSettings()
-  })
-  watch(autoQaShortcutRecognition, persistAssistantSettings)
-  watch(selectedTheme, persistAppearanceSettings)
+  startSettingsPersistence()
   onMounted(async () => {
-    restoreAsrSettings()
-    const hasLocalAiSettings = restoreAiSettings()
-    restoreAssistantSettings()
-    restoreAppearanceSettings()
+    const { hasLocalAiSettings } = restoreSettings()
 
     // Electron has already verified that this is the backend instance it
     // launched. Do not race it with an arbitrary renderer timeout: the
@@ -1597,15 +1541,6 @@ export function useAppController() {
     return link.replace(/^https?:\/\//, '').replace(/^www\./, '').slice(0, 42)
   }
 
-  function normalizeAiModelValue(model) {
-    if (model === 'deepseek-chat') return 'deepseek-v4-flash:enabled'
-    if (model === 'deepseek-reasoner') return 'deepseek-v4-flash:enabled'
-    if (model === 'deepseek-v4-flash' || model === 'deepseek-v4-pro') {
-      return `${model}:enabled`
-    }
-    return model || 'deepseek-v4-flash:enabled'
-  }
-
   function stripAssistantMarkdown(markdown) {
     return documentMarkdownWithoutConversation(markdown)
       .replace(/\n## AI 摘要[\s\S]*$/u, '')
@@ -1644,57 +1579,6 @@ export function useAppController() {
     const detailsMatch = text.match(/<details>\s*<summary>(?:原文正文|原始转写文本)<\/summary>\s*([\s\S]*?)\s*<\/details>/iu)
     if (detailsMatch) return detailsMatch[1].trim()
     return ''
-  }
-
-  function restoreAsrSettings() {
-    try {
-      // v1 exposed ASR tuning.  New tasks are fixed to the desktop policy, so
-      // discard that local preset instead of silently carrying it forward.
-      localStorage.removeItem(ASR_SETTINGS_KEY)
-    } catch {
-      // Storage availability does not affect the fixed ASR policy.
-    }
-  }
-
-  function restoreAiSettings() {
-    try {
-      const raw = localStorage.getItem(AI_SETTINGS_KEY)
-      if (!raw) return false
-      const data = JSON.parse(raw)
-      selectedAiModel.value = normalizeAiModelValue(data.ai_model)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  function restoreAssistantSettings() {
-    try {
-      const raw = localStorage.getItem(ASSISTANT_SETTINGS_KEY)
-      if (!raw) return false
-      const data = JSON.parse(raw)
-      autoQaShortcutRecognition.value = Boolean(data.auto_qa_shortcut_recognition ?? true)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  function restoreAppearanceSettings() {
-    try {
-      const raw = localStorage.getItem(APPEARANCE_SETTINGS_KEY)
-      if (!raw) {
-        applyTheme()
-        return false
-      }
-      const data = JSON.parse(raw)
-      selectedTheme.value = normalizeAppearanceTheme(data.theme)
-      applyTheme()
-      return true
-    } catch {
-      applyTheme()
-      return false
-    }
   }
 
   function appendAsrFormData(formData) {
