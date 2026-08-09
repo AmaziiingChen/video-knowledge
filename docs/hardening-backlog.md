@@ -137,9 +137,11 @@ lines.
   summary cache now has its own database owner; the planner's JSON shape
   compatibility and parsing now live in `group_report_plan_shape.py`. The
   legacy first-sync task adapter now lives in
-  `wechat_initial_sync_queue.py`, leaving account/subscription persistence and
-  collection orchestration in `wechat_subscription.py`. Report normalization
-  and writing remain the next intentional boundaries in the main pipeline.
+  `wechat_initial_sync_queue.py`, while the paced all-subscription check
+  adapter and its remote/authorization stop policy now live in
+  `wechat_bulk_sync_queue.py`. Account/subscription persistence and collection
+  orchestration remain in `wechat_subscription.py`. Report normalization and
+  writing remain the next intentional boundaries in the main pipeline.
 
 ## Non-negotiable compatibility checks
 
