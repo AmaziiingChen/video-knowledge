@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from config import settings
-from routers.tasks import TaskResponse, _to_response
+from presentation.task_responses import TaskResponse, to_task_response
 from services.pipeline_runner import PipelineRequest, WHISPER_MODELS
 from services.manual_collection_settings import manual_collection_settings
 from services.subtitles import SUBTITLE_EXTENSIONS
@@ -141,7 +141,7 @@ async def create_upload_tasks(
         )
         records.append(task_manager.create(request))
 
-    return UploadTasksResponse(tasks=[_to_response(record) for record in records])
+    return UploadTasksResponse(tasks=[to_task_response(record) for record in records])
 
 
 @router.post("/upload-subtitle-tasks", response_model=UploadTasksResponse)
@@ -192,4 +192,4 @@ async def create_upload_subtitle_tasks(
         )
         records.append(task_manager.create(request))
 
-    return UploadTasksResponse(tasks=[_to_response(record) for record in records])
+    return UploadTasksResponse(tasks=[to_task_response(record) for record in records])

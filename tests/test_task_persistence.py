@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app
-from routers.tasks import _to_response
+from presentation.task_responses import to_task_response
 from services.pipeline_runner import (
     AICallInfo,
     PipelineErrorInfo,
@@ -100,7 +100,7 @@ def test_task_state_persistence_retries_busy_database_and_exposes_failure():
 
         assert mocked_connect.call_count == TASK_PERSISTENCE_ATTEMPTS
         assert manager.get(record.task_id).persistence_error == "任务暂时无法写入本地数据库"
-        response = _to_response(manager.get(record.task_id))
+        response = to_task_response(manager.get(record.task_id))
         assert response.status == "queued"
         assert response.persistence_error == "任务暂时无法写入本地数据库"
         assert response.error == "任务暂时无法写入本地数据库"

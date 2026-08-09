@@ -34,7 +34,9 @@ frontend/
     workbench/          shell, panes, tabs, editor and navigation surfaces
 
 backend/
-  main.py               application composition, middleware and router registration
+  main.py               application composition, middleware and lifecycle
+  router_registry.py    explicit API router registration
+  presentation/         shared response models and record presenters
   routers/              HTTP validation and response adaptation
   services/             domain operations and infrastructure implementations
   native/               macOS-specific helpers
