@@ -48,6 +48,12 @@ a refactor shrinks its file. Raising a ceiling merely to pass CI is forbidden.
 This budget does not declare the current sizes healthy. It prevents regression
 while the files are split into feature-owned modules.
 
+The second contraction ratchet moves publishing settings, cover tasks,
+selected-text context, preview-find state, report data contracts and Markdown
+normalization behind explicit owners. The corresponding legacy ceilings now
+match the smaller files; CI will reject putting those responsibilities back
+into the composition roots.
+
 ## Exit criteria
 
 - No Vue or JavaScript production file exceeds 1,000 lines without a documented

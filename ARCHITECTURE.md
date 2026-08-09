@@ -53,6 +53,22 @@ docs/                   product, release and integration documentation
 
 The current `composables/`, `workbench/`, `routers/`, and `services/` directories still contain oversized modules. New work must follow the ownership rules below instead of adding another branch to the application entrypoints.
 
+### Extracted ownership boundaries
+
+| Boundary | Owns | Deliberately does not own |
+| --- | --- | --- |
+| `features/wechat/useWechatPublishingSettingsController.js` | masked publishing settings, Keychain-backed form lifecycle, cover-provider connection checks | draft creation, cover task polling, workspace navigation |
+| `features/wechat/useWechatCoverController.js` | cover planning, history selection, task polling and cleanup | publication credentials, report generation, editor rendering |
+| `features/assistant/useSelectedTextContext.js` | selected quote normalization and its explicit assistant-input token | reader DOM selection, Q&A transport, document persistence |
+| `workbench/usePreviewFindController.js` | find-bar state, local highlighting, navigation and cleanup | deciding which reader DOM is active, webview implementation details |
+| `services/group_report_models.py` | immutable report inputs, outputs and progress contracts | model calls, persistence, Markdown rendering |
+| `services/group_report_markdown.py` | deterministic citation and Markdown normalization | report planning, provider calls, summary cache, task state |
+
+The legacy composition files re-export or compose these boundaries so existing
+callers keep their API. Future contractions should extend the same owners rather
+than recreating parallel state in `App.vue`, `EditorHost.vue`, or the report
+pipeline.
+
 ## Frontend dependency direction
 
 ```mermaid

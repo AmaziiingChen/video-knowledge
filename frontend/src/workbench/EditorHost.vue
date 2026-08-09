@@ -644,7 +644,6 @@ const questionPageIcon = 'questionmark.text.page'
 const playFillIcon = 'play.fill'
 const pauseFillIcon = 'pause.fill'
 const ellipsisIcon = 'ellipsis'
-import { clearPreviewTextHighlights, highlightPreviewText } from '../utils/previewTextSearch'
 import {
   readableCharacterCount,
   reportBodyHtmlForCharacterCount,
@@ -676,6 +675,7 @@ import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
 import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
+import { usePreviewFindController } from './usePreviewFindController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
@@ -763,19 +763,9 @@ const activeArticlePreviewFrame = ref(null)
 const activeLocalHtmlRemoteWebview = ref(null)
 const xhsGalleryTrack = ref(null)
 const articleOutlineRoot = ref(null)
-const previewFindOpen = ref(false)
-const previewFindQuery = ref('')
-const previewFindMatchCount = ref(0)
-const previewFindActiveIndex = ref(-1)
-const previewFindTruncated = ref(false)
-const previewFindFocusRequest = ref(0)
 const selectedTextAction = ref(null)
 const readingProgress = ref(0)
 const readingCharacterCount = ref(0)
-let previewFindHighlightRoot = null
-let previewFindMatches = []
-let previewFindRefreshFrame = 0
-let previewFindRestoreFocus = null
 let localHtmlRemoteFindRequestId = null
 const wechatRemoteFindRequestIds = new Map()
 let removeDesktopPreviewFindListener = null
@@ -900,6 +890,31 @@ const activeLocalHtmlRemotePage = computed(() => {
   return { contentItemId: tabId, sourceUrl }
 })
 const isLocalHtmlRemoteVisible = computed(() => Boolean(activeLocalHtmlRemotePage.value))
+const {
+  clearPreviewFindHighlights,
+  closePreviewFind,
+  disposePreviewFindController,
+  navigatePreviewFind,
+  openPreviewFind,
+  previewFindActiveIndex,
+  previewFindFocusRequest,
+  previewFindMatchCount,
+  previewFindOpen,
+  previewFindQuery,
+  previewFindTruncated,
+  schedulePreviewFindRefresh,
+  setRemoteFindResult,
+  updatePreviewFindQuery,
+} = usePreviewFindController({
+  hasActiveContent: () => Boolean(activeContentTab.value),
+  getMode: previewFindMode,
+  getLocalRoot: previewFindRoot,
+  getFocusFallback: () => contentHero.value,
+  onLocalMatchActivated: seekMediaToPreviewFindMatch,
+  refreshRemote: refreshRemotePreviewFind,
+  navigateRemote: navigateRemotePreviewFind,
+  clearRemote: clearRemotePreviewFind,
+})
 const activeRemoteOutlineKey = computed(() => {
   if (isWechatRemoteVisible.value) return `wechat:${activeWechatContent.value?.id || ''}`
   if (isLocalHtmlRemoteVisible.value) return `local-html:${activeContentTab.value?.id || ''}`
@@ -1046,11 +1061,6 @@ watch(activeTimelineKey, () => {
   scheduleActiveTranscriptScroll()
 }, { flush: 'post' })
 
-watch(previewFindQuery, () => {
-  if ((isWechatRemoteVisible.value || isLocalHtmlRemoteVisible.value) && previewFindOpen.value) return
-  schedulePreviewFindRefresh()
-})
-
 watch(
   () => [
     activeContentTab.value?.id || '',
@@ -1079,10 +1089,7 @@ onBeforeUnmount(() => {
     clearTimeout(transcriptScrollTimer)
     transcriptScrollTimer = null
   }
-  if (previewFindRefreshFrame) {
-    window.cancelAnimationFrame(previewFindRefreshFrame)
-    previewFindRefreshFrame = 0
-  }
+  disposePreviewFindController()
   if (selectedTextActionRevealFrame) {
     window.cancelAnimationFrame(selectedTextActionRevealFrame)
     selectedTextActionRevealFrame = 0
@@ -1092,7 +1099,6 @@ onBeforeUnmount(() => {
     readingProgressRefreshFrame = 0
   }
   detachReadingProgressFrame()
-  clearPreviewFindHighlights()
   window.removeEventListener('keydown', handlePreviewFindShortcut, true)
   document.removeEventListener('selectionchange', handleDocumentSelectionChange)
   document.removeEventListener('pointerdown', handleSelectedTextPointerDown, true)
@@ -1315,9 +1321,10 @@ function handleLocalHtmlRemoteConsoleMessage(contentItemId, event) {
 function handleLocalHtmlRemoteFoundInPage(event) {
   const result = event?.result
   if (!result || result.requestId !== localHtmlRemoteFindRequestId) return
-  previewFindMatchCount.value = Number(result.matches) || 0
-  previewFindActiveIndex.value = Math.max(-1, (Number(result.activeMatchOrdinal) || 0) - 1)
-  previewFindTruncated.value = false
+  setRemoteFindResult({
+    matchCount: result.matches,
+    activeMatchOrdinal: result.activeMatchOrdinal,
+  })
 }
 
 function isXiaohongshuArticleTab(tabId) {
@@ -1530,9 +1537,10 @@ function handleWechatRemoteFoundInPage(contentItemId, event) {
   const result = event?.result
   if (!result || !webview || !isWechatRemoteVisible.value) return
   if (result.requestId !== wechatRemoteFindRequestIds.get(contentItemId)) return
-  previewFindMatchCount.value = Number(result.matches) || 0
-  previewFindActiveIndex.value = Math.max(-1, (Number(result.activeMatchOrdinal) || 0) - 1)
-  previewFindTruncated.value = false
+  setRemoteFindResult({
+    matchCount: result.matches,
+    activeMatchOrdinal: result.activeMatchOrdinal,
+  })
 }
 
 function handleWechatRemoteConsoleMessage(contentItemId, event) {
@@ -1792,6 +1800,52 @@ function articleAttachmentsForTab(tabId) {
   return Array.isArray(attachments) ? attachments : []
 }
 
+function previewFindMode() {
+  if (isWechatRemoteVisible.value) return 'wechat'
+  if (isLocalHtmlRemoteVisible.value) return 'local-html'
+  return 'local'
+}
+
+function refreshRemotePreviewFind(mode) {
+  if (mode === 'wechat') refreshWechatRemoteFind()
+  else if (mode === 'local-html') refreshLocalHtmlRemoteFind()
+}
+
+function clearRemotePreviewFind({ clearSelection = false } = {}) {
+  clearWechatRemoteFind({ clearSelection })
+  clearLocalHtmlRemoteFind({ clearSelection })
+}
+
+function navigateRemotePreviewFind(mode, query, direction) {
+  if (mode === 'wechat') {
+    const contentItemId = activeWechatContent.value?.id
+    const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
+    if (!contentItemId || !webview?.findInPage) return
+    try {
+      wechatRemoteFindRequestIds.set(contentItemId, webview.findInPage(query, {
+        forward: direction >= 0,
+        findNext: false,
+        matchCase: false,
+      }))
+    } catch {
+      wechatRemoteFindRequestIds.delete(contentItemId)
+    }
+    return
+  }
+  if (mode !== 'local-html') return
+  const webview = activeLocalHtmlRemoteWebview.value
+  if (!webview?.findInPage) return
+  try {
+    localHtmlRemoteFindRequestId = webview.findInPage(query, {
+      forward: direction >= 0,
+      findNext: false,
+      matchCase: false,
+    })
+  } catch {
+    localHtmlRemoteFindRequestId = null
+  }
+}
+
 function previewFindRoot() {
   const tab = activeContentTab.value
   if (!tab) return null
@@ -1806,38 +1860,12 @@ function previewFindRoot() {
   return contentHero.value?.querySelector('.article-preview-body') || null
 }
 
-function updatePreviewFindActiveMatch(index, { scroll = false } = {}) {
-  for (const match of previewFindMatches) match.classList.remove('preview-find-active')
-  if (!previewFindMatches.length) {
-    previewFindActiveIndex.value = -1
-    return
-  }
-  const nextIndex = (index + previewFindMatches.length) % previewFindMatches.length
-  const match = previewFindMatches[nextIndex]
-  match.classList.add('preview-find-active')
-  previewFindActiveIndex.value = nextIndex
-  if (scroll) {
-    seekMediaToPreviewFindMatch(match)
-    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    match.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center', inline: 'nearest' })
-  }
-}
-
 function seekMediaToPreviewFindMatch(match) {
   const tab = activeContentTab.value
   if (!tab || !hasTranscriptTimeline(tab.id)) return
   const startSeconds = Number(match.closest('.timeline-segment')?.dataset.startSeconds)
   if (!Number.isFinite(startSeconds)) return
   handleTimelineSegmentClick(tab.id, startSeconds)
-}
-
-function clearPreviewFindHighlights() {
-  if (previewFindHighlightRoot) clearPreviewTextHighlights(previewFindHighlightRoot)
-  previewFindHighlightRoot = null
-  previewFindMatches = []
-  previewFindMatchCount.value = 0
-  previewFindActiveIndex.value = -1
-  previewFindTruncated.value = false
 }
 
 function clearLocalHtmlRemoteFind({ clearSelection = false } = {}) {
@@ -1904,69 +1932,6 @@ function refreshWechatRemoteFind() {
   } catch {
     wechatRemoteFindRequestIds.delete(contentItemId)
   }
-}
-
-function updatePreviewFindQuery(query) {
-  previewFindQuery.value = query
-  // The isolated original-page preview has its own DOM.  Query it directly
-  // from the input event so matching is live; Enter remains navigation only.
-  if (previewFindOpen.value && isLocalHtmlRemoteVisible.value) {
-    refreshLocalHtmlRemoteFind()
-  } else if (previewFindOpen.value && isWechatRemoteVisible.value) {
-    refreshWechatRemoteFind()
-  }
-}
-
-function refreshPreviewFind() {
-  previewFindRefreshFrame = 0
-  if (!previewFindOpen.value) return
-  if (isWechatRemoteVisible.value) {
-    clearPreviewFindHighlights()
-    refreshWechatRemoteFind()
-    return
-  }
-  if (isLocalHtmlRemoteVisible.value) {
-    clearPreviewFindHighlights()
-    refreshLocalHtmlRemoteFind()
-    return
-  }
-  const root = previewFindRoot()
-  if (previewFindHighlightRoot && previewFindHighlightRoot !== root) clearPreviewTextHighlights(previewFindHighlightRoot)
-  previewFindHighlightRoot = root
-  const highlighted = highlightPreviewText(root, previewFindQuery.value)
-  previewFindMatches = highlighted.matches
-  previewFindTruncated.value = highlighted.truncated
-  previewFindMatchCount.value = previewFindMatches.length
-  updatePreviewFindActiveMatch(0)
-}
-
-function schedulePreviewFindRefresh() {
-  if (!previewFindOpen.value) return
-  if (previewFindRefreshFrame) window.cancelAnimationFrame(previewFindRefreshFrame)
-  previewFindRefreshFrame = window.requestAnimationFrame(refreshPreviewFind)
-}
-
-function openPreviewFind() {
-  if (!activeContentTab.value) return
-  if (!previewFindOpen.value) {
-    previewFindRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const selectedText = window.getSelection?.()?.toString().trim() || ''
-    if (!previewFindQuery.value && selectedText && selectedText.length <= 120) previewFindQuery.value = selectedText
-    previewFindOpen.value = true
-  }
-  previewFindFocusRequest.value += 1
-  schedulePreviewFindRefresh()
-}
-
-function closePreviewFind() {
-  previewFindOpen.value = false
-  previewFindQuery.value = ''
-  clearWechatRemoteFind({ clearSelection: true })
-  clearLocalHtmlRemoteFind({ clearSelection: true })
-  clearPreviewFindHighlights()
-  const target = previewFindRestoreFocus?.isConnected ? previewFindRestoreFocus : contentHero.value
-  previewFindRestoreFocus = null
-  target?.focus?.({ preventScroll: true })
 }
 
 function handleDocumentSelectionChange() {
@@ -2089,41 +2054,6 @@ function askAboutSelectedText() {
     void webview?.executeJavaScript?.('window.getSelection?.().removeAllRanges()').catch(() => {})
   }
   clearSelectedTextAction()
-}
-
-function navigatePreviewFind(direction) {
-  if (!previewFindQuery.value.trim()) return
-  if (isWechatRemoteVisible.value) {
-    const contentItemId = activeWechatContent.value?.id
-    const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
-    if (!contentItemId || !webview?.findInPage) return
-    try {
-      wechatRemoteFindRequestIds.set(contentItemId, webview.findInPage(previewFindQuery.value.trim(), {
-        forward: direction >= 0,
-        findNext: false,
-        matchCase: false,
-      }))
-    } catch {
-      wechatRemoteFindRequestIds.delete(contentItemId)
-    }
-    return
-  }
-  if (isLocalHtmlRemoteVisible.value) {
-    const webview = activeLocalHtmlRemoteWebview.value
-    if (!webview?.findInPage) return
-    try {
-      localHtmlRemoteFindRequestId = webview.findInPage(previewFindQuery.value.trim(), {
-        forward: direction >= 0,
-        findNext: false,
-        matchCase: false,
-      })
-    } catch {
-      localHtmlRemoteFindRequestId = null
-    }
-    return
-  }
-  if (!previewFindMatches.length) return
-  updatePreviewFindActiveMatch(previewFindActiveIndex.value + direction, { scroll: true })
 }
 
 function handleReadingScroll(event) {

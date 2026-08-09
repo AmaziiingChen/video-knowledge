@@ -863,7 +863,9 @@ import { requestDestructiveConfirmation } from './composables/useDestructiveConf
 import { enqueueSourceSyncTask, observeSourceSyncTask } from './utils/sourceSyncTask'
 import { promptTaskContracts, promptTemplateDisplayName } from './config/promptInterface'
 import { WECHAT_COVER_STYLE_OPTIONS } from './config/wechatCoverStyles'
+import { useWechatCoverController } from './features/wechat/useWechatCoverController.js'
 import { useWechatDraftController } from './features/wechat/useWechatDraftController.js'
+import { useWechatPublishingSettingsController } from './features/wechat/useWechatPublishingSettingsController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -1481,18 +1483,34 @@ async function openCampusAttachment(attachment) {
     ElMessage.error(error?.message || '附件下载失败，请重新连接 WebVPN 后重试')
   }
 }
-const wechatPublishingSettings = ref({ configured: false, display_name: '', app_id_masked: '', status: 'unconfigured', last_error: '' })
-const wechatPublishingDisplayName = ref('订阅号')
-const wechatPublishingAppId = ref('')
-const wechatPublishingAppSecret = ref('')
-const wechatPublicSiteBaseUrl = ref('')
-const savingWechatPublishingSettings = ref(false)
-const wechatQwenCoverSettings = ref({ configured: false, endpoint: '', model: 'qwen-image-2.0' })
-const wechatQwenCoverApiKey = ref('')
-const wechatQwenCoverEndpoint = ref('https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation')
-const wechatQwenCoverModel = ref('qwen-image-2.0')
-const savingWechatQwenCoverSettings = ref(false)
-const testingWechatQwenCoverConnection = ref(false)
+const {
+  ensureWechatCoverConfigured,
+  ensureWechatPublishingConfigured,
+  loadWechatPublishingSettings,
+  loadWechatQwenCoverSettings,
+  saveWechatPublishingSettings,
+  saveWechatQwenCoverSettings,
+  savingWechatPublishingSettings,
+  savingWechatQwenCoverSettings,
+  testWechatQwenCoverConnection,
+  testingWechatQwenCoverConnection,
+  wechatPublicSiteBaseUrl,
+  wechatPublishingAppId,
+  wechatPublishingAppSecret,
+  wechatPublishingDisplayName,
+  wechatPublishingSettings,
+  wechatQwenCoverApiKey,
+  wechatQwenCoverEndpoint,
+  wechatQwenCoverModel,
+  wechatQwenCoverSettings,
+} = useWechatPublishingSettingsController({
+  apiBase: WECHAT_PUBLISHING_API,
+  openSettings: (section) => {
+    settingsInitialSection.value = section
+    showSettings.value = true
+  },
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
 const {
   confirmWechatPublication,
   createWechatReportDraft,
@@ -1517,40 +1535,43 @@ const {
   wechatDraftTitle,
 } = useWechatDraftController({
   apiBase: WECHAT_PUBLISHING_API,
-  ensurePublishingConfigured: async () => {
-    if (!wechatPublishingSettings.value.configured) await loadWechatPublishingSettings()
-    if (wechatPublishingSettings.value.configured) return true
-    settingsInitialSection.value = 'wechat'
-    showSettings.value = true
-    ElMessage.info('请先在“微信公众号”中配置订阅号发布账号')
-    return false
+  ensurePublishingConfigured: ensureWechatPublishingConfigured,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+const {
+  confirmWechatCoverPlan,
+  disposeWechatCoverController,
+  loadWechatCoverHistory,
+  openWechatCoverPlan,
+  planWechatCover,
+  planningWechatCover,
+  previewWechatCoverPrompt,
+  previewingWechatCoverPrompt,
+  regenerateWechatReportCover,
+  selectWechatReportCover,
+  submittingWechatCoverPlan,
+  wechatCoverGeneratingContentIds,
+  wechatCoverHistoryForContent,
+  wechatCoverPlan,
+  wechatCoverPlanDialogVisible,
+  wechatCoverResolvedPrompt,
+  wechatCoverStyle,
+  wechatCoverSwitchingContentIds,
+} = useWechatCoverController({
+  apiBase: WECHAT_PUBLISHING_API,
+  selectedContentItem,
+  ensureCoverConfigured: ensureWechatCoverConfigured,
+  refreshContentItems: loadContentItems,
+  refreshContentAiCalls: loadContentAiCalls,
+  refreshAiTokenUsage: loadAiTokenUsageSummary,
+  draftState: {
+    contentItemId: wechatDraftContentItemId,
+    coverStatus: wechatDraftCoverStatus,
+    coverUrl: wechatDraftCoverUrl,
+    dialogVisible: wechatDraftDialogVisible,
   },
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
-const wechatCoverPlanDialogVisible = ref(false)
-const planningWechatCover = ref(false)
-const submittingWechatCoverPlan = ref(false)
-const previewingWechatCoverPrompt = ref(false)
-const wechatCoverPlanContentItemId = ref('')
-const wechatCoverPlanTitle = ref('')
-const wechatCoverPlan = ref({})
-const wechatCoverResolvedPrompt = ref('')
-const wechatCoverStyle = ref('minimal_zine')
-const wechatCoverGeneratingContentIds = ref([])
-const wechatCoverSwitchingContentIds = ref([])
-const wechatCoverHistories = ref({})
-const wechatCoverPollTimers = new Map()
-watch(
-  () => {
-    const item = selectedContentItem.value
-    const isReport = item?.source_provider === 'wechat_report' || item?.content_type === 'report'
-    return isReport ? String(item?.id || '') : ''
-  },
-  (contentItemId) => {
-    if (contentItemId) void loadWechatCoverHistory(contentItemId)
-  },
-  { immediate: true },
-)
 const loadingWeChatSubscriptions = ref(false)
 let wechatSubscriptionsLoadVersion = 0
 const wechatAccounts = ref([])
@@ -1734,333 +1755,6 @@ async function openSettings() {
   settingsInitialSection.value = 'appearance'
   showSettings.value = true
   await Promise.all([loadWeChatSubscriptions(), loadWechatPublishingSettings(), loadWechatQwenCoverSettings(), loadMediaTools(), loadRuntimeComponents(), loadDeepSeekSettings(), loadPaddleOcrSettings(), loadManualCollectionSettings(), loadFolderImportWatcherStatus()])
-}
-
-async function loadWechatPublishingSettings() {
-  try {
-    const response = await axios.get(`${WECHAT_PUBLISHING_API}/settings`, { timeout: 10000 })
-    wechatPublishingSettings.value = response.data || { configured: false }
-    wechatPublishingDisplayName.value = response.data?.display_name || '订阅号'
-    wechatPublishingAppId.value = ''
-    wechatPublishingAppSecret.value = ''
-    wechatPublicSiteBaseUrl.value = response.data?.public_site_base_url || ''
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法读取公众号发布配置'))
-  }
-}
-
-async function loadWechatQwenCoverSettings() {
-  try {
-    const response = await axios.get(`${WECHAT_PUBLISHING_API}/cover-settings`, { timeout: 10000 })
-    wechatQwenCoverSettings.value = response.data || { configured: false }
-    wechatQwenCoverEndpoint.value = response.data?.endpoint || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation'
-    wechatQwenCoverModel.value = response.data?.model || 'qwen-image-2.0'
-    wechatQwenCoverApiKey.value = ''
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法读取千问封面配置'))
-  }
-}
-
-async function saveWechatPublishingSettings() {
-  savingWechatPublishingSettings.value = true
-  try {
-    const response = await axios.put(`${WECHAT_PUBLISHING_API}/settings`, {
-      display_name: wechatPublishingDisplayName.value.trim() || '订阅号',
-      app_id: wechatPublishingAppId.value.trim(),
-      app_secret: wechatPublishingAppSecret.value.trim(),
-      public_site_base_url: wechatPublicSiteBaseUrl.value.trim(),
-    }, { timeout: 15000 })
-    wechatPublishingSettings.value = response.data || { configured: true }
-    wechatPublishingAppId.value = ''
-    wechatPublishingAppSecret.value = ''
-    ElMessage.success('公众号发布账号已保存到本机 Keychain')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '公众号发布账号保存失败'))
-  } finally {
-    savingWechatPublishingSettings.value = false
-  }
-}
-
-async function saveWechatQwenCoverSettings() {
-  savingWechatQwenCoverSettings.value = true
-  try {
-    const response = await axios.put(`${WECHAT_PUBLISHING_API}/cover-settings`, {
-      api_key: wechatQwenCoverApiKey.value.trim() || undefined,
-      endpoint: wechatQwenCoverEndpoint.value.trim(),
-      model: wechatQwenCoverModel.value.trim(),
-    }, { timeout: 15000 })
-    wechatQwenCoverSettings.value = response.data || { configured: true }
-    wechatQwenCoverApiKey.value = ''
-    ElMessage.success('千问封面配置已保存到本机 Keychain')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '千问封面配置保存失败'))
-  } finally {
-    savingWechatQwenCoverSettings.value = false
-  }
-}
-
-async function testWechatQwenCoverConnection() {
-  try {
-    await ElMessageBox.confirm(
-      '将生成 1 张测试图来验证当前 API Key、接口地址和图像模型；此操作可能消耗免费额度或余额。',
-      '测试封面模型',
-      { confirmButtonText: '生成测试图', cancelButtonText: '取消', type: 'warning' },
-    )
-  } catch {
-    return
-  }
-
-  testingWechatQwenCoverConnection.value = true
-  try {
-    const response = await axios.post(`${WECHAT_PUBLISHING_API}/cover-settings/test`, {
-      api_key: wechatQwenCoverApiKey.value.trim() || undefined,
-      endpoint: wechatQwenCoverEndpoint.value.trim(),
-      model: wechatQwenCoverModel.value.trim(),
-    }, { timeout: 90000 })
-    const elapsed = Number(response.data?.elapsed_ms || 0)
-    ElMessage.success(`封面模型可用${elapsed ? ` · ${elapsed} ms` : ''}`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '封面模型测试失败'))
-  } finally {
-    testingWechatQwenCoverConnection.value = false
-  }
-}
-
-async function ensureWechatCoverConfigured() {
-  if (!wechatQwenCoverSettings.value.configured) await loadWechatQwenCoverSettings()
-  if (wechatQwenCoverSettings.value.configured) return true
-  settingsInitialSection.value = 'ai'
-  showSettings.value = true
-  ElMessage.info('请先在“AI 服务”设置中配置图像模型 API Key')
-  return false
-}
-
-async function openWechatCoverPlan(contentItem) {
-  const contentItemId = contentItem?.id
-  if (!contentItemId || !(await ensureWechatCoverConfigured())) return
-  wechatCoverPlanContentItemId.value = contentItemId
-  wechatCoverPlanTitle.value = String(contentItem?.title || '')
-  wechatCoverPlan.value = {}
-  wechatCoverResolvedPrompt.value = ''
-  wechatCoverStyle.value = 'minimal_zine'
-  wechatCoverPlanDialogVisible.value = true
-}
-
-async function planWechatCover(coverStyle) {
-  const contentItemId = wechatCoverPlanContentItemId.value
-  if (!contentItemId) return
-  wechatCoverStyle.value = String(coverStyle || 'minimal_zine')
-  wechatCoverPlan.value = {}
-  wechatCoverResolvedPrompt.value = ''
-  planningWechatCover.value = true
-  try {
-    const response = await axios.post(
-      `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}/cover-plan`,
-      {
-        title: wechatCoverPlanTitle.value.trim(),
-        cover_style: wechatCoverStyle.value,
-      },
-      { timeout: 120000 },
-    )
-    if (wechatCoverPlanContentItemId.value !== contentItemId) return
-    wechatCoverPlan.value = response.data?.visual_brief || {}
-    wechatCoverResolvedPrompt.value = response.data?.resolved_image_prompt || ''
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '公众号封面主题策划失败'))
-  } finally {
-    planningWechatCover.value = false
-  }
-}
-
-async function previewWechatCoverPrompt(visualBrief) {
-  const contentItemId = wechatCoverPlanContentItemId.value
-  if (!contentItemId) return
-  previewingWechatCoverPrompt.value = true
-  try {
-    const response = await axios.post(
-      `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}/cover-prompt`,
-      {
-        title: wechatCoverPlanTitle.value.trim(),
-        visual_brief: visualBrief,
-      },
-      { timeout: 15000 },
-    )
-    wechatCoverResolvedPrompt.value = response.data?.resolved_image_prompt || ''
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法解析完整生图提示词'))
-  } finally {
-    previewingWechatCoverPrompt.value = false
-  }
-}
-
-async function confirmWechatCoverPlan(visualBrief) {
-  const contentItemId = wechatCoverPlanContentItemId.value
-  if (!contentItemId || !(await ensureWechatCoverConfigured())) return
-  submittingWechatCoverPlan.value = true
-  try {
-    const response = await axios.post(
-      `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}/cover`,
-      {
-        title: wechatCoverPlanTitle.value.trim(),
-        visual_brief: visualBrief,
-      },
-      { timeout: 20000 },
-    )
-    wechatCoverPlanDialogVisible.value = false
-    monitorWechatCoverTask(response.data, contentItemId)
-    ElMessage.success('封面已进入生成队列')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法开始生成公众号封面'))
-  } finally {
-    submittingWechatCoverPlan.value = false
-  }
-}
-
-async function regenerateWechatReportCover(contentItem) {
-  const contentItemId = contentItem?.id
-  if (!contentItemId || wechatCoverGeneratingContentIds.value.includes(contentItemId)) return
-  if (!(await ensureWechatCoverConfigured())) return
-  try {
-    const response = await axios.post(
-      `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}/cover`,
-      { title: String(contentItem?.title || '').trim() },
-      { timeout: 20000 },
-    )
-    monitorWechatCoverTask(response.data, contentItemId)
-    ElMessage.success('正在使用当前视觉策划重新生成封面')
-  } catch (error) {
-    const message = wechatErrorMessage(error, '无法重新生成公众号封面')
-    if (message.includes('视觉策划')) {
-      await openWechatCoverPlan(contentItem)
-      return
-    }
-    ElMessage.error(message)
-  }
-}
-
-function wechatCoverHistoryForContent(contentItemId) {
-  return wechatCoverHistories.value[String(contentItemId || '')] || {
-    active_cover_id: '',
-    covers: [],
-  }
-}
-
-async function loadWechatCoverHistory(contentItemId, { showError = false } = {}) {
-  const normalizedId = String(contentItemId || '')
-  if (!normalizedId) return
-  try {
-    const response = await axios.get(
-      `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(normalizedId)}/covers`,
-      { timeout: 10000 },
-    )
-    wechatCoverHistories.value = {
-      ...wechatCoverHistories.value,
-      [normalizedId]: {
-        active_cover_id: String(response.data?.active_cover_id || ''),
-        covers: Array.isArray(response.data?.covers) ? response.data.covers : [],
-      },
-    }
-  } catch (error) {
-    if (showError) {
-      ElMessage.error(wechatErrorMessage(error, '无法读取封面历史'))
-    }
-  }
-}
-
-async function selectWechatReportCover({ contentItemId, coverId }) {
-  const normalizedId = String(contentItemId || '')
-  const normalizedCoverId = String(coverId || '')
-  if (
-    !normalizedId
-    || !normalizedCoverId
-    || wechatCoverSwitchingContentIds.value.includes(normalizedId)
-  ) return
-  wechatCoverSwitchingContentIds.value = [
-    ...wechatCoverSwitchingContentIds.value,
-    normalizedId,
-  ]
-  try {
-    const response = await axios.post(
-      `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(normalizedId)}/covers/${encodeURIComponent(normalizedCoverId)}/select`,
-      {},
-      { timeout: 10000 },
-    )
-    wechatCoverHistories.value = {
-      ...wechatCoverHistories.value,
-      [normalizedId]: {
-        active_cover_id: String(response.data?.active_cover_id || ''),
-        covers: Array.isArray(response.data?.covers) ? response.data.covers : [],
-      },
-    }
-    if (wechatDraftDialogVisible.value && wechatDraftContentItemId.value === normalizedId) {
-      wechatDraftCoverUrl.value = String(response.data?.cover_url || '')
-      wechatDraftCoverStatus.value = 'qwen_generated'
-    }
-    await loadContentItems()
-    ElMessage.success('已选择此封面，发布草稿时会使用它')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法切换公众号封面'))
-  } finally {
-    wechatCoverSwitchingContentIds.value = wechatCoverSwitchingContentIds.value
-      .filter((item) => item !== normalizedId)
-  }
-}
-
-function setWechatCoverGenerating(contentItemId, generating) {
-  const next = new Set(wechatCoverGeneratingContentIds.value)
-  if (generating) next.add(contentItemId)
-  else next.delete(contentItemId)
-  wechatCoverGeneratingContentIds.value = [...next]
-}
-
-function monitorWechatCoverTask(task, contentItemId) {
-  const taskId = String(task?.task_id || '')
-  if (!taskId || !contentItemId) return
-  const previousTimer = wechatCoverPollTimers.get(contentItemId)
-  if (previousTimer) clearTimeout(previousTimer)
-  setWechatCoverGenerating(contentItemId, true)
-
-  const poll = async () => {
-    try {
-      const response = await axios.get(
-        `${API}/tasks/${encodeURIComponent(taskId)}`,
-        { timeout: 10000 },
-      )
-      const state = response.data || {}
-      if (state.status === 'succeeded') {
-        wechatCoverPollTimers.delete(contentItemId)
-        setWechatCoverGenerating(contentItemId, false)
-        await loadContentItems()
-        await loadWechatCoverHistory(contentItemId)
-        await Promise.all([
-          loadContentAiCalls(contentItemId),
-          loadAiTokenUsageSummary(),
-        ])
-        if (wechatDraftDialogVisible.value && wechatDraftContentItemId.value === contentItemId) {
-          const defaults = await axios.get(
-            `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}`,
-            { timeout: 15000 },
-          )
-          wechatDraftCoverUrl.value = defaults.data?.cover_url || ''
-          wechatDraftCoverStatus.value = defaults.data?.cover_status || ''
-        }
-        ElMessage.success('新封面已生成，旧封面仍可切换')
-        return
-      }
-      if (['failed', 'cancelled'].includes(state.status)) {
-        wechatCoverPollTimers.delete(contentItemId)
-        setWechatCoverGenerating(contentItemId, false)
-        ElMessage.error(state.error || '公众号封面生成失败，原封面已保留')
-        return
-      }
-      const timer = setTimeout(poll, 1500)
-      wechatCoverPollTimers.set(contentItemId, timer)
-    } catch {
-      const timer = setTimeout(poll, 3000)
-      wechatCoverPollTimers.set(contentItemId, timer)
-    }
-  }
-  void poll()
 }
 
 async function chooseObsidianFolder() {
@@ -4260,11 +3954,10 @@ onBeforeUnmount(() => {
   reportGenerationConfirmationResolver = null
   stopWeChatQrPolling()
   stopWeChatBulkSyncPolling()
+  disposeWechatCoverController()
   disposeWechatDraftController()
   stopWeChatInitialSyncListPolling()
   for (const subscriptionId of wechatInitialSyncPollTimers.keys()) stopWeChatInitialSyncPolling(subscriptionId)
-  for (const timer of wechatCoverPollTimers.values()) clearTimeout(timer)
-  wechatCoverPollTimers.clear()
 })
 
 </script>
