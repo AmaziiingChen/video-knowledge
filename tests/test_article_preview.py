@@ -341,7 +341,7 @@ def test_article_preview_uses_retained_normalized_html_without_refetching(monkey
     def unexpected_refetch(*args, **kwargs):
         raise AssertionError("retained normalized HTML should not trigger a WebVPN refetch")
 
-    monkeypatch.setattr("routers.content.load_content_source_text", unexpected_refetch)
+    monkeypatch.setattr("routers.content_preview.load_content_source_text", unexpected_refetch)
     with TestClient(app) as client:
         response = client.get(f"/api/content/{item.id}/article-preview")
 

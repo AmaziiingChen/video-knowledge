@@ -1,27 +1,27 @@
 from fastapi import FastAPI
-
 from routers import (
     agent_workspace,
     campus_sources,
     clipboard,
     completion_notifications,
     content,
-    content_preparation,
-    content_mutations,
-    content_source_text,
     content_analyses,
+    content_mutations,
+    content_preparation,
+    content_preview,
+    content_source_text,
     content_usage,
     cookie,
     creator_sources,
     download,
     favorite_sources,
     folder_import_watcher,
-    ingest,
     inbox,
-    library_trash,
+    ingest,
+    knowledge,
     library_folders,
     library_source_groups,
-    knowledge,
+    library_trash,
     llm_settings,
     local_imports,
     manual_collection,
@@ -57,7 +57,6 @@ from routers import (
     wechat_subscriptions,
 )
 
-
 API_ROUTERS = (
     (parse.router, "parse"),
     (download.router, "download"),
@@ -75,6 +74,7 @@ API_ROUTERS = (
     (inbox.router, "inbox"),
     (search.router, "search"),
     (content.router, "content"),
+    (content_preview.router, "content-preview"),
     (content_preparation.router, "content-preparation"),
     (content_mutations.router, "content-mutations"),
     (content_source_text.router, "content-source-text"),
