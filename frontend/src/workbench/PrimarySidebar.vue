@@ -275,6 +275,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contentIsUnread } from '../features/library/contentReadState.js'
+import { buildLibraryTreeNodes, compareLibraryTreeNodes, sortLibraryNodes } from '../features/library/libraryTreeModel.js'
 import { loadLibraryTreePreferences, loadOpenFolderIds as loadSavedOpenFolderIds, saveLibraryTreePreferences, saveOpenFolderIds as saveSavedOpenFolderIds } from '../features/library/libraryTreePreferences.js'
 import { CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
@@ -553,14 +554,6 @@ function isUnreadContent(item) {
   })
 }
 
-function displayContentName(item) {
-  const title = String(item?.title || '').trim()
-  if (title) return title
-  const identity = String(item?.canonical_source_id || '').trim()
-  if (identity) return identity
-  return '未命名内容'
-}
-
 function nodeAriaLabel(node) {
   if (node?.unread) return `${node.name}，未读`
   if (node?.hasNewDescendants) return `${node.name}，包含 ${node.unreadCount || ''} 条未读内容`
@@ -586,175 +579,24 @@ const folderPathById = computed(() => {
   return paths
 })
 
-const unreadContentItems = computed(() => sortNodes(props.libraryContentItems.filter(isUnreadContent)))
+const unreadContentItems = computed(() => sortLibraryNodes(props.libraryContentItems.filter(isUnreadContent)))
 
 function unreadSourcePath(item) {
   return folderPathById.value.get(item?.library_folder_id) || item?.source_name || '资料库'
 }
 
-const visibleLibraryNodes = computed(() => {
-  if (searchActive.value) {
-    const items = props.sidebarTreeItems
-    return items.map((item) => ({
-      type: 'content',
-      id: item.id,
-      name: displayContentName(item),
-      parentId: item.library_folder_id || null,
-      sortOrder: Number(item.sort_order || 0),
-      depth: 0,
-      ancestorIds: [],
-      unread: isUnreadContent(item),
-      raw: item
-    }))
-  }
-  const foldersByParent = new Map()
-  const itemsByParent = new Map()
-  const foldersById = new Map(props.libraryFolders.map((folder) => [String(folder.id), folder]))
-
-  for (const folder of props.libraryFolders) {
-    const parentId = folder.parent_folder_id || null
-    if (!foldersByParent.has(parentId)) foldersByParent.set(parentId, [])
-    foldersByParent.get(parentId).push(folder)
-  }
-  for (const item of props.sidebarTreeItems) {
-    const parentId = item.library_folder_id || null
-    if (!itemsByParent.has(parentId)) itemsByParent.set(parentId, [])
-    itemsByParent.get(parentId).push(item)
-  }
-
-  const result = []
-  const unreadRoot = {
-    type: 'unread-root',
-    id: '__unread__',
-    name: '未读',
-    depth: 0,
-    hasNewDescendants: true,
-    unreadCount: unreadContentItems.value.length,
-    raw: null,
-  }
-  if (unreadContentItems.value.length) {
-    result.push(unreadRoot)
-    if (isNodeOpen(unreadRoot)) {
-      for (const item of unreadContentItems.value) {
-        result.push({
-          type: 'unread-content', id: item.id,
-          name: displayContentName(item),
-          depth: 1, unread: true, raw: item,
-        })
-      }
-    }
-  }
-  const pinnedFolderIds = new Set(
-    props.libraryFolders.filter((folder) => Boolean(folder.is_pinned)).map((folder) => String(folder.id))
-  )
-  const pinnedRootFolders = props.libraryFolders.filter((folder) => {
-    if (!folder.is_pinned) return false
-    let parentId = folder.parent_folder_id ? String(folder.parent_folder_id) : ''
-    const visited = new Set([String(folder.id)])
-    while (parentId && !visited.has(parentId)) {
-      visited.add(parentId)
-      if (pinnedFolderIds.has(parentId)) return false
-      parentId = foldersById.get(parentId)?.parent_folder_id
-        ? String(foldersById.get(parentId).parent_folder_id)
-        : ''
-    }
-    return true
-  })
-  if (pinnedRootFolders.length) {
-    result.push({
-      type: 'pinned-root',
-      id: '__pinned__',
-      name: '置顶',
-      depth: 0,
-      meta: pinnedRootFolders.length,
-      raw: null,
-    })
-  }
-  // The pinned view stays ahead of the ordinary tree. The ordinary root order
-  // itself is user-controlled through folder and separator drag.
-  const appendChildren = (parentId, depth, ancestorIds = [], withinPinnedTree = false) => {
-    const folderNodes = sortNodes((foldersByParent.get(parentId) || []).filter((folder) => (
-      withinPinnedTree || !folder.is_pinned
-    ))).map((folder) => ({
-      type: 'folder',
-      id: folder.id,
-      name: folder.name,
-      parentId: folder.parent_folder_id || null,
-      sortOrder: Number(folder.sort_order || 0),
-      depth,
-      ancestorIds,
-      meta: folderContentCounts.value.get(String(folder.id)) ?? 0,
-      hasNewDescendants: Boolean(folderUnreadCounts.value.get(String(folder.id))),
-      unreadCount: folderUnreadCounts.value.get(String(folder.id)) || 0,
-      raw: folder
-    }))
-    const contentNodes = sortNodes(itemsByParent.get(parentId) || []).map((item) => ({
-      type: 'content',
-      id: item.id,
-      name: displayContentName(item),
-      parentId: item.library_folder_id || null,
-      sortOrder: Number(item.sort_order || 0),
-      depth,
-      ancestorIds,
-      unread: isUnreadContent(item),
-      raw: item
-    }))
-
-    const nodes = [...folderNodes, ...contentNodes].sort(compareTreeNode)
-    for (const node of nodes) {
-      result.push(node)
-      if (node.type === 'folder' && isFolderOpen(node.id)) {
-        appendChildren(node.id, depth + 1, [...ancestorIds, node.id], withinPinnedTree || Boolean(node.raw?.is_pinned))
-        const history = folderHistoryState(node.id)
-        if (history?.loading || history?.hasMore) {
-          result.push({
-            type: 'folder-history-more',
-            id: `${node.id}:history`,
-            parentId: node.id,
-            name: history.loading ? '正在加载资料…' : '加载更多资料',
-            depth: depth + 1,
-            loading: Boolean(history.loading),
-          })
-        }
-      }
-    }
-  }
-
-  if (pinnedRootFolders.length && pinnedRootOpen.value) {
-    const pinnedNodes = sortNodes(pinnedRootFolders).map((folder) => ({
-      type: 'folder',
-      id: folder.id,
-      name: folder.name,
-      parentId: folder.parent_folder_id || null,
-      sortOrder: Number(folder.sort_order || 0),
-      depth: 1,
-      ancestorIds: [],
-      meta: folderContentCounts.value.get(String(folder.id)) ?? 0,
-      hasNewDescendants: Boolean(folderUnreadCounts.value.get(String(folder.id))),
-      unreadCount: folderUnreadCounts.value.get(String(folder.id)) || 0,
-      raw: folder,
-    }))
-    for (const node of pinnedNodes) {
-      result.push(node)
-      if (isFolderOpen(node.id)) {
-        appendChildren(node.id, 2, [node.id], true)
-        const history = folderHistoryState(node.id)
-        if (history?.loading || history?.hasMore) {
-          result.push({
-            type: 'folder-history-more',
-            id: `${node.id}:history`,
-            parentId: node.id,
-            name: history.loading ? '正在加载资料…' : '加载更多资料',
-            depth: 2,
-            loading: Boolean(history.loading),
-          })
-        }
-      }
-    }
-  }
-  appendChildren(null, 0)
-  return result
-})
+const visibleLibraryNodes = computed(() => buildLibraryTreeNodes({
+  searchActive: searchActive.value,
+  libraryFolders: props.libraryFolders,
+  sidebarTreeItems: props.sidebarTreeItems,
+  unreadContentItems: unreadContentItems.value,
+  isUnreadContent,
+  isNodeOpen,
+  isFolderOpen,
+  folderHistoryState,
+  folderContentCounts: folderContentCounts.value,
+  folderUnreadCounts: folderUnreadCounts.value,
+}))
 
 const presentationLibraryNodes = computed(() => {
   if (searchActive.value || !userGroupSeparators.value.length) return visibleLibraryNodes.value
@@ -936,34 +778,11 @@ const selectionBoxStyle = computed(() => {
   }
 })
 
-function sortNodes(nodes) {
-  return [...nodes].sort((left, right) => {
-    if (isContentItem(left) || isContentItem(right)) {
-      return recentTimestamp(right) - recentTimestamp(left)
-        || String(right.created_at || '').localeCompare(String(left.created_at || ''))
-        || String(left.title || left.name || '').localeCompare(String(right.title || right.name || ''))
-    }
-    return Number(left.sort_order || 0) - Number(right.sort_order || 0)
-      || String(right.created_at || '').localeCompare(String(left.created_at || ''))
-      || String(left.title || left.name || '').localeCompare(String(right.title || right.name || ''))
-  })
-}
-
-function compareTreeNode(left, right) {
-  if (left.type === 'content' && right.type === 'content') {
-    return recentTimestamp(right.raw) - recentTimestamp(left.raw)
-      || left.name.localeCompare(right.name)
-  }
-  return left.sortOrder - right.sortOrder
-    || (left.type === right.type ? 0 : left.type === 'folder' ? -1 : 1)
-    || left.name.localeCompare(right.name)
-}
-
 function compareRootTreeNode(left, right) {
   const groupOrder = ROOT_LIBRARY_GROUP_ORDER.indexOf(rootLibraryGroup(left))
   const otherGroupOrder = ROOT_LIBRARY_GROUP_ORDER.indexOf(rootLibraryGroup(right))
   if (groupOrder !== otherGroupOrder) return groupOrder - otherGroupOrder
-  return compareTreeNode(left, right)
+  return compareLibraryTreeNodes(left, right)
 }
 
 function rootLibraryGroup(node) {
@@ -1004,7 +823,7 @@ function separatorSortOrder(separator, rootsById = null) {
   const roots = rootsById || new Map(rootFolderNodes().map((node) => [String(node.id), node]))
   const anchor = roots.get(String(separator?.beforeFolderId || ''))
   if (anchor) return Number(anchor.sortOrder || 0) - 0.5
-  const last = [...roots.values()].sort(compareTreeNode).at(-1)
+  const last = [...roots.values()].sort(compareLibraryTreeNodes).at(-1)
   return last ? Number(last.sortOrder || 0) + 1 : 0
 }
 
@@ -1050,16 +869,6 @@ watch(
   },
   { immediate: true },
 )
-
-function isContentItem(node) {
-  return Boolean(node && ('source_provider' in node || 'content_type' in node || 'canonical_source_id' in node))
-}
-
-function recentTimestamp(item) {
-  const value = item?.published_at || item?.created_at || item?.updated_at || ''
-  const timestamp = Date.parse(value)
-  return Number.isFinite(timestamp) ? timestamp : 0
-}
 
 function contentNodeTitle(node) {
   if (!isContentNode(node)) return node?.name || ''
