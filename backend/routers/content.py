@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 import html
 import re
 import hashlib
@@ -25,15 +24,12 @@ from services.xiaohongshu_cache import xiaohongshu_cache_dir
 from services.campus_sources import is_campus_attachment_blacklisted, render_document_markdown_html
 from services.document_formatter import request_document_formatting
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
-from services.knowledge_library import relocate_managed_documents
 from config import settings
 from services.cache import (
     cache_dir_for_url,
     cache_entry_for_url,
     read_cache_meta,
 )
-from services.database import utc_now_iso
-from services.repository import new_id
 from services.repository import ContentItemRecord, ContentRepository
 from services.local_file_imports import (
     extract_document_text,
@@ -97,16 +93,6 @@ class ArticlePreviewResponse(BaseModel):
     attachments: list[dict[str, str]] = Field(default_factory=list)
     formatting_status: str = "not_applicable"
     formatting_detail: str = ""
-
-
-class ContentStatusRequest(BaseModel):
-    status: str = Field(min_length=1)
-
-
-class ContentUpdateRequest(BaseModel):
-    title: str | None = None
-    library_folder_id: str | None = None
-    sort_order: float | None = None
 
 
 @router.get("/content", response_model=list[ContentItemResponse])
@@ -683,67 +669,6 @@ async def reprocess_local_source(content_item_id: str):
         connection.commit()
     task = task_manager.create(request, task_type="process_video" if kind in {"video", "audio"} else "import_document")
     return LocalFileImportResponse(item=_item_to_response(item), task_id=task.task_id, processing=True)
-
-
-@router.patch("/content/{item_id}/status", response_model=ContentItemResponse)
-async def update_content_status(item_id: str, req: ContentStatusRequest):
-    if req.status not in CONTENT_STATUSES:
-        raise HTTPException(status_code=400, detail=f"不支持的内容状态: {req.status}")
-    initialize_database()
-    try:
-        with connect() as connection:
-            item = ContentRepository(connection).update_status(item_id, req.status)
-            connection.commit()
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="内容不存在") from exc
-    cache_entry = _cache_entries_by_source_url([item.source_url]).get(item.source_url or "", {})
-    return _item_to_response(item, cache_entry)
-
-
-@router.patch("/content/{item_id}", response_model=ContentItemResponse)
-async def update_content_item(item_id: str, req: ContentUpdateRequest):
-    initialize_database()
-    try:
-        with connect() as connection:
-            repository = ContentRepository(connection)
-            current = repository.get_content_item(item_id)
-            fields = req.model_fields_set
-            next_folder_id = req.library_folder_id if "library_folder_id" in fields else current.library_folder_id
-            next_sort_order = req.sort_order if "sort_order" in fields else current.sort_order
-            if next_folder_id:
-                _ensure_folder_exists(connection, next_folder_id)
-            item = repository.update_content_item(
-                item_id,
-                title=current.title if req.title is None else req.title.strip(),
-                library_folder_id=next_folder_id,
-                sort_order=next_sort_order,
-            )
-            connection.commit()
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="内容不存在") from exc
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(status_code=400, detail="文件夹位置无效") from exc
-    relocate_managed_documents([item.id])
-    cache_entry = _cache_entries_by_source_url([item.source_url]).get(item.source_url or "", {})
-    return _item_to_response(item, cache_entry)
-
-
-@router.delete("/content/{item_id}", response_model=dict)
-async def delete_content_item(item_id: str):
-    initialize_database()
-    with connect() as connection:
-        repository = ContentRepository(connection)
-        try:
-            item = repository.get_content_item(item_id)
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail="内容不存在") from exc
-        deleted_at = utc_now_iso()
-        connection.execute(
-            "UPDATE content_items SET deleted_at = ?, trash_batch_id = ?, updated_at = ? WHERE id = ?",
-            (deleted_at, new_id(), deleted_at, item.id),
-        )
-        connection.commit()
-    return {"success": True}
 
 
 def _cache_entries_by_source_url(source_urls) -> dict[str, dict]:

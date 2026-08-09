@@ -76,7 +76,8 @@ lines.
   Markdown imports now have dedicated service/router owners. Article
   preparation/OCR queue endpoints now live in `routers/content_preparation.py`;
   text-readiness and explicit source refresh now live in
-  `routers/content_source_text.py`. Local-file import, content read/update and
+  `routers/content_source_text.py`; content status, rename/move and soft-delete
+  mutations now live in `routers/content_mutations.py`. Local-file import and
   capture endpoints remain separate follow-up cuts.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
