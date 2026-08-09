@@ -112,8 +112,10 @@ lines.
   GitHub Release path.
 - [ ] Continue ratcheting every production source below 1,000 lines, or add a
   narrowly documented generated/declarative exception. The group-report source
-  summary cache now has its own database owner; report planning and writing
-  remain the next intentional boundaries in the main pipeline.
+  summary cache now has its own database owner; the planner's JSON shape
+  compatibility and parsing now live in `group_report_plan_shape.py`. Report
+  normalization and writing remain the next intentional boundaries in the main
+  pipeline.
 
 ## Non-negotiable compatibility checks
 
