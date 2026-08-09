@@ -60,6 +60,7 @@ from services.search_index import upsert_source_text_document
 from services.content_presentation import (
     ContentItemResponse,
     ContentTextReadinessResponse,
+    LocalFileImportResponse,
     content_item_response as _item_to_response,
     readiness_response as _readiness_response,
 )
@@ -100,12 +101,6 @@ class ContentPageResponse(BaseModel):
     offset: int
     has_more: bool
     recent_after: str | None = None
-
-
-class LocalFileImportResponse(BaseModel):
-    item: ContentItemResponse
-    task_id: str | None = None
-    processing: bool = False
 
 
 class ContentItemsResolveRequest(BaseModel):

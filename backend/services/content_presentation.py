@@ -56,6 +56,12 @@ class ContentItemResponse(BaseModel):
     source_section: str | None = None
 
 
+class LocalFileImportResponse(BaseModel):
+    item: ContentItemResponse
+    task_id: str | None = None
+    processing: bool = False
+
+
 def content_item_response(
     item: ContentItemRecord,
     cache_entry: dict | None = None,
