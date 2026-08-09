@@ -64,7 +64,8 @@ lines.
   AI/OCR call history and daily usage now live in `routers/content_usage.py`;
   listing, import, content mutation and capture remain separate follow-up cuts.
 - [ ] Add direct tests for public-tree, DMG validation and backend packaging
-  scripts; add bounded job timeouts and persist release measurements.
+  scripts; persist release measurements.  Verify jobs now have bounded
+  timeouts and repeated pull-request/main checks cancel stale in-progress runs.
 - [ ] Establish auditable Python dependency constraints/lock data and add an
   incremental, explicit coverage baseline for high-risk boundaries.
 
