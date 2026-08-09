@@ -69,15 +69,7 @@ import {
   markInterruptedReportLogs,
   persistReportLogHistory,
 } from '../features/logs/processLogHistory.js'
-import {
-  readArticlePreviewCache,
-  removeArticlePreviewCache,
-  writeArticlePreviewCache,
-} from '../features/library/articlePreviewCache.js'
-import {
-  pendingArticlePreview,
-  revealArticlePreviewLoader,
-} from '../features/library/articlePreviewLoadState.js'
+import { useArticlePreviewController } from '../features/library/useArticlePreviewController.js'
 import { useOpenClawController } from '../features/integrations/useOpenClawController.js'
 import { useQaSessionController } from '../features/assistant/useQaSessionController.js'
 import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
@@ -281,9 +273,15 @@ export function useAppController() {
   const selectedContentItem = ref(null)
   const canUndoLibraryAction = computed(() => libraryUndoStack.value.length > 0 && !applyingLibraryHistory.value)
   const canRedoLibraryAction = computed(() => libraryRedoStack.value.length > 0 && !applyingLibraryHistory.value)
-  const articlePreviews = reactive({})
-  const articlePreviewFormattingTimers = new Map()
-  const articlePreviewLoadingTimers = new Map()
+  const {
+    articlePreviews,
+    disposeArticlePreviews,
+    loadArticlePreview,
+    resetArticlePreview,
+    updatePendingArticlePreviewReadiness,
+  } = useArticlePreviewController({
+    refreshContentTextReadiness: (contentItemId) => refreshContentTextReadiness(contentItemId),
+  })
   const articlePreparationStatus = ref({
     active_content_item_id: '',
     active_count: 0,
@@ -1626,8 +1624,7 @@ export function useAppController() {
     stopCompletionNotificationPolling()
     window.__knowledgeHubRemoveTrayNotificationListener?.()
     delete window.__knowledgeHubRemoveTrayNotificationListener
-    for (const timer of articlePreviewLoadingTimers.values()) window.clearTimeout(timer)
-    articlePreviewLoadingTimers.clear()
+    disposeArticlePreviews()
     if (aiTokenSummaryTimer) {
       window.clearInterval(aiTokenSummaryTimer)
       aiTokenSummaryTimer = null
@@ -3345,90 +3342,6 @@ export function useAppController() {
     }
   }
 
-  async function loadArticlePreview(item, { force = false } = {}) {
-    if (!item?.id) return
-    const currentPreview = articlePreviews[item.id]
-    if (!force && currentPreview !== undefined) return
-    const cachedPreview = force ? null : readArticlePreviewCache(item.id, item.updated_at)
-    if (cachedPreview) {
-      // Render the durable local snapshot before revalidating it. This keeps a
-      // known article readable across app restarts instead of flashing a loader.
-      articlePreviews[item.id] = cachedPreview
-    } else {
-      articlePreviews[item.id] = pendingArticlePreview(currentPreview, item.text_readiness)
-      scheduleArticlePreviewLoader(item.id)
-    }
-    try {
-      const res = await axios.get(`${API}/content/${item.id}/article-preview`, {
-        timeout: 30000
-      })
-      articlePreviews[item.id] = res.data
-      cancelArticlePreviewLoader(item.id)
-      writeArticlePreviewCache(item, res.data)
-      scheduleArticlePreviewFormattingRefresh(item.id)
-      // Article preview can finish materializing the local body. Refresh the
-      // lightweight readiness separately so the assistant stops showing the
-      // startup placeholder without waiting for a manual library refresh.
-      void refreshContentTextReadiness(item.id)
-    } catch (error) {
-      cancelArticlePreviewLoader(item.id)
-      if (cachedPreview) return
-      articlePreviews[item.id] = {
-        error: error.response?.data?.detail || '文章版式预览暂不可用'
-      }
-      await refreshContentTextReadiness(item.id)
-    }
-  }
-
-  function updatePendingArticlePreviewReadiness(item) {
-    if (!item?.id || !articlePreviews[item.id]?.loading) return
-    // The list deliberately returns a cheap "pending" readiness marker.
-    // Replace it as soon as the exact item detail arrives, without restarting
-    // the in-flight preview request or flashing a second loader.
-    articlePreviews[item.id] = pendingArticlePreview(articlePreviews[item.id], item.text_readiness)
-  }
-
-  function scheduleArticlePreviewLoader(contentItemId) {
-    cancelArticlePreviewLoader(contentItemId)
-    const timer = window.setTimeout(() => {
-      articlePreviewLoadingTimers.delete(contentItemId)
-      const preview = articlePreviews[contentItemId]
-      if (preview?.loading) articlePreviews[contentItemId] = revealArticlePreviewLoader(preview)
-    }, 180)
-    articlePreviewLoadingTimers.set(contentItemId, timer)
-  }
-
-  function cancelArticlePreviewLoader(contentItemId) {
-    const timer = articlePreviewLoadingTimers.get(contentItemId)
-    if (timer !== undefined) window.clearTimeout(timer)
-    articlePreviewLoadingTimers.delete(contentItemId)
-  }
-
-  function scheduleArticlePreviewFormattingRefresh(contentItemId, attempt = 0) {
-    const preview = articlePreviews[contentItemId]
-    if (!['queued', 'running'].includes(preview?.formatting_status) || articlePreviewFormattingTimers.has(contentItemId)) return
-    const timer = window.setTimeout(async () => {
-      articlePreviewFormattingTimers.delete(contentItemId)
-      try {
-        const res = await axios.get(`${API}/content/${contentItemId}/article-preview`, {
-          timeout: 30000
-        })
-        articlePreviews[contentItemId] = res.data
-        if (attempt < 39) scheduleArticlePreviewFormattingRefresh(contentItemId, attempt + 1)
-      } catch {
-        // The OCR original remains readable. A later explicit reopen/retry can
-        // request the formatting state again without showing a transient error.
-      }
-    }, 1500)
-    articlePreviewFormattingTimers.set(contentItemId, timer)
-  }
-
-  function cancelArticlePreviewFormattingRefresh(contentItemId) {
-    const timer = articlePreviewFormattingTimers.get(contentItemId)
-    if (timer !== undefined) window.clearTimeout(timer)
-    articlePreviewFormattingTimers.delete(contentItemId)
-  }
-
   function mergeContentTextReadiness(contentItemId, readiness) {
     if (!contentItemId || !readiness) return
     allContentItems.value = allContentItems.value.map((item) => (
@@ -3457,10 +3370,7 @@ export function useAppController() {
     try {
       const res = await axios.post(`${API}/content/${item.id}/source-text/refresh`, {}, { timeout: 30000 })
       mergeContentTextReadiness(item.id, res.data)
-      cancelArticlePreviewFormattingRefresh(item.id)
-      cancelArticlePreviewLoader(item.id)
-      delete articlePreviews[item.id]
-      removeArticlePreviewCache(item.id)
+      resetArticlePreview(item.id)
       await loadArticlePreview({ ...item, text_readiness: res.data })
       ElMessage.success('正文已重新抓取')
     } catch (error) {

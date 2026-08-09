@@ -441,143 +441,16 @@
                   >
                     <SvgMaskIcon :src="isAudioPlaying ? pauseFillIcon : playFillIcon" :size="15" />
                   </button>
-                  <el-popover
-                    v-model:visible="contentActionsOpen"
-                    placement="bottom-end"
-                    :width="320"
-                    trigger="hover"
-                    :show-after="90"
-                    :hide-after="180"
-                    :show-arrow="false"
-                    transition="content-action-pop"
-                    popper-class="content-action-popover"
+                  <ContentActionMenu
+                    :model="activeContentActionMenuModel"
+                    @select="handleContentActionMenuSelect"
                   >
                     <template #reference>
                       <button class="content-fact-button" type="button" aria-label="内容操作">
                         <SvgMaskIcon :src="ellipsisIcon" :size="15" />
                       </button>
                     </template>
-                    <div class="content-action-menu">
-                      <div class="content-action-menu-heading">内容操作</div>
-                      <button
-                        type="button"
-                        v-if="hasRemoteSource(activeContentTab.id)"
-                        @click="$emit('copy-text', sourceUrlForTab(activeContentTab.id), '链接已复制'); contentActionsOpen = false"
-                      >复制原链接</button>
-                      <button
-                        v-if="hasRemoteSource(activeContentTab.id)"
-                        type="button"
-                        @click="$emit('open-external-link', sourceUrlForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >在外部浏览器打开</button>
-                      <button
-                        v-if="canOpenWechatRemotePage"
-                        type="button"
-                        :disabled="activeWechatRemotePage?.status === 'loading'"
-                        @click="toggleWechatRemotePage(); contentActionsOpen = false"
-                      >{{ wechatRemoteActionLabel }}</button>
-                      <button
-                        v-if="isArticleTab(activeContentTab.id) && textReadinessForTab(activeContentTab.id)?.retryable"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('retry-source-text', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ textReadinessForTab(activeContentTab.id).status === 'needs_fetch' ? '获取正文' : '重试正文' }}</button>
-                      <button
-                        v-if="contentForTab(activeContentTab.id)?.status === 'failed'"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('retry-content-processing', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >重新处理</button>
-                      <button
-                        v-if="canReprocessLocalSource(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('reprocess-local-source', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ localReprocessLabel(activeContentTab.id) }}</button>
-                      <button
-                        v-if="contentForTab(activeContentTab.id)?.original_file_path"
-                        type="button"
-                        @click="$emit('open-original-file', contentForTab(activeContentTab.id).original_file_path); contentActionsOpen = false"
-                      >打开原始文件</button>
-                      <button
-                      v-if="canRetranscribeMedia(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('retranscribe-video', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ isAudioTab(activeContentTab.id) ? '重新转写音频' : '重新转写视频' }}</button>
-                      <button
-                        v-if="canFetchExternalSubtitle(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('fetch-external-subtitle', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >尝试获取外挂字幕</button>
-                      <button
-                        v-if="canRefreshSourceContext(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('refresh-source-context', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >补采互动与评论</button>
-                      <button
-                        v-if="canDownloadVideo(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('redownload-video', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ isVideoCacheExpired(activeContentTab.id) ? '重新下载视频' : '下载视频' }}</button>
-                      <button
-                      v-if="isTimedMediaTab(activeContentTab.id)"
-                      type="button"
-                      :disabled="!timelineSegmentsForTab(activeContentTab.id).length"
-                      @click="exportVideoSubtitles(activeContentTab.id); contentActionsOpen = false"
-                      >导出字幕 / 转写 (.txt)</button>
-                      <button
-                        v-if="isReportTab(activeContentTab.id)"
-                        type="button"
-                        :disabled="isWechatCoverGenerating(activeContentTab.id) || isWechatCoverSwitching(activeContentTab.id)"
-                        @click="requestWechatCoverGeneration(activeContentTab.id); contentActionsOpen = false"
-                      >{{ contentForTab(activeContentTab.id)?.cover_url ? '重新生成 AI 封面' : '生成 AI 封面' }}</button>
-                      <button
-                        v-if="isReportTab(activeContentTab.id) && contentForTab(activeContentTab.id)?.cover_url"
-                        type="button"
-                        :disabled="isWechatCoverGenerating(activeContentTab.id) || isWechatCoverSwitching(activeContentTab.id)"
-                        @click="$emit('replan-wechat-cover', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >重新策划封面主题</button>
-                      <button
-                        v-if="isReportTab(activeContentTab.id)"
-                        type="button"
-                        :disabled="isWechatCoverSwitching(activeContentTab.id)"
-                        @click="$emit('create-wechat-draft', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ wechatPublishingConfigured ? '存入公众号草稿' : '配置公众号草稿发布' }}</button>
-                      <button
-                        v-if="contentForTab(activeContentTab.id)"
-                        class="is-danger"
-                        type="button"
-                        @click="contentActionsOpen = false; $emit('delete-content', contentForTab(activeContentTab.id))"
-                      >移入回收站</button>
-                      <div class="content-action-menu-details">
-                        <div
-                          v-for="detail in contentDetailRows(activeContentTab.id)"
-                          :key="detail.label"
-                          :class="{ 'is-url': detail.kind === 'url', 'is-path': detail.kind === 'path' }"
-                        >
-                          <span>{{ detail.label }}</span>
-                          <button
-                            v-if="detail.kind === 'path'"
-                            class="content-detail-path"
-                            type="button"
-                            :title="detail.title || detail.value"
-                            @click="$emit('reveal-path', detail.value)"
-                          >{{ detail.value }}</button>
-                          <button
-                            v-else-if="detail.kind === 'url'"
-                            class="content-detail-path content-detail-url"
-                            type="button"
-                            :title="detail.title || detail.value"
-                            @click="$emit('open-external-link', detail.value)"
-                          >{{ detail.value }}</button>
-                          <strong v-else :title="detail.title || detail.value">{{ detail.value }}</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </el-popover>
+                  </ContentActionMenu>
                   </div>
                 </div>
                 </div>
@@ -843,9 +716,11 @@ import PreviewFindBar from './PreviewFindBar.vue'
 import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
+import { createContentActionMenuModel } from './contentActionMenuModel.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
 const ArtAudioPlayer = defineAsyncComponent(() => import('./ArtAudioPlayer.vue'))
+const ContentActionMenu = defineAsyncComponent(() => import('./ContentActionMenu.vue'))
 const props = defineProps({
   activeView: { type: String, required: true },
   workspaceTabs: { type: Array, default: () => [] },
@@ -928,7 +803,6 @@ const activeArticlePreviewFrame = ref(null)
 const activeLocalHtmlRemoteWebview = ref(null)
 const xhsGalleryTrack = ref(null)
 const articleOutlineRoot = ref(null)
-const contentActionsOpen = ref(false)
 const previewFindOpen = ref(false)
 const previewFindQuery = ref('')
 const previewFindMatchCount = ref(0)
@@ -1331,6 +1205,63 @@ function contentDetailRows(tabId) {
     ...(hasRemoteSource(tabId) ? [{ label: '原文链接', value: sourceUrl, title: sourceUrl, kind: 'url' }] : []),
   ]
   return rows
+}
+
+const activeContentActionMenuModel = computed(() => {
+  const tabId = activeContentTab.value?.id || ''
+  const content = tabId ? props.contentForTab(tabId) : null
+  const textReadiness = tabId ? textReadinessForTab(tabId) : null
+  return createContentActionMenuModel({
+    content,
+    retryingContentId: props.retryingContentId,
+    hasRemoteSource: tabId ? hasRemoteSource(tabId) : false,
+    remotePageAvailable: canOpenWechatRemotePage.value,
+    remotePageLoading: activeWechatRemotePage.value?.status === 'loading',
+    remotePageLabel: wechatRemoteActionLabel.value,
+    articleTextRetryable: Boolean(tabId && isArticleTab(tabId) && textReadiness?.retryable),
+    articleTextStatus: textReadiness?.status,
+    canReprocessLocalSource: tabId ? canReprocessLocalSource(tabId) : false,
+    localReprocessLabel: tabId ? localReprocessLabel(tabId) : '',
+    canRetranscribeMedia: tabId ? canRetranscribeMedia(tabId) : false,
+    isAudio: tabId ? isAudioTab(tabId) : false,
+    canFetchExternalSubtitle: tabId ? canFetchExternalSubtitle(tabId) : false,
+    canRefreshSourceContext: tabId ? canRefreshSourceContext(tabId) : false,
+    canDownloadVideo: tabId ? canDownloadVideo(tabId) : false,
+    videoCacheExpired: tabId ? isVideoCacheExpired(tabId) : false,
+    isTimedMedia: tabId ? isTimedMediaTab(tabId) : false,
+    hasTimelineSegments: Boolean(tabId && timelineSegmentsForTab(tabId).length),
+    isReport: tabId ? isReportTab(tabId) : false,
+    coverGenerating: tabId ? isWechatCoverGenerating(tabId) : false,
+    coverSwitching: tabId ? isWechatCoverSwitching(tabId) : false,
+    publishingConfigured: props.wechatPublishingConfigured,
+    details: tabId ? contentDetailRows(tabId) : [],
+  })
+})
+
+function handleContentActionMenuSelect({ id, payload } = {}) {
+  const tabId = activeContentTab.value?.id || ''
+  const content = tabId ? props.contentForTab(tabId) : null
+  const sourceUrl = tabId ? sourceUrlForTab(tabId) : ''
+  switch (id) {
+    case 'copy-source': emit('copy-text', sourceUrl, '链接已复制'); break
+    case 'open-source': emit('open-external-link', sourceUrl); break
+    case 'toggle-remote-page': toggleWechatRemotePage(); break
+    case 'retry-source-text': emit('retry-source-text', content); break
+    case 'retry-processing': emit('retry-content-processing', content); break
+    case 'reprocess-local-source': emit('reprocess-local-source', content); break
+    case 'open-original-file': emit('open-original-file', content?.original_file_path || ''); break
+    case 'retranscribe-media': emit('retranscribe-video', content); break
+    case 'fetch-external-subtitle': emit('fetch-external-subtitle', content); break
+    case 'refresh-source-context': emit('refresh-source-context', content); break
+    case 'download-video': emit('redownload-video', content); break
+    case 'export-transcript': exportVideoSubtitles(tabId); break
+    case 'generate-cover': requestWechatCoverGeneration(tabId); break
+    case 'replan-cover': emit('replan-wechat-cover', content); break
+    case 'create-wechat-draft': emit('create-wechat-draft', content); break
+    case 'delete-content': emit('delete-content', content); break
+    case 'reveal-detail-path': emit('reveal-path', payload); break
+    case 'open-detail-url': emit('open-external-link', payload); break
+  }
 }
 
 function canRetranscribeMedia(tabId) {
@@ -4425,158 +4356,6 @@ function exportVideoSubtitles(tabId) {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--vk-accent-strong) 50%, transparent);
 }
 
-:global(.content-action-popover) {
-  z-index: 3000 !important;
-  padding: 7px !important;
-  border: 1px solid color-mix(in srgb, var(--vk-border) 72%, var(--vk-bg-panel)) !important;
-  border-radius: 10px !important;
-  /* A small action menu needs a denser material than the larger preview chrome:
-     its text must stay legible when it overlaps a dense article or report. */
-  background: var(--vk-surface-raised) !important;
-  background:
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--vk-bg-panel) 88%, var(--vk-bg-center)) 0%,
-      color-mix(in srgb, var(--vk-bg-panel) 94%, transparent) 100%
-    ) !important;
-  box-shadow:
-    0 18px 40px color-mix(in srgb, var(--vk-text) 18%, transparent),
-    0 3px 9px color-mix(in srgb, var(--vk-text) 8%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--vk-bg-panel) 68%, transparent) !important;
-  backdrop-filter: blur(28px) saturate(150%) brightness(1.04);
-  -webkit-backdrop-filter: blur(28px) saturate(150%) brightness(1.04);
-  transform-origin: right top;
-}
-
-:global(.content-action-pop-enter-active) {
-  transition:
-    opacity 150ms var(--vk-ease-out),
-    scale 150ms var(--vk-ease-out);
-}
-
-:global(.content-action-pop-leave-active) {
-  transition:
-    opacity 100ms var(--vk-ease-out),
-    scale 100ms var(--vk-ease-out);
-}
-
-:global(.content-action-pop-enter-from) {
-  opacity: 0;
-  scale: 0.96;
-}
-
-:global(.content-action-pop-leave-to) {
-  opacity: 0;
-  scale: 0.98;
-}
-
-:global(.content-action-popover .el-popper__arrow::before) {
-  background: color-mix(in srgb, var(--vk-bg-panel) 74%, transparent) !important;
-}
-
-.content-action-menu-heading {
-  padding: 3px 7px 5px;
-  color: var(--vk-muted);
-  font-size: 11px;
-}
-
-.content-action-menu > button {
-  width: 100%;
-  padding: 7px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--vk-text);
-  text-align: left;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.content-action-menu > button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--vk-accent) 10%, transparent);
-  color: var(--vk-accent-strong);
-}
-
-.content-action-menu > button.is-danger {
-  margin-top: 5px;
-  color: var(--vk-danger);
-}
-
-.content-action-menu > button.is-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--vk-danger) 10%, transparent);
-  color: var(--vk-danger);
-}
-
-.content-action-menu > button:disabled {
-  color: var(--vk-muted);
-  cursor: default;
-}
-
-.content-action-menu-details {
-  display: grid;
-  gap: 5px;
-  margin-top: 6px;
-  padding: 9px 7px 3px;
-  border-top: 1px solid color-mix(in srgb, var(--vk-border) 78%, transparent);
-}
-
-.content-action-menu-details > div {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  min-width: 0;
-  font-size: 11px;
-}
-
-.content-action-menu-details span {
-  color: var(--vk-muted);
-  line-height: 1.45;
-}
-
-.content-action-menu-details strong {
-  color: var(--vk-text);
-  font-weight: 500;
-  text-align: right;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.content-action-menu-details > div.is-url,
-.content-action-menu-details > div.is-path {
-  margin-top: 2px;
-}
-
-.content-action-menu-details > div.is-url strong,
-.content-action-menu-details > div.is-path .content-detail-path {
-  color: var(--vk-muted);
-  font-size: 10px;
-}
-
-.content-detail-path {
-  min-width: 0;
-  overflow: hidden;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--vk-muted);
-  cursor: pointer;
-  font: inherit;
-  line-height: 1.45;
-  text-align: right;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.content-detail-path:hover {
-  color: var(--vk-text);
-  text-decoration-color: currentColor;
-}
-
 .transcript-timeline {
   min-height: 0;
   height: 100%;
@@ -4967,16 +4746,6 @@ function exportVideoSubtitles(tabId) {
     box-shadow: none;
   }
 
-  :global(.content-action-pop-enter-active),
-  :global(.content-action-pop-leave-active) {
-    transition: opacity var(--vk-motion-fast) ease;
-  }
-
-  :global(.content-action-pop-enter-from),
-  :global(.content-action-pop-leave-to) {
-    scale: 1;
-  }
-
   .reader-selection-ask {
     transition: border-color 100ms ease, background-color 100ms ease, box-shadow 100ms ease;
   }
@@ -5009,7 +4778,6 @@ function exportVideoSubtitles(tabId) {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :global(.content-action-popover),
   .report-footnote-return,
   .transcript-follow-button,
   .reader-selection-ask {
@@ -5020,7 +4788,6 @@ function exportVideoSubtitles(tabId) {
 }
 
 @media (prefers-contrast: more) {
-  :global(.content-action-popover),
   .report-footnote-return,
   .transcript-follow-button,
   .reader-selection-ask {
