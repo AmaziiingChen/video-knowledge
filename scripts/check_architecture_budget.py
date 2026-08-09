@@ -28,7 +28,7 @@ KNOWN_DEBT_BUDGETS = {
     "backend/services/campus_sources.py": 1_529,
     "backend/services/pipeline_runner.py": 1_447,
     "backend/services/downloader.py": 1_613,
-    "backend/services/wechat_reports.py": 1_475,
+    "backend/services/wechat_reports.py": 1_415,
     "backend/services/prompt_templates.py": 1_424,
     "backend/services/knowledge_library.py": 1_386,
     "frontend/src/workbench/ProcessLogDock.vue": 1_279,
