@@ -64,6 +64,12 @@ npm ci
 cd ..
 ```
 
+校园报告默认使用确定性的词法匹配。只有需要本地语义向量排序时，才安装可选依赖：
+
+```bash
+python -m pip install -r requirements-optional.txt
+```
+
 ### 2. 配置
 
 复制 [backend/.env.example](backend/.env.example) 为 `backend/.env` 后，至少配置一个可用的 DeepSeek Key：

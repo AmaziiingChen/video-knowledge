@@ -12,6 +12,8 @@ npm run desktop:package:mac
 
 该命令生成 DMG，位于 `frontend/release/`。安装包不启用自动下载、静默安装或一键更新。
 
+语音模型不随安装包分发。用户在“设置 → 本机处理”中按需下载所选模型；模型保存在用户本机数据目录，不进入应用包或 GitHub Release。
+
 ## 无 Developer ID 签名的 macOS 分发
 
 KnowledgeHub 当前以不使用 Developer ID 签名或 Apple 公证的 Apple Silicon DMG 正常发布。每个 GitHub Release 都会提供对应的 SHA-256 校验值；下载后请先核对校验值，再安装和打开应用。

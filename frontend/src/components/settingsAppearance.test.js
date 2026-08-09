@@ -6,6 +6,7 @@ const source = await readFile(new URL('./SettingsDialog.vue', import.meta.url), 
 const appSource = await readFile(new URL('../App.vue', import.meta.url), 'utf8')
 const chromeSource = await readFile(new URL('../workbench/WorkspaceChromeActions.vue', import.meta.url), 'utf8')
 const controllerSource = await readFile(new URL('../composables/useAppController.js', import.meta.url), 'utf8')
+const desktopPresentationSource = await readFile(new URL('../config/desktopPresentation.js', import.meta.url), 'utf8')
 
 test('appearance settings show theme choices without a redundant heading', () => {
   assert.doesNotMatch(source, /settings-appearance-heading/)
@@ -23,9 +24,9 @@ test('local processing fixes ASR to the native small-model baseline', () => {
   assert.doesNotMatch(source, /识别后端|模型策略|短视频模型|长视频模型|语音活动检测/)
   assert.match(source, /本机原生识别与 small 模型/)
   assert.doesNotMatch(appSource, /v-model:selected-asr-backend|v-model:asr-model-strategy/)
-  assert.match(controllerSource, /whisper_model: 'small'/)
-  assert.match(controllerSource, /asr_model_strategy: 'manual'/)
-  assert.match(controllerSource, /asr_backend: 'auto'/)
+  assert.match(desktopPresentationSource, /whisper_model: 'small'/)
+  assert.match(desktopPresentationSource, /asr_model_strategy: 'manual'/)
+  assert.match(desktopPresentationSource, /asr_backend: 'auto'/)
   assert.match(controllerSource, /localStorage\.removeItem\(ASR_SETTINGS_KEY\)/)
 })
 

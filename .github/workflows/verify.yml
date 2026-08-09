@@ -44,6 +44,7 @@ jobs:
       - run: npm ci
       - run: npm audit --package-lock-only --audit-level=high
       - run: npm test
+      - run: npm run check:reachability
       - run: npm run build
       - run: npm run build:public-report
 
@@ -63,4 +64,5 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm test
+      - run: npm run check:reachability
       - run: npm run build

@@ -55,21 +55,13 @@ def build_native_tools(target: str) -> list[Path]:
     return outputs
 
 
-def build_backend(target: str, *, bundle_local_asr_model: bool = False) -> None:
+def build_backend(target: str) -> None:
     native_tools = build_native_tools(target)
     native_arguments = []
     for helper in native_tools:
         native_arguments.extend(("--add-binary", f"{helper}{os.pathsep}native_tools"))
 
     data_arguments: list[str] = ["--add-data", f"{ROOT / 'backend' / 'native'}{os.pathsep}native"]
-    if bundle_local_asr_model:
-        model_directory = ROOT / "data" / "models" / "mlx-whisper" / "small"
-        if not ((model_directory / "config.json").is_file() and any(model_directory.glob("*.npz"))):
-            raise SystemExit("无法预置本机语音模型：未找到 data/models/mlx-whisper/small 的完整模型文件")
-        data_arguments.extend((
-            "--add-data",
-            f"{model_directory}{os.pathsep}preloaded_models/mlx/small",
-        ))
     build_root = DESKTOP_DIR / "build" / target
     environment = os.environ.copy()
     # Keep PyInstaller's cache inside the project build directory. Its default
@@ -96,6 +88,21 @@ def build_backend(target: str, *, bundle_local_asr_model: bool = False) -> None:
             str(build_root / "spec"),
             "--paths",
             str(ROOT / "backend"),
+            # The Apple Silicon MLX path never imports mlx_whisper's legacy
+            # PyTorch compatibility implementation. Exclude it so PyInstaller
+            # does not turn an optional upstream module into a 400 MB runtime
+            # dependency of every desktop installation.
+            "--exclude-module",
+            "torch",
+            "--exclude-module",
+            "mlx_whisper.torch_whisper",
+            # Campus semantic ranking has a deterministic lexical fallback.
+            # Its local transformer stack is optional and must not become part
+            # of the default desktop distribution.
+            "--exclude-module",
+            "sentence_transformers",
+            "--exclude-module",
+            "transformers",
             *data_arguments,
             *native_arguments,
             str(BACKEND_ENTRY),
@@ -108,9 +115,8 @@ def build_backend(target: str, *, bundle_local_asr_model: bool = False) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="构建 KnowledgeHub 桌面后端")
     parser.add_argument("--target", choices=("macos",), default=host_target())
-    parser.add_argument("--bundle-local-asr-model", action="store_true", help="将当前 small MLX 语音模型预置到本机 macOS 包")
     arguments = parser.parse_args()
     host = host_target()
     if arguments.target != host:
         raise SystemExit(f"{arguments.target} 安装包必须在对应平台构建；当前主机是 {host}")
-    build_backend(arguments.target, bundle_local_asr_model=arguments.bundle_local_asr_model)
+    build_backend(arguments.target)

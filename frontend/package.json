@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "test": "node --test",
+    "check:reachability": "node scripts/check-source-reachability.mjs",
     "build": "vite build",
     "build:public-report": "vite build --config vite.public-report.config.js && node scripts/finalize-public-report-site.mjs",
     "preview:public-report": "vite preview --config vite.public-report.config.js",
@@ -16,9 +17,8 @@
     "desktop": "npm run build && npm run desktop:launch",
     "desktop:launch": "bash ../scripts/prepare_electron_macos.sh && electron electron/main.cjs",
     "desktop:backend": "python ../scripts/build_desktop_backend.py --target macos",
-    "desktop:backend:mac": "python ../scripts/build_desktop_backend.py --target macos --bundle-local-asr-model",
     "desktop:package": "npm run desktop:package:mac",
-    "desktop:package:mac": "npm run build && npm run desktop:backend:mac && electron-builder --mac dmg --arm64"
+    "desktop:package:mac": "npm run build && npm run desktop:backend && electron-builder --mac dmg --arm64"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
