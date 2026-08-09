@@ -25,10 +25,9 @@ from services.group_report_pipeline import (
     GroupReportContext,
     GroupReportSource,
     generate_group_report,
-    _source_footnote,
 )
+from services.group_report_markdown import _source_footnote
 from services.prompt_file_store import remove_report_prompt_files, sync_report_prompt_files, write_report_prompt_file
-
 
 REPORT_PROMPT_TYPE = "group_context"
 LEGACY_REPORT_PROMPT_TYPE = "range"
@@ -689,10 +688,6 @@ def generate_report(
         if window_start >= window_end:
             raise ValueError("报告时间窗口无效")
     end = period_end or (window_end.date() if window_end is not None else datetime.now().astimezone().date())
-    if period_end is None and window_start is not None:
-        start = window_start.date()
-    else:
-        start = end if report_type == "daily" else end - timedelta(days=6)
     with connect() as connection:
         group = connection.execute(
             "SELECT * FROM wechat_subscription_groups WHERE id=?",

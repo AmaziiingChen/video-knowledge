@@ -1,25 +1,66 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
 import json
-import pytest
 import re
 import sys
-from threading import Event
+from datetime import date, datetime, timezone
 from pathlib import Path
+from threading import Event
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
 from config import settings
+from services.ai_call_logger import AICallRecord
 from services.database import connect, initialize_database
+from services.group_report_models import _SupportingSource
+from services.group_report_pipeline import (
+    GROUP_REPORT_MODEL_CHAIN,
+    OVERVIEW_FALLBACK,
+    OVERVIEW_TASK,
+    SECTION_PLAN_FALLBACK,
+    SECTION_WRITER_FALLBACK,
+    SOURCE_SUMMARY_FALLBACK,
+    GroupReportContext,
+    GroupReportSource,
+    _chat_json_stream,
+    _is_json_payload,
+    _load_cached_summaries,
+    _normalize_generated_section_markdown,
+    _normalize_report_overview,
+    _normalize_report_plan_shape,
+    _normalize_section_heading_levels,
+    _parse_json,
+    _parse_report_plan,
+    _ProgressUsage,
+    _Section,
+    _sha256,
+    _store_cached_summaries,
+    _summarize_one,
+    _summarize_sources,
+    generate_group_report,
+)
+from services.group_report_plan_normalization import normalize_report_plan
 from services.knowledge_library import write_content_markdown_document
 from services.llm_provider import LLMResponse, LLMStreamChunk, LLMUsage
+from services.prompt_templates import (
+    DEFAULT_GROUP_REPORT_OVERVIEW_PROMPT,
+    DEFAULT_GROUP_REPORT_SECTION_PLAN_PROMPT,
+    DEFAULT_GROUP_REPORT_SECTION_WRITER_PROMPT,
+    DEFAULT_GROUP_REPORT_SOURCE_SUMMARY_PROMPT,
+    DEFAULT_PROMPT_TEMPLATES,
+    PromptTemplateRepository,
+    sync_builtin_prompt_definitions,
+)
 from services.repository import ContentRepository
-from services.wechat_report_generation import REPORT_SYSTEM_PROMPT, ReportSource, generate_cited_report
-
+from services.wechat_report_generation import (
+    REPORT_SYSTEM_PROMPT,
+    ReportSource,
+    generate_cited_report,
+)
 from services.wechat_reports import (
     DEFAULT_REPORT_PROMPT_VERSION,
     _campus_report_prompts,
@@ -29,49 +70,6 @@ from services.wechat_reports import (
     _report_document_name,
     create_group,
 )
-from services.ai_call_logger import AICallRecord
-from services.group_report_pipeline import (
-    GroupReportContext,
-    GroupReportSource,
-    GROUP_REPORT_MODEL_CHAIN,
-    OVERVIEW_FALLBACK,
-    OVERVIEW_TASK,
-    SECTION_PLAN_FALLBACK,
-    SECTION_WRITER_FALLBACK,
-    SOURCE_SUMMARY_FALLBACK,
-    _ProgressUsage,
-    _Section,
-    _SupportingSource,
-    _chat_json_stream,
-    _is_json_payload,
-    _load_cached_summaries,
-    _normalize_generated_section_markdown,
-    _normalize_report_overview,
-    _normalize_report_plan,
-    _normalize_report_plan_shape,
-    _normalize_section_heading_levels,
-    _parse_json,
-    _parse_report_plan,
-    _report_plan_issues,
-    _sha256,
-    _store_cached_summaries,
-    _summarize_one,
-    _summarize_sources,
-    generate_group_report,
-)
-from services.prompt_templates import (
-    DEFAULT_PROMPT_TEMPLATES,
-    DEFAULT_GROUP_REPORT_OVERVIEW_PROMPT,
-    DEFAULT_GROUP_REPORT_SECTION_PLAN_PROMPT,
-    DEFAULT_GROUP_REPORT_SECTION_WRITER_PROMPT,
-    DEFAULT_GROUP_REPORT_SOURCE_SUMMARY_PROMPT,
-    _HEADING_CONTRACT_DEFAULT_GROUP_REPORT_SECTION_WRITER_PROMPT,
-    _PREVIOUS_DEFAULT_GROUP_REPORT_OVERVIEW_PROMPT,
-    _PREVIOUS_DEFAULT_GROUP_REPORT_SECTION_PLAN_PROMPT,
-    sync_builtin_prompt_definitions,
-)
-from services.prompt_templates import PromptTemplateRepository
-
 
 FACT_JSON = """{
   "summary": "学校发布了一项通知",
@@ -1152,10 +1150,8 @@ def test_report_plan_allows_scoped_supporting_reuse_but_requires_unique_primary_
         {"S001", "S002"},
     )
 
-    issues = _report_plan_issues(sections, {"S001", "S002"}, set())
-
     assert strategy == "先服务后发展"
-    assert not any(issues.values())
+    assert [section.source_ids for section in sections] == [("S001",), ("S002",)]
     assert sections[1].supporting_sources[0].use_scope == "只补充服务调整的背景影响"
 
 
@@ -1780,7 +1776,7 @@ def test_group_pipeline_reports_unrecognized_plan_shape_without_retrying():
 
 
 def test_report_plan_normalization_supplies_fallbacks_and_drops_empty_sections():
-    strategy, sections, excluded, adjustments = _normalize_report_plan(
+    strategy, sections, excluded, adjustments = normalize_report_plan(
         "",
         [
             _Section(
