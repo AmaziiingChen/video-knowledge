@@ -52,7 +52,10 @@ lines.
   retained as a compatibility import. Streaming JSON extraction now lives in
   `services/knowledge_streaming_json.py`, so only the structured ``answer``
   field can reach the visible response stream; the existing private entry point
-  remains a compatibility import.
+  remains a compatibility import. Evidence context construction, server-side
+  excerpt selection and model quotation validation now live in
+  `services/knowledge_answer_evidence.py`, while existing internal call sites
+  retain their aliases.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
