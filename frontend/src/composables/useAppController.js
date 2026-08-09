@@ -89,6 +89,7 @@ import { usePlatformCredentialController } from '../features/integrations/usePla
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
+import { useActiveTaskEventStreamController } from '../features/tasks/useActiveTaskEventStreamController.js'
 import { useTaskQueueController } from '../features/tasks/useTaskQueueController.js'
 
 export function useAppController() {
@@ -176,8 +177,6 @@ export function useAppController() {
   const backendLogCount = ref(0)
   const logClearedAt = ref(Number(localStorage.getItem(PROCESS_LOG_CLEARED_AT_KEY) || 0))
   const pollTimer = ref(null)
-  let taskEventSource = null
-  let taskEventSourceTaskId = ''
   const taskStatus = ref('idle')
   const taskCancelRequested = ref(false)
   const selectedModel = ref('small')
@@ -422,6 +421,20 @@ export function useAppController() {
     initialUpdatedAfter: logClearedAt.value
       ? new Date(logClearedAt.value).toISOString()
       : '',
+  })
+  const {
+    startTaskEventStream,
+    stopTaskEventStream,
+    syncTaskEventStream,
+  } = useActiveTaskEventStreamController({
+    apiBase: API,
+    eventSourceFactory: typeof EventSource === 'undefined' ? null : (url) => new EventSource(url),
+    mergeBatchTasks,
+    applyTaskData,
+    hydrateProgressiveTask,
+    progressiveTaskSnapshots,
+    terminalStatuses,
+    isActiveTask,
   })
   const {
     retryingContentId,
@@ -1528,10 +1541,13 @@ export function useAppController() {
 
   watch(
     () => [
-      activeWorkspaceTab.value?.content_item_id || '',
+      activeWorkspaceContent.value?.id || '',
       batchTasks.value.map((task) => `${task.task_id}:${task.content_item_id || ''}:${task.status || ''}`).join('|'),
     ],
-    () => syncTaskEventStreamForActiveContent(),
+    () => syncTaskEventStream({
+      activeContentItemId: activeWorkspaceContent.value?.id,
+      batchTasks: batchTasks.value,
+    }),
     { flush: 'post' }
   )
   watch(selectedAiModel, (model) => {
@@ -1652,62 +1668,6 @@ export function useAppController() {
     }
     stopTaskEventStream()
     taskPollFailureCount.value = 0
-  }
-
-  function stopTaskEventStream() {
-    if (taskEventSource) taskEventSource.close()
-    taskEventSource = null
-    taskEventSourceTaskId = ''
-  }
-
-  function startTaskEventStream(taskId) {
-    const normalizedTaskId = String(taskId || '')
-    if (!normalizedTaskId || typeof EventSource === 'undefined') return
-    if (taskEventSource && taskEventSourceTaskId === normalizedTaskId) return
-    stopTaskEventStream()
-
-    const source = new EventSource(`${API}/tasks/${encodeURIComponent(normalizedTaskId)}/events`)
-    taskEventSource = source
-    taskEventSourceTaskId = normalizedTaskId
-    source.addEventListener('task', (event) => {
-      let data
-      try {
-        data = JSON.parse(event.data)
-      } catch {
-        return
-      }
-      if (String(data?.task_id || '') !== normalizedTaskId) return
-      // Normal queue polling remains the durable source for history, while
-      // the local stream makes every progressive milestone visible at once:
-      // playable media, transcript readiness and the growing AI summary.
-      mergeBatchTasks([data])
-      applyTaskData(data)
-      const previousSnapshot = progressiveTaskSnapshots.get(normalizedTaskId)
-      void hydrateProgressiveTask(data, previousSnapshot)
-      if (terminalStatuses.has(data.status) && taskEventSourceTaskId === normalizedTaskId) {
-        stopTaskEventStream()
-      }
-    })
-    source.addEventListener('error', () => {
-      // EventSource reconnects itself. The regular task poll stays active as
-      // the durable fallback if a local backend restart closes this channel.
-    })
-  }
-
-  function syncTaskEventStreamForActiveContent() {
-    const contentItemId = String(activeWorkspaceContent.value?.id || '')
-    const activeTask = contentItemId
-      ? batchTasks.value.find((task) => (
-        String(task?.content_item_id || '') === contentItemId && isActiveTask(task)
-      ))
-      : null
-    if (activeTask?.task_id) {
-      startTaskEventStream(activeTask.task_id)
-      return
-    }
-    // A stream belongs to one open detail pane. Do not leave a hidden tab
-    // subscribed after the reader moves to a completed or unrelated item.
-    if (taskEventSourceTaskId) stopTaskEventStream()
   }
 
   function shortLink(link) {

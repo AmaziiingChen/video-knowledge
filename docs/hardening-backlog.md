@@ -61,7 +61,9 @@ lines.
   live in `features/library/useLibrarySourceGroupController.js`. Folder-tree
   ownership, task runtime, link import and assistant sessions remain in the
   facade because they still share optimistic updates, tab cleanup and durable
-  queue state.
+  queue state. The active-reader EventSource lifecycle now lives in
+  `features/tasks/useActiveTaskEventStreamController.js`, retaining task-ID
+  validation, terminal cleanup and polling fallback behavior.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it
