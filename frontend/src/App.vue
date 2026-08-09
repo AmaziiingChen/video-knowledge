@@ -869,6 +869,7 @@ import { useWechatFilterController } from './features/wechat/useWechatFilterCont
 import { useWechatReportGroupController } from './features/wechat/useWechatReportGroupController.js'
 import { useWechatSubscriptionSyncController } from './features/wechat/useWechatSubscriptionSyncController.js'
 import { useWechatSubscriptionManagementController } from './features/wechat/useWechatSubscriptionManagementController.js'
+import { useLibrarySourceGroupController } from './features/library/useLibrarySourceGroupController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -1589,10 +1590,21 @@ const {
   reportGroups: wechatReportGroups,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
-const librarySourceGroups = ref([])
-const sourceGroupEditor = ref(null)
-const showSourceGroupEditor = ref(false)
-const removingSourceGroupKey = ref('')
+const {
+  librarySourceGroups,
+  sourceGroupEditor,
+  showSourceGroupEditor,
+  removingSourceGroupKey,
+  loadLibrarySourceGroups,
+  openSourceGroupEditor,
+  removeSourceFromGroup,
+} = useLibrarySourceGroupController({
+  apiBase: LIBRARY_SOURCE_GROUPS_API,
+  loadWeChatSubscriptions,
+  loadCampusSources,
+  confirmDestructive: requestDestructiveConfirmation,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
 const wechatGeneratingGroupId = ref('')
 const wechatPreparingGroupId = ref('')
 const reportGenerationDialog = ref({
@@ -1925,63 +1937,6 @@ async function loadWeChatSubscriptions({ silent = false } = {}) {
     if (!silent && requestVersion === wechatSubscriptionsLoadVersion) {
       loadingWeChatSubscriptions.value = false
     }
-  }
-}
-
-async function loadLibrarySourceGroups() {
-  try {
-    const response = await axios.get(LIBRARY_SOURCE_GROUPS_API, { timeout: 10000 })
-    librarySourceGroups.value = Array.isArray(response.data) ? response.data : []
-  } catch {
-    // Source groups are an additional library view and must not block core content loading.
-  }
-}
-
-async function openSourceGroupEditor(group) {
-  if (!group?.id) return
-  await loadLibrarySourceGroups()
-  sourceGroupEditor.value = librarySourceGroups.value.find((item) => String(item.id) === String(group.id)) || {
-    ...group,
-    sources: [],
-  }
-  showSourceGroupEditor.value = true
-}
-
-async function removeSourceFromGroup(source) {
-  const group = sourceGroupEditor.value
-  const sourceId = String(source?.source_id || '').trim()
-  const sourceKind = String(source?.kind || '').trim()
-  if (!group?.id || !sourceId || !sourceKind || removingSourceGroupKey.value) return
-
-  const sourceLabel = source.label || '这个来源'
-  const confirmed = await requestDestructiveConfirmation({
-    title: '移出分组',
-    message: `将“${sourceLabel}”移出“${group.name}”？原来源与已收集内容会保留。`,
-    confirmLabel: '移出分组',
-    cancelLabel: '保留',
-  })
-  if (!confirmed) return
-
-  const removalKey = `${sourceKind}:${sourceId}`
-  removingSourceGroupKey.value = removalKey
-  try {
-    await axios.delete(
-      `${LIBRARY_SOURCE_GROUPS_API}/${encodeURIComponent(group.id)}/sources/${encodeURIComponent(sourceKind)}/${encodeURIComponent(sourceId)}`,
-      { timeout: 10000 },
-    )
-    await Promise.all([loadLibrarySourceGroups(), loadWeChatSubscriptions(), loadCampusSources({ silent: true })])
-    const refreshedGroup = librarySourceGroups.value.find((item) => String(item.id) === String(group.id)) || null
-    if (refreshedGroup) {
-      sourceGroupEditor.value = refreshedGroup
-    } else {
-      showSourceGroupEditor.value = false
-      sourceGroupEditor.value = null
-    }
-    ElMessage.success(`已将“${sourceLabel}”移出“${group.name}”`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '移出分组失败'))
-  } finally {
-    if (removingSourceGroupKey.value === removalKey) removingSourceGroupKey.value = ''
   }
 }
 

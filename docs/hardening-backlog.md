@@ -57,9 +57,11 @@ lines.
   Content recovery actions (source text, reprocessing, retranscription,
   subtitles and redownloads) now live in
   `features/library/useContentRecoveryController.js` while reusing the durable
-  task queue. Folder-tree ownership, task runtime, link import and assistant
-  sessions remain in the facade because they still share optimistic updates,
-  tab cleanup and durable queue state.
+  task queue. Source-group loading, guarded removal and editor lifecycle now
+  live in `features/library/useLibrarySourceGroupController.js`. Folder-tree
+  ownership, task runtime, link import and assistant sessions remain in the
+  facade because they still share optimistic updates, tab cleanup and durable
+  queue state.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it

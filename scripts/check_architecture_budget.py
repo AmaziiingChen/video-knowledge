@@ -13,7 +13,7 @@ MAX_NEW_SOURCE_LINES = 1_000
 KNOWN_DEBT_BUDGETS = {
     "frontend/src/composables/useAppController.js": 3_952,
     "frontend/src/workbench/EditorHost.vue": 3_569,
-    "frontend/src/App.vue": 2_907,
+    "frontend/src/App.vue": 2_862,
     "backend/services/database.py": 167,
     "backend/services/group_report_pipeline.py": 1_467,
     "frontend/src/styles/app.css": 2_410,
