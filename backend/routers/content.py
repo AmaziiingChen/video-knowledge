@@ -62,11 +62,6 @@ from services.local_file_imports import (
 )
 from services.pipeline_runner import PipelineRequest
 from services.task_manager import task_manager
-from services.content_deletion import (
-    ContentDeleteCleanup,
-    cleanup_content_files_after_commit as _cleanup_content_files_after_commit,
-    delete_content_item_data as _delete_content_item_data,
-)
 from services.search_index import upsert_source_text_document
 from services.knowledge_library import (
     ensure_library_folder_directory,
@@ -229,15 +224,6 @@ class FolderUpdateRequest(BaseModel):
     parent_folder_id: str | None = None
     sort_order: float | None = None
     is_pinned: bool | None = None
-
-
-class TrashEntryResponse(BaseModel):
-    id: str
-    entry_type: str
-    name: str
-    deleted_at: str
-    content_type: str | None = None
-    source_provider: str | None = None
 
 
 def _item_to_response(
@@ -1248,152 +1234,6 @@ async def delete_library_folder(folder_id: str):
     return {"success": True}
 
 
-@router.get("/content/trash", response_model=list[TrashEntryResponse])
-async def list_library_trash():
-    initialize_database()
-    with connect() as connection:
-        folders = connection.execute(
-            """
-            SELECT folder.id, folder.name, folder.deleted_at
-            FROM library_folders AS folder
-            LEFT JOIN library_folders AS parent ON parent.id = folder.parent_folder_id
-            WHERE folder.deleted_at IS NOT NULL
-              AND (parent.id IS NULL OR parent.deleted_at IS NULL)
-            ORDER BY folder.deleted_at DESC
-            """
-        ).fetchall()
-        items = connection.execute(
-            """
-            SELECT item.id, item.title AS name, item.deleted_at,
-                   item.content_type, item.source_provider
-            FROM content_items AS item
-            LEFT JOIN library_folders AS folder ON folder.id = item.library_folder_id
-            WHERE item.deleted_at IS NOT NULL
-              AND (folder.id IS NULL OR folder.deleted_at IS NULL)
-            ORDER BY item.deleted_at DESC
-            """
-        ).fetchall()
-    entries = [TrashEntryResponse(id=row["id"], entry_type="folder", name=row["name"], deleted_at=row["deleted_at"]) for row in folders]
-    entries.extend(
-        TrashEntryResponse(
-            id=row["id"],
-            entry_type="content",
-            name=row["name"],
-            deleted_at=row["deleted_at"],
-            content_type=row["content_type"],
-            source_provider=row["source_provider"],
-        )
-        for row in items
-    )
-    return sorted(entries, key=lambda entry: entry.deleted_at, reverse=True)
-
-
-@router.delete("/content/trash", response_model=dict)
-async def empty_library_trash():
-    """Permanently remove every soft-deleted library item and folder."""
-    initialize_database()
-    cleanup_plans: list[ContentDeleteCleanup] = []
-    with connect() as connection:
-        repository = ContentRepository(connection)
-        content_rows = connection.execute(
-            "SELECT * FROM content_items WHERE deleted_at IS NOT NULL"
-        ).fetchall()
-        for content_row in content_rows:
-            cleanup_plans.append(
-                _delete_content_item_data(connection, repository, _content_row_to_record(content_row))
-            )
-        deleted_folder_count = int(connection.execute(
-            "SELECT COUNT(*) FROM library_folders WHERE deleted_at IS NOT NULL"
-        ).fetchone()[0])
-        connection.execute("DELETE FROM library_folders WHERE deleted_at IS NOT NULL")
-        connection.commit()
-    for plan in cleanup_plans:
-        _cleanup_content_files_after_commit(plan)
-    return {
-        "success": True,
-        "deleted_content_count": len(cleanup_plans),
-        "deleted_folder_count": deleted_folder_count,
-    }
-
-
-@router.post("/content/trash/{entry_type}/{entry_id}/restore", response_model=dict)
-async def restore_library_trash_entry(entry_type: str, entry_id: str):
-    initialize_database()
-    if entry_type not in {"folder", "content"}:
-        raise HTTPException(status_code=400, detail="不支持的回收站项目")
-    with connect() as connection:
-        table = "library_folders" if entry_type == "folder" else "content_items"
-        row = connection.execute(f"SELECT trash_batch_id FROM {table} WHERE id = ? AND deleted_at IS NOT NULL", (entry_id,)).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="回收站项目不存在")
-        batch_id = row["trash_batch_id"]
-        now = utc_now_iso()
-        restored_content_ids: list[str] = []
-        restored_folder_ids: list[str] = []
-        if entry_type == "folder" and batch_id:
-            restored_folder_ids = [
-                str(item["id"])
-                for item in connection.execute(
-                    "SELECT id FROM library_folders WHERE trash_batch_id = ?",
-                    (batch_id,),
-                ).fetchall()
-            ]
-            restored_content_ids = [
-                str(item["id"])
-                for item in connection.execute(
-                    "SELECT id FROM content_items WHERE trash_batch_id = ?",
-                    (batch_id,),
-                ).fetchall()
-            ]
-            connection.execute("UPDATE library_folders SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE trash_batch_id = ?", (now, batch_id))
-            connection.execute("UPDATE content_items SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE trash_batch_id = ?", (now, batch_id))
-        else:
-            if entry_type == "content":
-                restored_content_ids = [entry_id]
-            else:
-                restored_folder_ids = [entry_id]
-            connection.execute(f"UPDATE {table} SET deleted_at = NULL, trash_batch_id = NULL, updated_at = ? WHERE id = ?", (now, entry_id))
-        connection.commit()
-    return {
-        "success": True,
-        # The tree is progressively loaded, so a folder refresh alone cannot
-        # repopulate a restored file row. Return the exact durable records for
-        # the renderer to resolve and merge without reloading the whole
-        # library.
-        "restored_content_ids": restored_content_ids,
-        "restored_folder_ids": restored_folder_ids,
-    }
-
-
-@router.delete("/content/trash/{entry_type}/{entry_id}", response_model=dict)
-async def permanently_delete_library_trash_entry(entry_type: str, entry_id: str):
-    initialize_database()
-    if entry_type not in {"folder", "content"}:
-        raise HTTPException(status_code=400, detail="不支持的回收站项目")
-    cleanup_plans: list[ContentDeleteCleanup] = []
-    with connect() as connection:
-        repository = ContentRepository(connection)
-        if entry_type == "content":
-            row = connection.execute("SELECT * FROM content_items WHERE id = ? AND deleted_at IS NOT NULL", (entry_id,)).fetchone()
-            if row is None:
-                raise HTTPException(status_code=404, detail="回收站项目不存在")
-            cleanup_plans.append(_delete_content_item_data(connection, repository, _content_row_to_record(row)))
-        else:
-            row = connection.execute("SELECT id FROM library_folders WHERE id = ? AND deleted_at IS NOT NULL", (entry_id,)).fetchone()
-            if row is None:
-                raise HTTPException(status_code=404, detail="回收站项目不存在")
-            folder_ids = _folder_tree_ids(connection, entry_id)
-            placeholders = ",".join("?" for _ in folder_ids)
-            content_rows = connection.execute(f"SELECT * FROM content_items WHERE library_folder_id IN ({placeholders})", folder_ids).fetchall()
-            for content_row in content_rows:
-                cleanup_plans.append(_delete_content_item_data(connection, repository, _content_row_to_record(content_row)))
-            connection.execute(f"DELETE FROM library_folders WHERE id IN ({placeholders})", folder_ids)
-        connection.commit()
-    for plan in cleanup_plans:
-        _cleanup_content_files_after_commit(plan)
-    return {"success": True}
-
-
 @router.patch("/content/{item_id}/status", response_model=ContentItemResponse)
 async def update_content_status(item_id: str, req: ContentStatusRequest):
     if req.status not in CONTENT_STATUSES:
@@ -1552,22 +1392,3 @@ def _folder_tree_ids(connection, folder_id: str) -> list[str]:
         (folder_id,),
     ).fetchall()
     return [row["id"] for row in rows]
-
-
-def _content_row_to_record(row) -> ContentItemRecord:
-    return ContentItemRecord(
-        id=row["id"],
-        content_type=row["content_type"],
-        source_provider=row["source_provider"],
-        source_url=row["source_url"],
-        canonical_source_id=row["canonical_source_id"],
-        title=row["title"],
-        cover_url=row["cover_url"],
-        duration_seconds=row["duration_seconds"],
-        status=row["status"],
-        series_id=row["series_id"],
-        library_folder_id=row["library_folder_id"],
-        sort_order=float(row["sort_order"] or 0),
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )

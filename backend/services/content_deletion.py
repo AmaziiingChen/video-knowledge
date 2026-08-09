@@ -30,6 +30,26 @@ class ContentDeleteCleanup:
     cache_key: str | None
 
 
+def content_record_from_row(row) -> ContentItemRecord:
+    """Build the repository record required by permanent-deletion flows."""
+    return ContentItemRecord(
+        id=row["id"],
+        content_type=row["content_type"],
+        source_provider=row["source_provider"],
+        source_url=row["source_url"],
+        canonical_source_id=row["canonical_source_id"],
+        title=row["title"],
+        cover_url=row["cover_url"],
+        duration_seconds=row["duration_seconds"],
+        status=row["status"],
+        series_id=row["series_id"],
+        library_folder_id=row["library_folder_id"],
+        sort_order=float(row["sort_order"] or 0),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 def delete_content_item_data(
     connection,
     repository: ContentRepository,
