@@ -865,6 +865,7 @@ import { useWechatDraftController } from './features/wechat/useWechatDraftContro
 import { useWechatPublishingSettingsController } from './features/wechat/useWechatPublishingSettingsController.js'
 import { useWechatReportPromptController } from './features/prompts/useWechatReportPromptController.js'
 import { usePromptWorkspaceController } from './features/prompts/usePromptWorkspaceController.js'
+import { useWechatAccountController } from './features/wechat/useWechatAccountController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -1668,16 +1669,6 @@ const {
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 const savingWeChatFilter = ref(false)
-const selectedWeChatAccountId = ref('')
-const wechatAccountDisplayName = ref('微信公众平台账号')
-const wechatQrLogin = ref({ login_id: '', status: '', message: '', qr_image_data_url: '' })
-const wechatQrStarting = ref(false)
-const wechatManualToken = ref('')
-const wechatManualCookie = ref('')
-const wechatManualConnecting = ref(false)
-const wechatSearchQuery = ref('')
-const wechatSearchResults = ref([])
-const wechatSearching = ref(false)
 const wechatSubscriptionInterval = ref(1440)
 const wechatAutoProcess = ref(false)
 const wechatSubscriptionStates = ref({})
@@ -1690,7 +1681,6 @@ const wechatSyncIntervalOptions = [
   { label: '每 12 小时', value: 720 },
   { label: '每天', value: 1440 }
 ]
-let wechatQrPollTimer = null
 let wechatBulkSyncPollTimer = null
 let wechatBulkProgressRefreshKey = ''
 let wechatBulkProgressRefreshInFlight = false
@@ -1703,6 +1693,34 @@ let wechatIncrementalLibraryRefreshQueued = false
 function wechatErrorMessage(error, fallback = '微信公众号订阅操作失败') {
   return error?.response?.data?.detail || error?.message || fallback
 }
+
+const {
+  selectedWeChatAccountId,
+  wechatAccountDisplayName,
+  wechatQrLogin,
+  wechatQrStarting,
+  wechatManualToken,
+  wechatManualCookie,
+  wechatManualConnecting,
+  wechatSearchQuery,
+  wechatSearchResults,
+  wechatSearching,
+  reconcileSelectedAccount,
+  startWeChatQrLogin,
+  scheduleWeChatQrPoll,
+  stopWeChatQrPolling,
+  connectWeChatManually,
+  deleteWeChatAccount,
+  transferWeChatAccountSubscriptions,
+  searchWeChatAccounts,
+  clearWeChatSearchResults,
+  disposeWechatAccountController,
+} = useWechatAccountController({
+  accounts: wechatAccounts,
+  refreshSubscriptions: loadWeChatSubscriptions,
+  settingsOpen: showSettings,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
 
 function formatWeChatInterval(minutes) {
   const value = Number(minutes)
@@ -1847,9 +1865,7 @@ async function loadWeChatSubscriptions({ silent = false } = {}) {
     // This data enriches the library tree only. It must not leave the whole
     //公众号管理页 in a loading state when its independent request is slow.
     void loadLibrarySourceGroups()
-    if (!wechatAccounts.value.some((account) => account.id === selectedWeChatAccountId.value)) {
-      selectedWeChatAccountId.value = wechatAccounts.value[0]?.id || ''
-    }
+    reconcileSelectedAccount()
     scheduleWeChatInitialSyncListPolling()
   } catch (error) {
     if (requestVersion === wechatSubscriptionsLoadVersion && !silent) {
@@ -1984,139 +2000,6 @@ async function openOriginalFile(path) {
   } catch (error) {
     ElMessage.error(wechatErrorMessage(error, '打开原始文件失败'))
   }
-}
-
-function stopWeChatQrPolling() {
-  if (wechatQrPollTimer) {
-    clearTimeout(wechatQrPollTimer)
-    wechatQrPollTimer = null
-  }
-}
-
-async function startWeChatQrLogin(reauthorizeAccountId = '') {
-  stopWeChatQrPolling()
-  wechatQrStarting.value = true
-  const account = wechatAccounts.value.find((item) => item.id === reauthorizeAccountId)
-  try {
-    const response = await axios.post(`${WECHAT_SUBSCRIPTION_API}/accounts/qr-login`, {
-      display_name: account?.display_name || wechatAccountDisplayName.value.trim() || '微信公众平台账号',
-      reauthorize_account_id: reauthorizeAccountId || null
-    }, { timeout: 30000 })
-    wechatQrLogin.value = response.data || {}
-    scheduleWeChatQrPoll()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '未能获取微信公众平台二维码'))
-  } finally {
-    wechatQrStarting.value = false
-  }
-}
-
-function scheduleWeChatQrPoll() {
-  stopWeChatQrPolling()
-  if (!wechatQrLogin.value.login_id || !showSettings.value) return
-  wechatQrPollTimer = setTimeout(pollWeChatQrLogin, 1800)
-}
-
-async function pollWeChatQrLogin() {
-  const loginId = wechatQrLogin.value.login_id
-  if (!loginId || !showSettings.value) return
-  try {
-    const response = await axios.post(`${WECHAT_SUBSCRIPTION_API}/accounts/qr-login/${loginId}/poll`, {
-      display_name: wechatAccountDisplayName.value.trim() || '微信公众平台账号',
-      reauthorize_account_id: wechatQrLogin.value.reauthorize_account_id || null
-    }, { timeout: 30000 })
-    wechatQrLogin.value = response.data || {}
-    if (response.data?.status === 'confirmed') {
-      ElMessage.success(response.data?.reauthorize_account_id ? '微信公众平台已重新授权，订阅保持不变' : '微信公众平台授权成功')
-      wechatQrLogin.value = { login_id: '', status: '', message: '', qr_image_data_url: '' }
-      await loadWeChatSubscriptions()
-      return
-    }
-    if (['expired', 'failed'].includes(response.data?.status)) {
-      stopWeChatQrPolling()
-      ElMessage.warning(response.data?.message || '二维码已失效，请重新点击扫码连接')
-      return
-    }
-    scheduleWeChatQrPoll()
-  } catch (error) {
-    stopWeChatQrPolling()
-    ElMessage.error(wechatErrorMessage(error, '微信扫码授权失败'))
-  }
-}
-
-async function connectWeChatManually() {
-  if (!wechatManualToken.value.trim() || !wechatManualCookie.value.trim()) {
-    ElMessage.warning('请输入 token 和 Cookie')
-    return
-  }
-  wechatManualConnecting.value = true
-  try {
-    const response = await axios.post(`${WECHAT_SUBSCRIPTION_API}/accounts`, {
-      display_name: wechatAccountDisplayName.value.trim() || '微信公众平台账号',
-      token: wechatManualToken.value.trim(),
-      cookie: wechatManualCookie.value.trim()
-    }, { timeout: 30000 })
-    selectedWeChatAccountId.value = response.data?.id || ''
-    wechatManualToken.value = ''
-    wechatManualCookie.value = ''
-    ElMessage.success('微信公众平台账号已连接')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '微信公众平台登录态不可用'))
-  } finally {
-    wechatManualConnecting.value = false
-  }
-}
-
-async function deleteWeChatAccount(accountId) {
-  try {
-    await axios.delete(`${WECHAT_SUBSCRIPTION_API}/accounts/${accountId}`, { timeout: 10000 })
-    ElMessage.success('授权账号已移除')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '移除授权账号失败'))
-  }
-}
-
-async function transferWeChatAccountSubscriptions(sourceAccountId) {
-  const targetAccountId = String(selectedWeChatAccountId.value || '')
-  if (!targetAccountId || targetAccountId === String(sourceAccountId)) {
-    ElMessage.warning('请先在授权账号列表中选中接管订阅的新账号')
-    return
-  }
-  try {
-    const response = await axios.post(
-      `${WECHAT_SUBSCRIPTION_API}/accounts/${sourceAccountId}/transfer-subscriptions`,
-      { target_account_id: targetAccountId },
-      { timeout: 10000 },
-    )
-    ElMessage.success(`已迁移 ${response.data?.moved_count || 0} 个公众号订阅`)
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '迁移公众号订阅失败'))
-  }
-}
-
-async function searchWeChatAccounts() {
-  if (!selectedWeChatAccountId.value || !wechatSearchQuery.value.trim()) return
-  wechatSearching.value = true
-  wechatSearchResults.value = []
-  try {
-    const response = await axios.get(`${WECHAT_SUBSCRIPTION_API}/accounts/${selectedWeChatAccountId.value}/search`, {
-      params: { q: wechatSearchQuery.value.trim(), limit: 10 },
-      timeout: 30000
-    })
-    wechatSearchResults.value = Array.isArray(response.data) ? response.data : []
-    if (!wechatSearchResults.value.length) ElMessage.info('没有找到匹配的公众号')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '搜索公众号失败'))
-  } finally {
-    wechatSearching.value = false
-  }
-}
-
-function clearWeChatSearchResults() {
-  wechatSearchResults.value = []
 }
 
 function setWeChatSubscriptionState(accountId, fakeid, state = '') {
@@ -3406,7 +3289,7 @@ onBeforeUnmount(() => {
   reportPreflightRequest?.controller.abort()
   reportGenerationConfirmationResolver?.(false)
   reportGenerationConfirmationResolver = null
-  stopWeChatQrPolling()
+  disposeWechatAccountController()
   stopWeChatBulkSyncPolling()
   disposeWechatCoverController()
   disposeWechatDraftController()

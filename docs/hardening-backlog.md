@@ -31,6 +31,10 @@ lines.
   tab types, draft/trash behavior and add mock-API race regression tests.
 - [ ] Extract the WeChat subscription controller from `App.vue`; add mock-API
   behavior tests and ratchet its remaining composition-root budget down.
+  Account authorization, QR polling, transfer and account-search state now live
+  in `features/wechat/useWechatAccountController.js`; the remaining sync,
+  filters and report-group state machine remains deliberately in `App.vue` for
+  the next behavior-preserving slice.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
