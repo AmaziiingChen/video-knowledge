@@ -69,7 +69,9 @@ lines.
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it
   owns desktop-only eligibility, WebView listener/timer cleanup, local-snapshot
   fallback, in-page find, bounded outline/progress messages and selection
-  forwarding. Report, article and media readers still need their own mounted
+  forwarding. Shared content-type, local-import preview and remote-source
+  classification now lives in `workbench/editorContentKind.js` with pure
+  boundary tests. Report, article and media readers still need their own mounted
   behavior boundaries.
 - [x] Extract report-generation SSE decoding from `App.vue`; preserve local
   capability headers, fragmented event handling and explicit server errors in

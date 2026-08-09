@@ -662,6 +662,7 @@ import { useReadingProgressController } from './useReadingProgressController.js'
 import { useReaderSelectionController } from './useReaderSelectionController.js'
 import { useRemoteArticlePreviewController } from './useRemoteArticlePreviewController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
+import { createEditorContentKind } from './editorContentKind.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
@@ -769,6 +770,20 @@ const activeContentTab = computed(() => {
     source_provider: props.selectedContentItem.source_provider,
     status: props.selectedContentItem.status,
   }
+})
+const {
+  articlePreviewHtml,
+  hasRemoteSource,
+  isArticleTab,
+  isAudioTab,
+  isLocalHtmlArticleTab,
+  isReportTab,
+  isTimedMediaTab,
+  isVideoTab,
+  sourceUrlForTab,
+} = createEditorContentKind({
+  contentForTab: props.contentForTab,
+  articlePreviewForTab: props.articlePreviewForTab,
 })
 
 const {
@@ -1158,18 +1173,6 @@ function textReadinessForTab(tabId) {
   return props.contentForTab(tabId)?.text_readiness || null
 }
 
-function isArticleTab(tabId) {
-  return ['article', 'forum_post'].includes(props.contentForTab(tabId)?.content_type) || isLocalHtmlArticleTab(tabId)
-}
-
-function isLocalHtmlArticleTab(tabId) {
-  const content = props.contentForTab(tabId)
-  if (content?.source_provider !== 'local_file' || content?.content_type !== 'document') return false
-  const format = String(content?.source_metadata?.file_format || '').toUpperCase()
-  const filename = String(content?.source_metadata?.file_name || '')
-  return ['HTML', 'HTM', 'XHTML'].includes(format) || /\.x?html?$/i.test(filename)
-}
-
 function localHtmlOriginalPageUrl(tabId) {
   if (!isLocalHtmlArticleTab(tabId)) return ''
   const sourceUrl = String(props.contentForTab(tabId)?.source_metadata?.original_source_url || '').trim()
@@ -1225,28 +1228,6 @@ function contentHeroLayoutStyle(tabId) {
   return null
 }
 
-function articlePreviewHtml(tabId) {
-  const preview = props.articlePreviewForTab(tabId)
-  // The live page is shown in the isolated webview above.  When it cannot be
-  // reached (including offline), retain a readable, persisted body snapshot
-  // instead of rendering a browser-saved HTML shell whose CSS asset folder may
-  // not have been imported alongside the .html file.
-  if (isLocalHtmlArticleTab(tabId)) return preview?.html || preview?.source_html || ''
-  return preview?.html || ''
-}
-
-function isVideoTab(tabId) {
-  return props.contentForTab(tabId)?.content_type === 'video'
-}
-
-function isAudioTab(tabId) {
-  return props.contentForTab(tabId)?.content_type === 'audio'
-}
-
-function isTimedMediaTab(tabId) {
-  return isVideoTab(tabId) || isAudioTab(tabId)
-}
-
 function isImageTab(tabId) {
   return props.contentForTab(tabId)?.content_type === 'image'
 }
@@ -1273,11 +1254,6 @@ function isWechatArticleTab(tabId) {
   return props.contentForTab(tabId)?.source_provider === 'wechat'
 }
 
-function isReportTab(tabId) {
-  const content = props.contentForTab(tabId)
-  return !isMiniProgramCaptureTab(tabId)
-    && (content?.source_provider === 'wechat_report' || content?.content_type === 'report')
-}
 
 function isExternalMarkdownTab(tabId) {
   const content = props.contentForTab(tabId)
@@ -1297,18 +1273,6 @@ function isExternalPdfTab(tabId) {
 function isExternalImageTab(tabId) {
   const content = props.contentForTab(tabId)
   return content?.source_provider === 'local_file' && content?.content_type === 'image'
-}
-
-function hasRemoteSource(tabId) {
-  return /^https?:\/\//iu.test(sourceUrlForTab(tabId))
-}
-
-function sourceUrlForTab(tabId) {
-  const content = props.contentForTab(tabId)
-  const storedSourceUrl = String(content?.source_url || '')
-  if (/^https?:\/\//iu.test(storedSourceUrl)) return storedSourceUrl
-  const originalSourceUrl = String(content?.source_metadata?.original_source_url || '')
-  return /^https?:\/\//iu.test(originalSourceUrl) ? originalSourceUrl : ''
 }
 
 function externalImportKindLabel(tabId) {
