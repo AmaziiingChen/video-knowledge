@@ -1,4 +1,4 @@
-import { h, ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { requestDestructiveConfirmation } from './useDestructiveConfirm'
@@ -77,6 +77,7 @@ import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
 import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
+import { useLibraryTrashController } from '../features/library/useLibraryTrashController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -215,8 +216,6 @@ export function useAppController() {
   // tree only after a user expands a folder or completes a history sync.
   const libraryFolderHistoryStates = ref({})
   const libraryFolderRevealIds = ref([])
-  const libraryTrashEntries = ref([])
-  const loadingLibraryTrash = ref(false)
   const libraryUndoStack = ref([])
   const libraryRedoStack = ref([])
   const applyingLibraryHistory = ref(false)
@@ -268,6 +267,25 @@ export function useAppController() {
   const selectedContentItem = ref(null)
   const canUndoLibraryAction = computed(() => libraryUndoStack.value.length > 0 && !applyingLibraryHistory.value)
   const canRedoLibraryAction = computed(() => libraryRedoStack.value.length > 0 && !applyingLibraryHistory.value)
+
+  const {
+    libraryTrashEntries,
+    loadingLibraryTrash,
+    loadLibraryTrash,
+    restoreLibraryTrashEntry,
+    permanentlyDeleteLibraryTrashEntry,
+    emptyLibraryTrash,
+    showTrashUndoMessage,
+  } = useLibraryTrashController({
+    loadContentItems,
+    loadLibraryFolders,
+    revealContentItems,
+    expandLibraryFolders,
+    resetLibraryHistory: () => {
+      libraryUndoStack.value = []
+      libraryRedoStack.value = []
+    },
+  })
   const {
     articlePreviews,
     disposeArticlePreviews,
@@ -2576,114 +2594,6 @@ export function useAppController() {
       const msg = e.response?.data?.detail || e.message || '读取文件夹失败'
       ElMessage.error(typeof msg === 'string' ? msg : '读取文件夹失败')
       if (throwOnError) throw e
-    }
-  }
-
-  async function loadLibraryTrash() {
-    loadingLibraryTrash.value = true
-    try {
-      const res = await axios.get(`${API}/content/trash`, { timeout: 10000 })
-      libraryTrashEntries.value = Array.isArray(res.data) ? res.data : []
-    } catch (e) {
-      ElMessage.error(e.response?.data?.detail || e.message || '读取回收站失败')
-    } finally {
-      loadingLibraryTrash.value = false
-    }
-  }
-
-  async function restoreLibraryTrashEntries(entries, successText) {
-    const restorableEntries = Array.isArray(entries) ? entries.filter((entry) => entry?.entry_type && entry?.id) : []
-    if (!restorableEntries.length) return false
-    try {
-      const restoredContentIds = new Set()
-      const restoredFolderIds = new Set()
-      for (const entry of restorableEntries) {
-        const response = await axios.post(`${API}/content/trash/${entry.entry_type}/${entry.id}/restore`, null, { timeout: 10000 })
-        for (const id of response.data?.restored_content_ids || []) restoredContentIds.add(String(id))
-        for (const id of response.data?.restored_folder_ids || []) restoredFolderIds.add(String(id))
-      }
-      await Promise.all([loadContentItems(), loadLibraryTrash()])
-      // Folder metadata alone is intentionally lightweight. Restore the
-      // concrete file records returned by the backend as well, otherwise a
-      // restored file stays absent until the user manually expands its folder
-      // or a later global refresh happens.
-      if (restoredContentIds.size) await revealContentItems([...restoredContentIds])
-      if (restoredFolderIds.size) expandLibraryFolders([...restoredFolderIds])
-      libraryUndoStack.value = []
-      libraryRedoStack.value = []
-      ElMessage.success(successText || (restorableEntries.length === 1
-        ? `已恢复“${restorableEntries[0].name}”`
-        : `已恢复 ${restorableEntries.length} 个项目`))
-      return true
-    } catch (e) {
-      await Promise.allSettled([loadContentItems(), loadLibraryTrash()])
-      ElMessage.error(e.response?.data?.detail || e.message || '恢复失败')
-      return false
-    }
-  }
-
-  async function restoreLibraryTrashEntry(entry) {
-    return restoreLibraryTrashEntries([entry])
-  }
-
-  function showTrashUndoMessage(entries, message) {
-    const undoEntries = Array.isArray(entries) ? entries.filter(Boolean) : []
-    if (!undoEntries.length) {
-      ElMessage.success(message)
-      return
-    }
-
-    let messageHandle = null
-    let restoring = false
-    const undo = async (event) => {
-      event?.preventDefault?.()
-      event?.stopPropagation?.()
-      if (restoring) return
-      restoring = true
-      messageHandle?.close?.()
-      const successText = undoEntries.length === 1
-        ? `已撤销移除“${undoEntries[0].name}”`
-        : `已撤销移除 ${undoEntries.length} 个项目`
-      await restoreLibraryTrashEntries(undoEntries, successText)
-    }
-
-    messageHandle = ElMessage({
-      type: 'success',
-      duration: 6500,
-      showClose: true,
-      customClass: 'vk-trash-undo-message',
-      message: h('span', { class: 'vk-trash-undo-content' }, [
-        h('span', { class: 'vk-trash-undo-label' }, message),
-        h('button', {
-          type: 'button',
-          class: 'vk-trash-undo-action',
-          'aria-label': '撤销移入回收站',
-          onClick: undo,
-        }, '撤销'),
-      ]),
-    })
-  }
-
-  async function permanentlyDeleteLibraryTrashEntry(entry) {
-    try {
-      await axios.delete(`${API}/content/trash/${entry.entry_type}/${entry.id}`, { timeout: 10000 })
-      await loadLibraryTrash()
-      ElMessage.success('已彻底删除')
-    } catch (e) {
-      ElMessage.error(e.response?.data?.detail || e.message || '彻底删除失败')
-    }
-  }
-
-  async function emptyLibraryTrash() {
-    try {
-      const res = await axios.delete(`${API}/content/trash`, { timeout: 30000 })
-      await Promise.all([loadLibraryTrash(), loadContentItems(), loadLibraryFolders()])
-      libraryUndoStack.value = []
-      libraryRedoStack.value = []
-      const deletedCount = Number(res.data?.deleted_content_count || 0) + Number(res.data?.deleted_folder_count || 0)
-      ElMessage.success(deletedCount ? `已清空回收站（${deletedCount} 项）` : '回收站已清空')
-    } catch (e) {
-      ElMessage.error(e.response?.data?.detail || e.message || '清空回收站失败')
     }
   }
 
