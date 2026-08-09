@@ -140,6 +140,11 @@ lines.
   public renderer import and private caller alias for compatibility. Article
   HTML URL normalization, attachment de-duplication/scope selection and list
   node de-duplication now live in `services/campus_html_content.py`.
+- [ ] Split `pipeline_runner.py` into stable transport contracts, media/source
+  execution and persistence boundaries. Request/response/log models, durable
+  error taxonomy and cancellation marker now live in
+  `services/pipeline_contracts.py`; `pipeline_runner.py` keeps its original
+  import surface while retaining all runtime orchestration.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now

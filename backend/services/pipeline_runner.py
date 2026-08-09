@@ -8,9 +8,6 @@ import uuid
 from collections.abc import Callable
 from threading import BoundedSemaphore
 from types import SimpleNamespace
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field
 
 from config import settings
 from services.cache import (
@@ -33,6 +30,17 @@ from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_artic
 from services.bilibili_context import fetch_bilibili_source_context
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
 from services.paddle_ocr import is_paddle_ocr_configured
+from services.pipeline_contracts import (
+    AICallInfo,
+    DownloadTransferInfo,
+    PipelineCancelled,
+    PipelineErrorInfo,  # noqa: F401 - public compatibility re-export
+    PipelineLog,
+    PipelineRequest,  # noqa: F401 - public compatibility re-export
+    PipelineResponse,
+    TextSourceInfo,
+    classify_pipeline_error,
+)
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.knowledge_library import attachments_root
 from services.content_source_text import load_content_source_text
@@ -73,127 +81,6 @@ _media_download_semaphore = BoundedSemaphore(1)
 # This is a transport coalescing limit, not a typewriter effect: every
 # snapshot still contains exactly the text the model has returned so far.
 SUMMARY_PUBLISH_INTERVAL_SECONDS = 0.025
-
-
-class PipelineRequest(BaseModel):
-    content_item_id: str | None = None
-    share_text: str | None = None
-    local_video_path: str | None = None
-    local_subtitle_path: str | None = None
-    # Non-media local documents use the same durable task queue for OCR. They
-    # are intentionally explicit rather than overloading a video path.
-    local_document_path: str | None = None
-    local_document_kind: str | None = None
-    source_title: str | None = None
-    source_url: str | None = None
-    whisper_model: str | None = None
-    asr_backend: str | None = None
-    asr_model_strategy: str | None = None
-    asr_short_video_model: str | None = None
-    asr_long_video_model: str | None = None
-    asr_beam_size: int | None = None
-    asr_vad_filter: bool | None = None
-    asr_fallback_enabled: bool | None = None
-    ai_model: str | None = None
-    use_cache: bool = True
-    processing_mode: str = "full"
-    # A user who explicitly asks to restore a Bilibili preview still expects
-    # the short subtitle-first path.  This flag requests the optional preview
-    # download alongside that path without turning the request into the old
-    # download-only shortcut.
-    download_video_preview: bool = False
-    # Explicit user action for an existing Bilibili item. It must never fall
-    # back to a media download or ASR when the player exposes no trusted track.
-    subtitle_only: bool = False
-    manual_collection: bool = False
-    cover_title: str | None = None
-    cover_digest: str | None = None
-    cover_visual_brief: dict[str, Any] | None = None
-    priority: int = 100
-    # Foreground means an explicit user action; background is work spawned by
-    # a scheduler, watcher, or an automatic analysis policy.
-    execution_mode: Literal["foreground", "background"] = "foreground"
-    # Source discovery uses the same durable task record as media processing,
-    # but its provider-specific request stays opaque to the pipeline itself.
-    source_sync_request: dict[str, Any] | None = None
-
-
-class PipelineLog(BaseModel):
-    step: str
-    message: str
-    level: str = "info"
-    elapsed_seconds: float | None = None
-    created_at: str | None = None
-
-
-class TextSourceInfo(BaseModel):
-    kind: str
-    source: str
-    cached: bool = False
-    detail: str | None = None
-    fallback_reason: str | None = None
-
-
-class AICallInfo(BaseModel):
-    call_type: str
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    total_tokens: int | None = None
-    prompt_cache_hit_tokens: int | None = None
-    prompt_cache_miss_tokens: int | None = None
-    estimated_cost: float | None = None
-    elapsed_seconds: float | None = None
-
-
-class PipelineErrorInfo(BaseModel):
-    stage: str
-    category: str
-    retryable: bool = True
-    retry_scope: str = "full"
-    message: str
-
-
-class DownloadTransferInfo(BaseModel):
-    """Live media-transfer telemetry, distinct from weighted pipeline progress."""
-
-    phase: str
-    detail: str
-    received_bytes: int | None = None
-    total_bytes: int | None = None
-    bytes_per_second: float | None = None
-    percent: float | None = None
-
-
-class PipelineResponse(BaseModel):
-    success: bool
-    task_id: str | None = None
-    content_item_id: str | None = None
-    url: str | None = None
-    platform: str | None = None
-    display_title: str | None = None
-    video_path: str | None = None
-    transcript: str | None = None
-    summary: str | None = None
-    obsidian_path: str | None = None
-    markdown_draft_path: str | None = None
-    whisper_model: str | None = None
-    asr_backend: str | None = None
-    text_source: TextSourceInfo | None = None
-    ai_calls: list[AICallInfo] = Field(default_factory=list)
-    cache_hits: list[str] = Field(default_factory=list)
-    logs: list[PipelineLog] = Field(default_factory=list)
-    timings: dict[str, float] = Field(default_factory=dict)
-    progress: dict[str, float] = Field(default_factory=dict)
-    overall_progress: float = 0.0
-    download_transfer: DownloadTransferInfo | None = None
-    source_sync_result: dict[str, Any] | None = None
-    error: str | None = None
-    error_info: PipelineErrorInfo | None = None
-    step: str | None = None
-
-
-class PipelineCancelled(Exception):
-    pass
 
 
 ProgressCallback = Callable[[PipelineResponse], None]
@@ -311,40 +198,6 @@ def _level_from_message(message: str) -> str:
     if any(token in message for token in ["完成", "成功"]):
         return "success"
     return "info"
-
-
-def classify_pipeline_error(step: str, error: str) -> PipelineErrorInfo:
-    if step == "config":
-        return PipelineErrorInfo(
-            stage=step,
-            category="configuration",
-            retryable=False,
-            retry_scope="none",
-            message=error,
-        )
-    if step == "parse":
-        return PipelineErrorInfo(
-            stage=step,
-            category="input",
-            retryable=False,
-            retry_scope="none",
-            message=error,
-        )
-    if step == "download":
-        return PipelineErrorInfo(stage=step, category="network_or_download", retryable=True, retry_scope="download", message=error)
-    if step == "extract_audio":
-        return PipelineErrorInfo(stage=step, category="media_processing", retryable=True, retry_scope="audio", message=error)
-    if step == "transcribe":
-        return PipelineErrorInfo(stage=step, category="asr", retryable=True, retry_scope="transcribe", message=error)
-    if step == "summarize":
-        return PipelineErrorInfo(stage=step, category="llm", retryable=True, retry_scope="summarize", message=error)
-    if step == "save":
-        return PipelineErrorInfo(stage=step, category="filesystem", retryable=True, retry_scope="save", message=error)
-    if step == "cancelled":
-        return PipelineErrorInfo(stage=step, category="cancelled", retryable=True, retry_scope="full", message=error)
-    if step == "executor":
-        return PipelineErrorInfo(stage=step, category="queue_executor", retryable=True, retry_scope="full", message=error)
-    return PipelineErrorInfo(stage=step, category="unknown", retryable=True, retry_scope="full", message=error)
 
 
 def run_pipeline_sync(
