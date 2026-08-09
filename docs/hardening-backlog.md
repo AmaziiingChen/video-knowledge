@@ -188,10 +188,12 @@ lines.
   adapter and its remote/authorization stop policy now live in
   `wechat_bulk_sync_queue.py`. The bounded authenticated public-account client,
   including cookie-header scope, response deadlines and article identity, now
-  lives in `wechat_subscription_client.py`; account/subscription persistence
-  and collection orchestration remain in `wechat_subscription.py`. Report
-  normalization and writing remain the next intentional boundaries in the main
-  pipeline.
+  lives in `wechat_subscription_client.py`. The ephemeral QR state machine,
+  including in-memory pending sessions and only post-confirmation credential
+  handoff, now lives in `wechat_subscription_qr_auth.py`; account/subscription
+  persistence and collection orchestration remain in
+  `wechat_subscription.py`. Report normalization and writing remain the next
+  intentional boundaries in the main pipeline.
 
 ## Non-negotiable compatibility checks
 
