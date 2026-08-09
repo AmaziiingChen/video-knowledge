@@ -215,56 +215,26 @@
           </div>
         </div>
 
-        <section v-if="libraryMode === 'files'" class="sidebar-trash" :class="{ open: trashOpen }">
-          <button class="sidebar-trash-toggle" type="button" @click="toggleTrash">
-            <SvgMaskIcon :src="trashIcon" :size="14" />
-            <span>回收站</span>
-            <small>{{ trashEntries.length || '' }}</small>
-            <el-icon class="sidebar-trash-arrow"><ArrowRight /></el-icon>
-          </button>
-          <Transition name="sidebar-trash-list">
-            <div v-if="trashOpen" class="sidebar-trash-list" v-loading="loadingTrash">
-              <div v-if="trashEntries.length" class="sidebar-trash-actions">
-                <button type="button" class="danger" @click="requestEmptyTrash">清空回收站</button>
-              </div>
-              <div v-for="entry in trashEntries" :key="`${entry.entry_type}:${entry.id}`" class="sidebar-trash-entry">
-                <SvgMaskIcon :src="trashEntryIcon(entry)" :size="14" />
-                <span :title="entry.name">{{ entry.name }}</span>
-                <button type="button" @click="$emit('restore-trash', entry)">恢复</button>
-                <button type="button" class="danger" @click.stop="requestPermanentDeletion(entry)">删除</button>
-              </div>
-              <p v-if="!loadingTrash && !trashEntries.length" class="sidebar-trash-empty">回收站为空</p>
-            </div>
-          </Transition>
-        </section>
+        <LibraryTrashPanel
+          v-if="libraryMode === 'files'"
+          :entries="trashEntries"
+          :loading="loadingTrash"
+          @load="$emit('load-trash')"
+          @restore="$emit('restore-trash', $event)"
+          @permanently-delete="$emit('permanently-delete-trash', $event)"
+          @empty="$emit('empty-trash')"
+        />
       </div>
 
-      <section v-if="libraryMode === 'files'" class="sidebar-section sidebar-link-dock">
-        <div class="sidebar-process-input">
-          <el-input
-            :model-value="shareText"
-            type="textarea"
-            name="source-link"
-            autocomplete="off"
-            aria-label="粘贴待处理链接"
-            :autosize="{ minRows: 1, maxRows: 6 }"
-            resize="none"
-            placeholder="粘贴链接…"
-            @update:model-value="$emit('update:shareText', $event)"
-            @input="$emit('input-change')"
-            @keydown.enter.exact.prevent="$emit('run-full-pipeline')"
-          />
-          <el-button
-            class="sidebar-run-button"
-            :loading="running && !result.task_id"
-            :disabled="!shareText.trim() || running"
-            aria-label="开始处理"
-            @click="$emit('run-full-pipeline')"
-          >
-            <SvgMaskIcon :src="sendIcon" :size="19" />
-          </el-button>
-        </div>
-      </section>
+      <SidebarLinkDock
+        v-if="libraryMode === 'files'"
+        :share-text="shareText"
+        :running="running"
+        :task-id="result.task_id"
+        @update:share-text="$emit('update:shareText', $event)"
+        @input-change="$emit('input-change')"
+        @run="$emit('run-full-pipeline')"
+      />
     </div>
 
     <PromptFileTree
@@ -364,12 +334,12 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contentIsUnread } from '../features/library/contentReadState.js'
-import { ArrowRight, CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
+import { CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
+import LibraryTrashPanel from './LibraryTrashPanel.vue'
 import PromptFileTree from './PromptFileTree.vue'
+import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
-import { requestDestructiveConfirmation } from '../composables/useDestructiveConfirm'
-const sendIcon = 'arrow.up.circle.fill'
 const folderIcon = 'folder'
 const highlighterIcon = 'highlighter'
 const trashIcon = 'trash'
@@ -381,26 +351,6 @@ const folderAddIcon = 'folder.badge.plus'
 const markdownImportIcon = 'square.and.arrow.down'
 const magnifyingglassIcon = 'magnifyingglass'
 import { libraryContentIcon } from '../utils/contentIcons'
-
-async function requestPermanentDeletion(entry) {
-  const confirmed = await requestDestructiveConfirmation({
-    title: '彻底删除',
-    message: '彻底删除后将同时清理相关缓存，无法恢复。',
-    confirmLabel: '彻底删除',
-  })
-  if (confirmed) emit('permanently-delete-trash', entry)
-}
-
-async function requestEmptyTrash() {
-  const count = props.trashEntries.length
-  if (!count) return
-  const confirmed = await requestDestructiveConfirmation({
-    title: '清空回收站',
-    message: `将彻底删除回收站中的 ${count} 个项目及相关缓存，无法恢复。`,
-    confirmLabel: '清空回收站',
-  })
-  if (confirmed) emit('empty-trash')
-}
 
 const props = defineProps({
   activeView: {
@@ -475,10 +425,6 @@ const props = defineProps({
     type: Object,
     default: null
   },
-  promptTaskType: {
-    type: String,
-    default: 'summary'
-  },
   promptTaskOptions: {
     type: Array,
     default: () => []
@@ -493,23 +439,7 @@ const props = defineProps({
   promptContexts: { type: Array, default: () => [] },
   activePromptNodeId: { type: String, default: '' },
   promptTrashEntries: { type: Array, default: () => [] },
-  loadingPromptTrash: { type: Boolean, default: false },
-  statusLabel: {
-    type: Function,
-    required: true
-  },
-  sourceProviderLabel: {
-    type: Function,
-    required: true
-  },
-  promptTaskLabel: {
-    type: Function,
-    required: true
-  },
-  formatBytes: {
-    type: Function,
-    required: true
-  }
+  loadingPromptTrash: { type: Boolean, default: false }
 })
 
 const emit = defineEmits([
@@ -552,10 +482,7 @@ const emit = defineEmits([
   'move-prompt-node',
   'load-prompt-trash',
   'restore-prompt-trash',
-  'permanently-delete-prompt-trash',
-  'update:promptTaskType',
-  'load-prompts',
-  'select-wechat-report-prompt'
+  'permanently-delete-prompt-trash'
 ])
 
 const libraryContentLoadLabel = computed(() => {
@@ -652,7 +579,6 @@ const treeViewportHeight = ref(0)
 const treeIsScrolling = ref(false)
 const selectionBox = ref(null)
 const selectionStart = ref(null)
-const trashOpen = ref(false)
 const contentContextMenu = ref(null)
 const contentContextMenuRef = ref(null)
 const separatorLayoutState = loadUserGroupSeparators()
@@ -779,11 +705,6 @@ const unreadContentItems = computed(() => sortNodes(props.libraryContentItems.fi
 
 function unreadSourcePath(item) {
   return folderPathById.value.get(item?.library_folder_id) || item?.source_name || '资料库'
-}
-
-function toggleTrash() {
-  trashOpen.value = !trashOpen.value
-  if (trashOpen.value) emit('load-trash')
 }
 
 const visibleLibraryNodes = computed(() => {
@@ -1273,10 +1194,6 @@ function contentNodeTitle(node) {
 
 function contentIcon(item) {
   return libraryContentIcon(item)
-}
-
-function trashEntryIcon(entry) {
-  return entry?.entry_type === 'content' ? contentIcon(entry) : folderIcon
 }
 
 function handleTreeScroll(event) {
@@ -2217,59 +2134,6 @@ function cancelBoxSelection() {
   pointer-events: none;
 }
 
-.sidebar-trash {
-  min-width: 0;
-  margin: 0 calc(var(--vk-space-control) + 4px) 0 4px;
-  border-top: 1px solid var(--vk-border);
-  padding-top: 5px;
-  background: var(--vk-bg-quiet);
-}
-
-.sidebar-trash-toggle {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto 14px;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-height: 28px;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--vk-muted);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sidebar-trash-toggle:hover { background: var(--vk-bg-hover); color: var(--vk-text); }
-.sidebar-trash-toggle small { color: var(--vk-muted); font-size: var(--vk-type-micro-size); }
-.sidebar-trash-arrow { transition: transform 0.16s ease; }
-.sidebar-trash.open .sidebar-trash-arrow { transform: rotate(90deg); }
-.sidebar-trash-list {
-  --el-loading-spinner-size: 14px;
-  display: grid;
-  gap: 2px;
-  min-height: 28px;
-  padding: 3px 0 0 18px;
-}
-.sidebar-trash-list-enter-active { transition: opacity var(--vk-motion-standard) var(--vk-ease-out), transform var(--vk-motion-standard) var(--vk-ease-out); }
-.sidebar-trash-list-leave-active { transition: opacity var(--vk-motion-fast) var(--vk-ease-out), transform var(--vk-motion-fast) var(--vk-ease-out); }
-.sidebar-trash-list-enter-from,
-.sidebar-trash-list-leave-to { opacity: 0; transform: translateY(-4px); }
-.sidebar-trash-list :deep(.el-loading-spinner) {
-  margin-top: -7px;
-}
-.sidebar-trash-list :deep(.el-loading-spinner .circular) {
-  width: 14px;
-  height: 14px;
-}
-.sidebar-trash-actions { display: flex; justify-content: flex-end; min-height: 23px; padding-right: 2px; }
-.sidebar-trash-actions button { padding: 2px 3px; border: 0; background: transparent; color: var(--vk-error-text); font: inherit; font-size: var(--vk-type-meta-size); cursor: pointer; }
-.sidebar-trash-entry { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; align-items: center; gap: 5px; min-height: 27px; color: var(--vk-muted); font-size: var(--vk-type-meta-size); }
-.sidebar-trash-entry > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-trash-entry button { padding: 2px 3px; border: 0; background: transparent; color: var(--vk-accent-strong); font: inherit; cursor: pointer; }
-.sidebar-trash-entry button.danger { color: var(--vk-error-text); }
-.sidebar-trash-empty { margin: 5px 0; color: var(--vk-muted); font-size: var(--vk-type-meta-size); }
 
 .sidebar-action-button.danger:hover {
   color: var(--vk-danger);
@@ -2343,67 +2207,6 @@ function cancelBoxSelection() {
   border-top: 0;
 }
 
-.sidebar-link-dock {
-  padding: 8px 2px 0;
-  border-top: 1px solid var(--vk-border);
-}
-
-.sidebar-process-input {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-  padding: 8px 8px 7px;
-  border: 1px solid color-mix(in srgb, var(--vk-border) 80%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--vk-bg-panel) 84%, transparent);
-  box-shadow: 0 5px 14px color-mix(in srgb, var(--vk-text) 3%, transparent);
-  transition:
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    background-color 0.16s ease;
-}
-
-.sidebar-process-input :deep(.el-textarea__inner) {
-  min-height: 0 !important;
-  max-height: 132px;
-  padding: 0 2px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--vk-text);
-  line-height: 1.45;
-  overflow-y: auto;
-}
-
-.sidebar-process-input :deep(.el-textarea__inner:focus) {
-  box-shadow: none;
-}
-
-.sidebar-run-button {
-  justify-self: end;
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0;
-  border: 0;
-  background: transparent !important;
-  color: var(--vk-accent-strong) !important;
-  box-shadow: none !important;
-}
-
-.sidebar-run-button:hover:not(:disabled),
-.sidebar-run-button:focus-visible {
-  background: transparent !important;
-  color: var(--vk-accent-strong) !important;
-  box-shadow: none !important;
-}
-
-.sidebar-run-button:disabled {
-  background: transparent !important;
-  color: var(--vk-muted) !important;
-  opacity: 0.42;
-}
 
 .sidebar-node-list {
   display: grid;

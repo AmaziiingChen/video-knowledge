@@ -766,81 +766,31 @@
           </section>
     </div>
 
-  <section
+  <PromptEditorSurface
     v-else-if="activeView === 'prompts'"
-    class="editor-surface prompt-editor-surface"
-    @keydown.meta.s.prevent="saveCurrentPrompt"
-    @keydown.ctrl.s.prevent="saveCurrentPrompt"
-  >
-    <div v-if="activePromptTabId" v-loading="promptWorkspaceLoading" class="prompt-editor-main">
-      <div class="prompt-function-bar">
-        <div class="prompt-usage" aria-label="提示词使用说明">
-          <strong>使用说明</strong>
-          <span v-if="isSystemPromptEditor" class="prompt-system-readonly">系统角色 · 只读核验</span>
-          <span v-else-if="isPromptContextEditor" class="prompt-system-readonly">任务上下文 · 只读核验</span>
-          <span><b>入口</b>{{ activePromptContract.entry }}</span>
-          <span><b>输入</b>{{ activePromptContract.input }}</span>
-          <span><b>输出</b>{{ activePromptContract.output }}</span>
-          <span v-if="activePromptContract.variables.length" class="prompt-contract-variables">
-            <b>变量</b><code v-for="variable in activePromptContract.variables" :key="variable">{{ variable }}</code>
-            <em>删除变量后，运行时仍会附加必要输入</em>
-          </span>
-        </div>
-        <div class="prompt-editor-actions">
-          <span v-if="currentPromptDirty" class="prompt-editor-dirty">未保存</span>
-          <el-button
-            v-if="!isReadOnlyPromptEditor && !isReportPromptEditor && selectedPromptTemplateId && !selectedPromptTemplate?.is_active"
-            class="prompt-activate-button"
-            size="small"
-            :loading="activatingPromptTemplate"
-            @click="$emit('activate-prompt-template', selectedPromptTemplateId)"
-          >
-            设为启用
-          </el-button>
-          <el-button
-            v-if="!isReadOnlyPromptEditor && (selectedPromptTemplateId || selectedWechatReportPrompt)"
-            class="prompt-reset-button"
-            size="small"
-            :disabled="currentPromptSaving"
-            @click="requestPromptReset"
-          >
-            <el-icon><Refresh /></el-icon>
-            恢复默认
-          </el-button>
-          <el-button
-            v-if="!isReadOnlyPromptEditor"
-            class="prompt-save-button"
-            size="small"
-            type="primary"
-            aria-keyshortcuts="Meta+S Control+S"
-            :loading="currentPromptSaving"
-            :disabled="!canSaveCurrentPrompt"
-            @click="saveCurrentPrompt"
-          >
-            保存
-          </el-button>
-        </div>
-      </div>
-
-      <el-input
-        class="prompt-editor-text"
-        :model-value="isReportPromptEditor ? wechatReportPromptText : promptEditorText"
-        type="textarea"
-        resize="none"
-        :name="isReportPromptEditor ? 'wechat-report-prompt' : 'prompt-template-content'"
-        autocomplete="off"
-        :aria-label="isReportPromptEditor ? '报告提示词' : '提示词内容'"
-        :placeholder="isReportPromptEditor ? '编辑报告提示词…' : '编辑当前提示词…'"
-        :readonly="isReadOnlyPromptEditor"
-        @update:model-value="updateCurrentPromptText"
-      />
-    </div>
-    <div v-else class="prompt-editor-empty">
-      <SvgMaskIcon :src="appendPageIcon" :size="42" />
-      <strong>从左侧文件树打开提示词</strong>
-      <span>提示词会在标签页中打开，可同时编辑多个文件。</span>
-    </div>
-  </section>
+    :prompt-workspace-tabs="promptWorkspaceTabs"
+    :active-prompt-tab-id="activePromptTabId"
+    :prompt-task-type="promptTaskType"
+    :prompt-templates="promptTemplates"
+    :selected-prompt-template-id="selectedPromptTemplateId"
+    :loading-prompts="loadingPrompts"
+    :prompt-editor-text="promptEditorText"
+    :prompt-editor-name="promptEditorName"
+    :saving-prompt-template="savingPromptTemplate"
+    :activating-prompt-template="activatingPromptTemplate"
+    :wechat-report-prompts="wechatReportPrompts"
+    :selected-wechat-report-prompt-group-id="selectedWechatReportPromptGroupId"
+    :selected-wechat-report-prompt-type="selectedWechatReportPromptType"
+    :wechat-report-prompt-text="wechatReportPromptText"
+    :loading-wechat-report-prompts="loadingWechatReportPrompts"
+    :saving-wechat-report-prompt="savingWechatReportPrompt"
+    @update:prompt-editor-text="$emit('update:promptEditorText', $event)"
+    @update:wechat-report-prompt-text="$emit('update:wechat-report-prompt-text', $event)"
+    @activate-prompt-template="$emit('activate-prompt-template', $event)"
+    @save-prompt="$emit('save-prompt')"
+    @save-wechat-report-prompt="$emit('save-wechat-report-prompt')"
+    @reset-prompt="$emit('reset-prompt')"
+  />
 
   </section>
 </template>
@@ -853,14 +803,11 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Refresh,
 } from '@element-plus/icons-vue'
-import { promptTaskContracts, promptTemplateDisplayName } from '../config/promptInterface'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../components/AiSkeletonStream.vue'
 import { useMarkdownFootnoteNavigation } from '../composables/useMarkdownFootnoteNavigation'
 const movieClapperIcon = 'movieclapper'
-const appendPageIcon = 'append.page'
 const questionPageIcon = 'questionmark.text.page'
 const playFillIcon = 'play.fill'
 const pauseFillIcon = 'pause.fill'
@@ -893,6 +840,7 @@ import {
   remoteOutlineBridgeScript,
 } from './remoteOutlineBridge.js'
 import PreviewFindBar from './PreviewFindBar.vue'
+import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
 
@@ -905,13 +853,8 @@ const props = defineProps({
   promptWorkspaceTabs: { type: Array, default: () => [] },
   activePromptTabId: { type: String, default: '' },
   selectedContentItem: { type: Object, default: null },
-  selectedModel: { type: String, default: 'small' },
-  useCache: { type: Boolean, default: true },
-  modelProfileOptions: { type: Array, default: () => [] },
   running: { type: Boolean, default: false },
   result: { type: Object, required: true },
-  parsedUrl: { type: Object, default: null },
-  mediaPreviewUrl: { type: String, default: '' },
   selectedMarkdownPreview: { type: String, default: '' },
   selectedMarkdownSizeBytes: { type: Number, default: 0 },
   selectedMarkdownPath: { type: String, default: '' },
@@ -924,7 +867,6 @@ const props = defineProps({
   promptEditorName: { type: String, default: '' },
   savingPromptTemplate: { type: Boolean, default: false },
   activatingPromptTemplate: { type: Boolean, default: false },
-  wechatReportGroups: { type: Array, default: () => [] },
   wechatReportPrompts: { type: Array, default: () => [] },
   selectedWechatReportPromptGroupId: { type: String, default: '' },
   selectedWechatReportPromptType: { type: String, default: 'group_context' },
@@ -941,13 +883,7 @@ const props = defineProps({
   sourceProviderLabel: { type: Function, required: true },
   formatDuration: { type: Function, required: true },
   formatDateTime: { type: Function, required: true },
-  promptTaskLabel: { type: Function, required: true },
   formatBytes: { type: Function, required: true },
-  roundedProgress: { type: Function, required: true },
-  statusLabel: { type: Function, required: true },
-  stepLabel: { type: Function, required: true },
-  batchTaskName: { type: Function, required: true },
-  formatSeconds: { type: Function, required: true },
   retryingContentId: { type: String, default: null },
   wechatPublishingConfigured: { type: Boolean, default: false },
   wechatCoverGeneratingContentIds: { type: Array, default: () => [] },
@@ -956,20 +892,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'update:selectedModel',
-  'update:useCache',
   'update:promptEditorText',
-  'update:promptEditorName',
-  'update:promptTaskType',
-  'load-prompts',
-  'select-prompt-template',
-  'new-prompt-template',
   'activate-prompt-template',
-  'delete-prompt-template',
   'save-prompt',
   'reset-prompt',
-  'update:selectedWechatReportPromptGroupId',
-  'update:selectedWechatReportPromptType',
   'update:wechat-report-prompt-text',
   'save-wechat-report-prompt',
   'copy-text',
@@ -984,14 +910,6 @@ const emit = defineEmits([
   'fetch-external-subtitle',
   'refresh-source-context',
   'redownload-video',
-  'activate-workspace-tab',
-  'close-workspace-tab',
-  'close-workspace-tabs',
-  'reveal-workspace-tab',
-  'delete-workspace-tab',
-  'activate-prompt-tab',
-  'close-prompt-tab',
-  'close-prompt-tabs',
   'ask-about-selection',
   'generate-wechat-cover',
   'regenerate-wechat-cover',
@@ -1086,73 +1004,6 @@ const selectedTextActionStyle = computed(() => {
     '--reader-selection-tail-bottom': opensAbove ? '-4px' : 'auto',
   }
 })
-const activePromptWorkspaceTab = computed(() => (
-  props.promptWorkspaceTabs.find((tab) => tab.id === props.activePromptTabId) || null
-))
-const isSystemPromptEditor = computed(() => activePromptWorkspaceTab.value?.kind === 'system')
-const isPromptContextEditor = computed(() => activePromptWorkspaceTab.value?.kind === 'context')
-const isReadOnlyPromptEditor = computed(() => isSystemPromptEditor.value || isPromptContextEditor.value)
-const isReportPromptEditor = computed(() => props.promptTaskType === 'wechat_reports')
-const selectedPromptTemplate = computed(() => {
-  return props.promptTemplates.find((template) => template.id === props.selectedPromptTemplateId) || null
-})
-const selectedWechatReportPrompt = computed(() => {
-  return props.wechatReportPrompts.find((item) => (
-    item.group_id === props.selectedWechatReportPromptGroupId
-    && item.report_type === props.selectedWechatReportPromptType
-  )) || null
-})
-const activePromptContract = computed(() => promptTaskContracts[props.promptTaskType] || {
-  entry: '知识处理流程',
-  input: '当前任务材料',
-  output: 'AI 生成内容',
-  variables: []
-})
-const standardPromptDirty = computed(() => {
-  if (isReadOnlyPromptEditor.value) return false
-  if (isReportPromptEditor.value) return false
-  if (!selectedPromptTemplate.value) {
-    return Boolean(props.promptEditorName.trim() || props.promptEditorText.trim())
-  }
-  return props.promptEditorName !== promptTemplateDisplayName(selectedPromptTemplate.value)
-    || props.promptEditorText !== selectedPromptTemplate.value.template
-})
-const reportPromptDirty = computed(() => {
-  if (!isReportPromptEditor.value || !selectedWechatReportPrompt.value) return false
-  return props.wechatReportPromptText !== selectedWechatReportPrompt.value.template
-})
-const currentPromptDirty = computed(() => (
-  isReportPromptEditor.value ? reportPromptDirty.value : standardPromptDirty.value
-))
-const canSaveCurrentPrompt = computed(() => {
-  if (!currentPromptDirty.value) return false
-  if (isReportPromptEditor.value) {
-    return Boolean(selectedWechatReportPrompt.value && props.wechatReportPromptText.trim())
-  }
-  return Boolean(props.promptEditorName.trim() && props.promptEditorText.trim())
-})
-const promptWorkspaceLoading = computed(() => (
-  isReportPromptEditor.value ? props.loadingWechatReportPrompts : props.loadingPrompts
-))
-const currentPromptSaving = computed(() => (
-  isReportPromptEditor.value ? props.savingWechatReportPrompt : props.savingPromptTemplate
-))
-
-function updateCurrentPromptText(value) {
-  if (isReadOnlyPromptEditor.value) return
-  emit(isReportPromptEditor.value ? 'update:wechat-report-prompt-text' : 'update:promptEditorText', value)
-}
-
-function saveCurrentPrompt() {
-  if (!canSaveCurrentPrompt.value || currentPromptSaving.value) return
-  emit(isReportPromptEditor.value ? 'save-wechat-report-prompt' : 'save-prompt')
-}
-
-function requestPromptReset() {
-  if (currentPromptSaving.value) return
-  emit('reset-prompt')
-}
-
 const mediaTranscriptHeight = ref(readStoredVerticalSplit('knowledgehub.media-transcript-height.v1'))
 const mediaTranscriptResizing = ref(false)
 const xhsImageTextHeight = ref(readStoredVerticalSplit('knowledgehub.xhs-image-text-height.v1'))
@@ -5076,531 +4927,6 @@ function exportVideoSubtitles(tabId) {
   font-size: 14px;
   line-height: 1.22;
 }
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  color: var(--vk-muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.editor-surface {
-  height: 100%;
-  min-height: 100%;
-  border: 0;
-  border-radius: var(--vk-radius-surface);
-  overflow: hidden;
-  background: var(--vk-bg-center);
-  color: var(--vk-text);
-}
-
-.prompt-editor-surface {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  min-height: 0;
-}
-
-.prompt-editor-breadcrumb {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--vk-space-xs);
-  padding: 0 var(--vk-space-panel);
-  overflow: hidden;
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-center);
-  color: var(--vk-muted);
-  font-size: var(--vk-type-label-size);
-  white-space: nowrap;
-}
-
-.prompt-editor-breadcrumb i {
-  color: color-mix(in srgb, var(--vk-muted) 54%, transparent);
-  font-style: normal;
-}
-
-.prompt-editor-breadcrumb strong {
-  color: var(--vk-text);
-  font-weight: 600;
-}
-
-.prompt-breadcrumb-leaf {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--vk-text);
-  text-overflow: ellipsis;
-}
-
-.prompt-editor-breadcrumb small {
-  flex: 0 0 auto;
-  color: var(--vk-muted);
-  font-size: var(--vk-type-micro-size);
-  font-variant-numeric: tabular-nums;
-}
-
-.editor-titlebar {
-  min-height: 35px;
-  align-items: center;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--vk-border);
-  color: var(--vk-text);
-  background: var(--vk-bg-hover);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.editor-titlebar-actions,
-.editor-row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.editor-empty {
-  min-height: 320px;
-  display: grid;
-  place-items: center;
-  color: var(--vk-muted);
-  font-size: 13px;
-}
-
-.editor-list {
-  display: grid;
-}
-
-.editor-row {
-  display: grid;
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--vk-border);
-}
-
-.editor-row:hover {
-  background: var(--vk-bg-hover);
-}
-
-.editor-row-head > div {
-  min-width: 0;
-}
-
-.editor-row-head strong {
-  display: block;
-  color: var(--vk-text);
-  font-size: 13px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.editor-row-head span {
-  display: block;
-  margin-top: 3px;
-  color: var(--vk-muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.prompt-editor-pane {
-  position: relative;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
-  padding: 0;
-}
-
-.template-rail-collapsed .prompt-editor-pane {
-  grid-template-columns: 42px minmax(0, 1fr);
-}
-
-.prompt-template-rail {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
-  overflow: hidden;
-  border-right: 1px solid var(--vk-border);
-  background: var(--vk-bg-quiet);
-}
-
-.prompt-template-rail-header {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--vk-space-xs);
-  padding: 0 var(--vk-space-sm) 0 var(--vk-space-control);
-  border-bottom: 1px solid var(--vk-border);
-}
-
-.template-rail-collapsed .prompt-template-rail-header {
-  justify-content: center;
-  padding: 0;
-}
-
-.prompt-template-rail-title,
-.prompt-template-rail-actions {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--vk-space-xs);
-}
-
-.prompt-template-rail-title strong {
-  color: var(--vk-text);
-  font-size: var(--vk-type-label-size);
-  font-weight: 600;
-}
-
-.prompt-template-rail-title small {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-micro-size);
-  font-variant-numeric: tabular-nums;
-}
-
-.prompt-rail-icon-button {
-  width: var(--vk-control-height-compact);
-  height: var(--vk-control-height-compact);
-  display: inline-grid;
-  flex: 0 0 auto;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--vk-radius-control);
-  background: transparent;
-  color: var(--vk-muted);
-  cursor: pointer;
-}
-
-.prompt-rail-icon-button:hover {
-  background: var(--vk-bg-hover);
-  color: var(--vk-text);
-}
-
-.prompt-rail-icon-button:focus-visible,
-.prompt-shortcut-item:focus-visible {
-  outline: none;
-  box-shadow: var(--vk-focus-ring);
-}
-
-.prompt-template-list {
-  min-height: 0;
-  display: grid;
-  align-content: start;
-  gap: 2px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: var(--vk-space-sm) var(--vk-space-xs);
-}
-
-.prompt-shortcut-item {
-  width: 100%;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--vk-space-xs);
-  padding: 0 var(--vk-space-sm);
-  border: 0;
-  border-radius: var(--vk-radius-compact);
-  background: transparent;
-  color: var(--vk-text);
-  font: inherit;
-  font-size: var(--vk-type-label-size);
-  text-align: left;
-  cursor: pointer;
-}
-
-.prompt-shortcut-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prompt-template-current {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  border-radius: var(--vk-radius-pill);
-  background: color-mix(in srgb, var(--vk-accent) 14%, transparent);
-  color: var(--vk-accent-strong);
-  font-size: var(--vk-type-micro-size);
-  font-weight: 600;
-  line-height: 18px;
-  padding: 0 var(--vk-space-xs);
-}
-
-.prompt-shortcut-item:hover,
-.prompt-shortcut-item.active {
-  background: var(--vk-selected-bg);
-  color: var(--vk-selected-fg);
-}
-
-.report-prompt-blank {
-  display: grid;
-  grid-row: 1 / -1;
-  min-height: 100%;
-  place-items: center;
-  padding: var(--vk-space-page);
-  color: var(--vk-muted);
-  font-size: var(--vk-type-body-size);
-  text-align: center;
-}
-
-.prompt-editor-main {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.prompt-function-bar {
-  min-width: 0;
-  min-height: 42px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--vk-space-sm);
-  padding: var(--vk-space-micro) var(--vk-space-control);
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-quiet);
-}
-
-.prompt-usage {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--vk-space-micro) var(--vk-space-cluster);
-  color: var(--vk-text);
-  font-size: var(--vk-type-meta-size);
-  line-height: 1.4;
-}
-
-.prompt-usage > strong {
-  color: var(--vk-text);
-  font-size: var(--vk-type-label-size);
-  font-weight: 600;
-}
-
-.prompt-usage span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--vk-space-micro);
-}
-
-.prompt-usage b {
-  color: var(--vk-muted);
-  font-weight: 500;
-}
-
-.prompt-usage code {
-  color: var(--vk-accent-strong);
-  font-family: var(--vk-font-mono);
-  font-size: inherit;
-}
-
-.prompt-usage em {
-  color: var(--vk-muted);
-  font-style: normal;
-}
-
-.prompt-editor-header {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--vk-space-control);
-  min-height: 56px;
-  padding: var(--vk-space-sm) var(--vk-space-control);
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-center);
-}
-
-.prompt-editor-name-field {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(120px, 420px);
-  align-items: center;
-  gap: var(--vk-space-sm);
-}
-
-.prompt-editor-name-field > span {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-  font-weight: 500;
-}
-
-.prompt-editor-static-name {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.prompt-editor-static-name strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--vk-text);
-  font-size: var(--vk-type-body-size);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prompt-editor-static-name span {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-}
-
-.prompt-editor-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--vk-space-xs);
-  min-width: 0;
-}
-
-.prompt-editor-actions :deep(.el-button + .el-button) {
-  margin-left: 0;
-}
-
-.prompt-editor-name {
-  width: 100%;
-  min-width: 0;
-}
-
-.prompt-editor-name :deep(.el-input__wrapper) {
-  min-height: var(--vk-control-height-default);
-  border-radius: var(--vk-radius-control);
-  background: var(--vk-bg-panel);
-  box-shadow: 0 0 0 1px var(--vk-border) inset;
-}
-
-.prompt-editor-name :deep(.el-input__inner) {
-  color: var(--vk-text);
-  font-size: var(--vk-type-body-size);
-  font-weight: 600;
-}
-
-.prompt-editor-dirty {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--vk-space-micro);
-  color: var(--vk-warning);
-  font-size: var(--vk-type-meta-size);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.prompt-editor-dirty::before {
-  width: 5px;
-  height: 5px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: currentColor;
-  content: '';
-}
-
-.prompt-save-button {
-  min-width: 58px;
-}
-
-.prompt-save-button:deep(.el-button),
-.prompt-save-button,
-.prompt-reset-button:deep(.el-button),
-.prompt-reset-button {
-  border-radius: var(--vk-radius-control);
-}
-
-.prompt-reset-button { min-width: 84px; }
-
-.prompt-activate-button {
-  border-radius: var(--vk-radius-control);
-}
-
-.prompt-editor-empty {
-  grid-row: 1 / -1;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: var(--vk-space-sm);
-  min-height: 0;
-  padding: var(--vk-space-page);
-  color: var(--vk-muted);
-  text-align: center;
-}
-
-.prompt-editor-empty :deep(.svg-mask-icon) { color: var(--vk-accent-strong); opacity: 0.72; }
-.prompt-editor-empty strong { color: var(--vk-text); font-size: var(--vk-type-body-size); font-weight: 600; }
-.prompt-editor-empty span { font-size: var(--vk-type-label-size); }
-
-.prompt-contract-strip {
-  min-width: 0;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--vk-space-xs) var(--vk-space-panel);
-  padding: var(--vk-space-xs) var(--vk-space-panel);
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-quiet);
-  color: var(--vk-text);
-  font-size: var(--vk-type-meta-size);
-  line-height: 1.4;
-}
-
-.prompt-contract-strip span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--vk-space-micro);
-}
-
-.prompt-contract-strip b {
-  color: var(--vk-muted);
-  font-weight: 500;
-}
-
-.prompt-contract-strip code {
-  color: var(--vk-accent-strong);
-  font-family: var(--vk-font-mono);
-  font-size: inherit;
-}
-
-.prompt-contract-strip em {
-  color: var(--vk-muted);
-  font-style: normal;
-}
-
-.prompt-editor-text {
-  min-height: 0;
-  height: 100%;
-}
-
-.prompt-editor-text :deep(.el-textarea__inner) {
-  box-sizing: border-box;
-  height: 100%;
-  min-height: 0;
-  border-color: var(--vk-border);
-  border-radius: var(--vk-radius-surface);
-  border-width: 0;
-  background: var(--vk-bg-panel);
-  color: var(--vk-text);
-  font-family: var(--vk-font-mono);
-  font-size: var(--vk-type-body-size);
-  line-height: 1.7;
-  padding: var(--vk-space-panel) var(--vk-space-page) var(--vk-space-section);
-  box-shadow: none;
-}
-
 
 @media (prefers-reduced-motion: reduce) {
   .media-transcript-splitter::before,

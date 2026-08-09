@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const source = await readFile(new URL('./PrimarySidebar.vue', import.meta.url), 'utf8')
+const linkDockSource = await readFile(new URL('./SidebarLinkDock.vue', import.meta.url), 'utf8')
 
 test('centres and enlarges file-tree toolbar actions without a top divider', () => {
   assert.match(source, /<SvgMaskIcon :src="folderAddIcon" :size="24"\s*\/>/)
@@ -18,10 +19,10 @@ test('centres and enlarges file-tree toolbar actions without a top divider', () 
 })
 
 test('expands the pasted-link composer from one to six lines', () => {
-  assert.match(source, /aria-label="粘贴待处理链接"[\s\S]*?:autosize="\{ minRows: 1, maxRows: 6 \}"/)
+  assert.match(linkDockSource, /aria-label="粘贴待处理链接"[\s\S]*?:autosize="\{ minRows: 1, maxRows: 6 \}"/)
   assert.match(
-    source,
+    linkDockSource,
     /\.sidebar-process-input\s*\{[\s\S]*?display:\s*grid;[\s\S]*?padding:\s*8px 8px 7px;[\s\S]*?\.sidebar-process-input :deep\(\.el-textarea__inner\)\s*\{[\s\S]*?max-height:\s*132px;[\s\S]*?padding:\s*0 2px;[\s\S]*?overflow-y:\s*auto;/,
   )
-  assert.match(source, /\.sidebar-run-button\s*\{[\s\S]*?justify-self:\s*end;/)
+  assert.match(linkDockSource, /\.sidebar-run-button\s*\{[\s\S]*?justify-self:\s*end;/)
 })
