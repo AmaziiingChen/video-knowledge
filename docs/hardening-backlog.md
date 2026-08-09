@@ -79,6 +79,10 @@ lines.
   call history, daily usage aggregation and its polling lifecycle now live in
   `features/usage/useAiUsageController.js`; content-analysis prompt loading and
   delegation now live in `features/assistant/useContentAnalysisController.js`.
+  QA response SSE decoding, display throttling, usage updates and completed
+  answer state reconciliation now live in
+  `features/assistant/createQaResponseStreamController.js`; request creation
+  and session orchestration remain in the facade.
   Content recovery actions (source text, reprocessing, retranscription,
   subtitles and redownloads) now live in
   `features/library/useContentRecoveryController.js` while reusing the durable
