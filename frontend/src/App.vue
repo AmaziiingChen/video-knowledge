@@ -866,6 +866,7 @@ import { useWechatPublishingSettingsController } from './features/wechat/useWech
 import { useWechatReportPromptController } from './features/prompts/useWechatReportPromptController.js'
 import { usePromptWorkspaceController } from './features/prompts/usePromptWorkspaceController.js'
 import { useWechatAccountController } from './features/wechat/useWechatAccountController.js'
+import { useWechatSubscriptionSyncController } from './features/wechat/useWechatSubscriptionSyncController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -1672,8 +1673,6 @@ const savingWeChatFilter = ref(false)
 const wechatSubscriptionInterval = ref(1440)
 const wechatAutoProcess = ref(false)
 const wechatSubscriptionStates = ref({})
-const syncingWeChatSubscriptionId = ref('')
-const wechatBulkSyncState = ref({ status: 'idle', total: 0, completed: 0, succeeded: 0, failed: 0, skipped: 0, imported_count: 0, incomplete_count: 0 })
 const refreshingWeChatProfileId = ref('')
 const wechatSubscriptionUpdateRevision = new Map()
 const wechatSyncIntervalOptions = [
@@ -1681,9 +1680,6 @@ const wechatSyncIntervalOptions = [
   { label: '每 12 小时', value: 720 },
   { label: '每天', value: 1440 }
 ]
-let wechatBulkSyncPollTimer = null
-let wechatBulkProgressRefreshKey = ''
-let wechatBulkProgressRefreshInFlight = false
 const wechatInitialSyncPollTimers = new Map()
 const wechatInitialSyncImportedCounts = new Map()
 let wechatInitialSyncListPollTimer = null
@@ -1719,6 +1715,20 @@ const {
   accounts: wechatAccounts,
   refreshSubscriptions: loadWeChatSubscriptions,
   settingsOpen: showSettings,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const {
+  syncingWeChatSubscriptionId,
+  wechatBulkSyncState,
+  syncWeChatSubscription,
+  syncAllWeChatSubscriptions,
+} = useWechatSubscriptionSyncController({
+  subscriptions: wechatSubscriptions,
+  loadSubscriptions: loadWeChatSubscriptions,
+  refreshContentItems: loadContentItems,
+  enqueueTask: enqueueSourceSyncTask,
+  observeTask: observeSourceSyncTask,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 
@@ -2248,120 +2258,6 @@ async function refreshWeChatSubscriptionProfile(subscriptionId) {
     ElMessage.error(wechatErrorMessage(error, '更新公众号资料失败'))
   } finally {
     refreshingWeChatProfileId.value = ''
-  }
-}
-
-async function syncWeChatSubscription(subscriptionId, options = { mode: 'latest', max_items: 10 }) {
-  syncingWeChatSubscriptionId.value = subscriptionId
-  try {
-    const subscription = wechatSubscriptions.value.find((item) => String(item.id) === String(subscriptionId))
-    const task = await enqueueSourceSyncTask({
-      kind: 'wechat_subscription',
-      source_title: subscription?.mp_name || '公众号检查',
-      source_url: subscription?.source_url,
-      subscription_id: subscriptionId,
-      mode: options.mode || 'latest',
-      max_items: options.max_items || undefined,
-      published_after: options.published_after || undefined,
-      published_before: options.published_before || undefined,
-    })
-    ElMessage.success('已开始检查公众号更新')
-    observeSourceSyncTask(task.task_id, {
-      onSucceeded: async (result) => {
-        const queued = Number(result.queued_for_analysis || 0)
-        ElMessage.success(`检查完成：检查到 ${result.found_count || 0} 篇，新增 ${result.imported_count || 0} 篇${queued ? `，已加入 ${queued} 篇自动分析` : ''}`)
-        await loadWeChatSubscriptions()
-      },
-      onFailed: (message) => ElMessage.error(message || '公众号同步失败'),
-    })
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '公众号同步失败'))
-  } finally {
-    syncingWeChatSubscriptionId.value = ''
-  }
-}
-
-function stopWeChatBulkSyncPolling() {
-  if (wechatBulkSyncPollTimer) clearTimeout(wechatBulkSyncPollTimer)
-  wechatBulkSyncPollTimer = null
-}
-
-function scheduleWeChatBulkSyncPoll() {
-  stopWeChatBulkSyncPolling()
-  if (!['queued', 'running'].includes(wechatBulkSyncState.value.status)) return
-  wechatBulkSyncPollTimer = setTimeout(() => loadWeChatBulkSyncStatus({ notify: true }), 1200)
-}
-
-function wechatBulkProgressKey(state) {
-  return [state?.job_id || '', Number(state?.completed || 0), state?.current_subscription_id || ''].join(':')
-}
-
-async function refreshWeChatSubscriptionsForBulkProgress() {
-  if (wechatBulkProgressRefreshInFlight) return
-  wechatBulkProgressRefreshInFlight = true
-  try {
-    await loadWeChatSubscriptions()
-  } finally {
-    wechatBulkProgressRefreshInFlight = false
-  }
-}
-
-function notifyWeChatBulkSyncFinished(state) {
-  const imported = Number(state.imported_count || 0)
-  if (state.status === 'succeeded') {
-    const coverage = Number(state.incomplete_count || 0)
-    ElMessage.success(`全部公众号检查完成：检查 ${state.completed || 0} 个，新增 ${imported} 篇${coverage ? `；${coverage} 个达到单次补漏上限` : ''}`)
-    return
-  }
-  if (state.status === 'completed_with_errors') {
-    ElMessage.warning(`公众号检查完成：成功 ${state.succeeded || 0} 个，失败 ${state.failed || 0} 个，新增 ${imported} 篇`)
-    return
-  }
-  if (state.status === 'stopped') ElMessage.warning(state.message || '批量更新已停止，请检查微信授权状态')
-}
-
-async function loadWeChatBulkSyncStatus({ notify = false } = {}) {
-  // Bulk checks are now ordinary persistent tasks. Their observer updates
-  // this presentation state, so reopening the view never probes a transient
-  // in-memory queue from a previous backend process.
-  if (notify) return
-}
-
-async function syncAllWeChatSubscriptions() {
-  if (['queued', 'running'].includes(wechatBulkSyncState.value.status)) return
-  try {
-    const total = wechatSubscriptions.value.filter((subscription) => subscription.enabled).length
-    if (!total) {
-      ElMessage.info('没有已启用的公众号需要更新')
-      return
-    }
-    const task = await enqueueSourceSyncTask({ kind: 'wechat_bulk', source_title: '检查全部公众号' })
-    wechatBulkSyncState.value = { status: task.status || 'queued', total, completed: 0, succeeded: 0, failed: 0, skipped: 0, imported_count: 0, incomplete_count: 0 }
-    ElMessage.success(`已开始逐个检查 ${total} 个公众号`)
-    observeSourceSyncTask(task.task_id, {
-      onUpdate: (update) => {
-        const progress = Math.max(0, Math.min(100, Number(update.overall_progress || 0)))
-        const message = update.logs?.at(-1)?.message || ''
-        const currentName = message.includes('：') ? message.split('：').at(-1).split('，')[0] : ''
-        wechatBulkSyncState.value = {
-          ...wechatBulkSyncState.value,
-          status: update.status,
-          completed: Math.min(total, Math.floor(progress / 100 * total)),
-          current_name: currentName,
-        }
-      },
-      onSucceeded: async (result) => {
-        wechatBulkSyncState.value = { status: 'succeeded', ...result }
-        await Promise.all([loadWeChatSubscriptions(), loadContentItems()])
-        notifyWeChatBulkSyncFinished(wechatBulkSyncState.value)
-      },
-      onFailed: (message) => {
-        wechatBulkSyncState.value = { ...wechatBulkSyncState.value, status: 'failed', message }
-        ElMessage.error(message || '公众号检查失败')
-      },
-    })
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '检查全部公众号未能启动'))
   }
 }
 
@@ -3290,7 +3186,6 @@ onBeforeUnmount(() => {
   reportGenerationConfirmationResolver?.(false)
   reportGenerationConfirmationResolver = null
   disposeWechatAccountController()
-  stopWeChatBulkSyncPolling()
   disposeWechatCoverController()
   disposeWechatDraftController()
   stopWeChatInitialSyncListPolling()

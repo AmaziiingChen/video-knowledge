@@ -60,6 +60,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `features/wechat/useWechatPublishingSettingsController.js` | masked publishing settings, Keychain-backed form lifecycle, cover-provider connection checks | draft creation, cover task polling, workspace navigation |
 | `features/wechat/useWechatCoverController.js` | cover planning, history selection, task polling and cleanup | publication credentials, report generation, editor rendering |
 | `features/wechat/useWechatAccountController.js` | account authorization, QR polling, manual credential handoff, account transfer and public-account search | subscription sync queue, subscription filters, report-group refresh |
+| `features/wechat/useWechatSubscriptionSyncController.js` | single/bulk subscription task enqueueing, observer progress and completion feedback | account authorization, subscription loading, filters and report groups |
 | `features/library/useLibrarySearchController.js` | debounced library search, stale-result rejection, result hydration and search lifecycle cleanup | sidebar tree presentation, content selection, telemetry transport |
 | `features/library/useLibraryTrashController.js` | trash loading, restore/delete/empty transactions and the bounded undo notice | folder/history model, selected tabs, content-tree rendering |
 | `features/library/libraryTreeModel.js` | pure folder/content/unread/pinned tree-node construction and deterministic ordering | localStorage preferences, drag/drop, selection, virtual rendering and parent events |
