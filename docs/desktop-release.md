@@ -32,18 +32,11 @@ xattr -dr com.apple.quarantine "/Applications/KnowledgeHub.app"
 
 不要使用 `sudo`，也不要关闭 Gatekeeper 或对整个下载目录执行隔离属性清除命令。
 
-## 下载页与手动更新
-
-1. 上传本次 DMG、`release/download/index.html` 和从 `release/manifest.template.json` 填写的版本清单到同一官方 HTTPS 域名。
-2. 将下载页中的两个链接替换为本次的实际文件链接，并写入版本号与 SHA-256 校验值。
-3. 在发行包的 `settings.env` 或受控运行环境中配置 `RELEASE_MANIFEST_URL=https://<官方域名>/manifest.json`；可选配置 `DOWNLOAD_PAGE_URL` 作为清单中的下载页回退地址。
-4. 启动应用确认“有可用更新”只显示提示，用户点击“打开下载页”后才调用系统浏览器；应用本身不下载、不替换任何文件。
-
 ## 发布前清单
 
 - macOS：发布不使用 Developer ID 签名或 Apple 公证的 Apple Silicon DMG，并在干净账户完成安装、首次打开、复启验证后再上传；随 Release 提供实际文件的 SHA-256。
 - 发布标签必须与 `frontend/package.json` 的版本严格一致；不要复用或覆盖已经公开的版本标签。
-- 上传前核对版本清单的版本、下载页链接、文件哈希与安装包实际名称一致。
+- 上传前核对 GitHub Release 的版本、DMG 文件名与 SHA-256 校验值一致。
 - 运行 `python scripts/check_public_release_tree.py`，确认没有本机资料、报告或常见凭据进入公开树和将要发布的分支/标签历史。
 - 使用明确的分支和标签推送；不要使用 `git push --mirror`。本机的恢复与开发工具引用不属于发布面。
 - 公开版保持 `MINIPROGRAM_FORUM_CAPTURE_ENABLED=false`；不发布微信小程序视觉采集。

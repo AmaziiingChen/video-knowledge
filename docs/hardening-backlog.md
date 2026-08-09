@@ -110,8 +110,8 @@ lines.
 - [ ] Add generated SBOM/license review evidence to release artifacts; evaluate
   immutable action pins.  Dependabot now covers GitHub Actions alongside npm
   and pip dependencies.
-- [ ] Separate the unused external download-site instructions from the normal
-  GitHub Release path.
+- [x] Remove the unused external download-site instructions; the release guide
+  now documents only the normal GitHub Release DMG and SHA-256 path.
 - [ ] Continue ratcheting every production source below 1,000 lines, or add a
   narrowly documented generated/declarative exception. The group-report source
   summary cache now has its own database owner; the planner's JSON shape
