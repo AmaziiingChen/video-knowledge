@@ -63,6 +63,9 @@ lines.
 
 ## P2 — repository hygiene and release provenance
 
+- [x] Remove verified-unreachable renderer batch-link, batch-upload and queue
+  action code after facade/template/call-site audit; retain the live queue,
+  clipboard and single-link processing paths.
 - [ ] Remove the three verified-unused Vite starter assets after the full
   renderer build confirms they are absent from output.
 - [ ] Remove committed macOS helper binaries after an arm64 build proves the

@@ -338,12 +338,6 @@ export function useAppController() {
   const inboxItems = ref([])
   const loadingInbox = ref(false)
   const processingInboxIds = ref(new Set())
-  const batchShareText = ref('')
-  const creatingBatchLinks = ref(false)
-  const uploadFiles = ref([])
-  const uploadingVideos = ref(false)
-  const subtitleFiles = ref([])
-  const uploadingSubtitles = ref(false)
   const batchTasks = ref([])
   const batchTaskIds = ref([])
   const batchTaskNames = ref({})
@@ -916,8 +910,6 @@ export function useAppController() {
     }
     return [...deduplicated.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
   })
-
-  const batchLinkCount = computed(() => extractBatchLinks(batchShareText.value).length)
 
   const modelProfileOptions = computed(() => {
     return preferredModelOrder
@@ -3843,145 +3835,6 @@ export function useAppController() {
     return parts.join(' · ')
   }
 
-  function extractBatchLinks(text) {
-    if (!text.trim()) return []
-    const patterns = [
-      /https?:\/\/v\.douyin\.com\/[A-Za-z0-9_/-]+/g,
-      /https?:\/\/(?:www\.)?bilibili\.com\/video\/[A-Za-z0-9]+/g,
-      /https?:\/\/b23\.tv\/[A-Za-z0-9]+/g,
-      /https?:\/\/mp\.weixin\.qq\.com\/[^\s]+/g,
-    ]
-    const links = []
-    for (const pattern of patterns) {
-      for (const match of text.matchAll(pattern)) {
-        links.push(match[0].replace(/[，。；、,.!?]+$/g, ''))
-      }
-    }
-    return [...new Set(links)]
-  }
-
-  async function startBatchLinkTasks() {
-    const links = extractBatchLinks(batchShareText.value)
-    if (!links.length) {
-      ElMessage.warning('没有识别到可处理的链接')
-      return
-    }
-
-    await createLinkTasks(links, { clearBatchText: true, sourceLabel: '链接' })
-  }
-
-  async function createLinkTasks(links, options = {}) {
-    if (creatingBatchLinks.value) return []
-
-    creatingBatchLinks.value = true
-    try {
-      const responses = []
-      for (const link of links) {
-        const res = await axios.post(`${API}/ingest/link`, {
-          text: link,
-          mode: 'process',
-          ...asrRequestOptions(),
-          ...aiRequestOptions(),
-          use_cache: useCache.value
-        }, { timeout: 10000 })
-        responses.push(res.data.task || res.data)
-      }
-
-      responses.forEach((task, index) => {
-        batchTaskNames.value[task.task_id] = links[index]
-      })
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, ...responses.map((task) => task.task_id)])]
-      mergeBatchTasks(responses)
-      await Promise.allSettled(responses.map((task) => hydrateProgressiveTask(task, progressiveTaskSnapshots.get(task.task_id))))
-      if (options.clearBatchText) {
-        batchShareText.value = ''
-      }
-      clipboardStatus.value = `已创建 ${responses.length} 个任务`
-      ElMessage.success(`已创建 ${responses.length} 个${options.sourceLabel || '链接'}任务`)
-      await pollBatchTasks()
-      return responses
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '创建任务失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '创建任务失败')
-      return []
-    } finally {
-      creatingBatchLinks.value = false
-    }
-  }
-
-  async function startUploadTasks() {
-    const rawFiles = uploadFiles.value.map((file) => file.raw).filter(Boolean)
-    if (!rawFiles.length) {
-      ElMessage.warning('请选择视频文件')
-      return
-    }
-
-    const formData = new FormData()
-    rawFiles.forEach((file) => formData.append('files', file))
-    appendAsrFormData(formData)
-    appendAiFormData(formData)
-
-    uploadingVideos.value = true
-    try {
-      const res = await axios.post(`${API}/upload-tasks`, formData, {
-        // Large local videos are streamed to the desktop backend. A fixed
-        // client deadline can report failure while the backend is still
-        // writing a healthy upload and creating its durable task.
-        timeout: 0
-      })
-      const tasks = res.data.tasks || []
-      tasks.forEach((task, index) => {
-        batchTaskNames.value[task.task_id] = rawFiles[index]?.name || task.source_title
-      })
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, ...tasks.map((task) => task.task_id)])]
-      mergeBatchTasks(tasks)
-      await Promise.allSettled(tasks.map((task) => hydrateProgressiveTask(task, progressiveTaskSnapshots.get(task.task_id))))
-      uploadFiles.value = []
-      ElMessage.success(`已创建 ${tasks.length} 个任务`)
-      await pollBatchTasks()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '上传失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '上传失败')
-    } finally {
-      uploadingVideos.value = false
-    }
-  }
-
-  async function startSubtitleUploadTasks() {
-    const rawFiles = subtitleFiles.value.map((file) => file.raw).filter(Boolean)
-    if (!rawFiles.length) {
-      ElMessage.warning('请选择字幕文件')
-      return
-    }
-
-    const formData = new FormData()
-    rawFiles.forEach((file) => formData.append('files', file))
-    appendAsrFormData(formData)
-    appendAiFormData(formData)
-
-    uploadingSubtitles.value = true
-    try {
-      const res = await axios.post(`${API}/upload-subtitle-tasks`, formData, {
-        timeout: 120000
-      })
-      const tasks = res.data.tasks || []
-      tasks.forEach((task, index) => {
-        batchTaskNames.value[task.task_id] = rawFiles[index]?.name || task.source_title
-      })
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, ...tasks.map((task) => task.task_id)])]
-      mergeBatchTasks(tasks)
-      await Promise.allSettled(tasks.map((task) => hydrateProgressiveTask(task, progressiveTaskSnapshots.get(task.task_id))))
-      subtitleFiles.value = []
-      ElMessage.success(`已创建 ${tasks.length} 个字幕任务`)
-      await pollBatchTasks()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '上传字幕失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '上传字幕失败')
-    } finally {
-      uploadingSubtitles.value = false
-    }
-  }
-
   async function pollBatchTasks() {
     stopBatchPolling()
     if (!batchTaskIds.value.length) return
@@ -4125,46 +3978,6 @@ export function useAppController() {
     }
   }
 
-  async function pauseBatchTask(task) {
-    try {
-      const res = await axios.post(`${API}/tasks/${task.task_id}/pause`, {}, { timeout: 10000 })
-      mergeBatchTasks([res.data])
-      if (res.data.status === 'paused') {
-        ElMessage.warning('任务已暂停')
-      } else {
-        ElMessage.info('当前任务无法暂停')
-      }
-      await pollBatchTasks()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '暂停失败'
-      ElMessage.error(msg)
-    }
-  }
-
-  async function resumeBatchTask(task) {
-    try {
-      const res = await axios.post(`${API}/tasks/${task.task_id}/resume`, {}, { timeout: 10000 })
-      mergeBatchTasks([res.data])
-      ElMessage.success('已继续任务')
-      await pollBatchTasks()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '继续失败'
-      ElMessage.error(msg)
-    }
-  }
-
-  async function prioritizeBatchTask(task) {
-    try {
-      const res = await axios.post(`${API}/tasks/${task.task_id}/prioritize`, {}, { timeout: 10000 })
-      mergeBatchTasks([res.data])
-      ElMessage.success('已提高优先级')
-      await pollBatchTasks()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '调整优先级失败'
-      ElMessage.error(msg)
-    }
-  }
-
   async function retryBatchTask(task) {
     try {
       const res = await axios.post(`${API}/tasks/${task.task_id}/retry`, {}, { timeout: 10000 })
@@ -4175,15 +3988,6 @@ export function useAppController() {
       const msg = e.response?.data?.detail || e.message || '重试失败'
       ElMessage.error(msg)
     }
-  }
-
-  function showBatchTask(task) {
-    resetRunState()
-    logs.value = []
-    backendLogCount.value = 0
-    backendLogCountsByTaskId.clear()
-    applyTaskData(task)
-    activeView.value = 'library'
   }
 
   async function copyText(value, message) {
