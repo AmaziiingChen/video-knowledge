@@ -73,6 +73,7 @@ import { useOpenClawController } from '../features/integrations/useOpenClawContr
 import { useQaSessionController } from '../features/assistant/useQaSessionController.js'
 import { useSelectedTextContext } from '../features/assistant/useSelectedTextContext.js'
 import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
+import { useWorkspaceTabProjectionController } from '../features/workspace/useWorkspaceTabProjectionController.js'
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
 import { useContentReadinessController } from '../features/library/useContentReadinessController.js'
@@ -668,27 +669,33 @@ export function useAppController() {
     return searchQuery.value.trim() ? searchResultContentItems.value : sidebarContentItems.value
   })
 
-  const activeWorkspaceTab = computed(() => {
-    return workspaceTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) || null
-  })
-
-  const activeWorkspaceContent = computed(() => {
-    const tab = activeWorkspaceTab.value
-    if (!tab?.content_item_id) return null
-    const listed = allContentItems.value.find((item) => item.id === tab.content_item_id)
-    const selected = selectedContentItem.value?.id === tab.content_item_id ? selectedContentItem.value : null
-    // A paginated library row deliberately carries a lightweight pending
-    // readiness placeholder. Keep the already-hydrated open item authoritative
-    // until a later full detail response replaces it.
-    if (selected?.text_readiness?.status !== 'pending' && listed?.text_readiness?.status === 'pending') {
-      return selected
-    }
-    return listed || selected
-  })
-
-  const activeWorkspaceResult = computed(() => {
-    const tab = activeWorkspaceTab.value
-    return tab?.content_item_id ? resultForTab(tab.id) : null
+  const {
+    workspaceTabById,
+    contentForTab,
+    resultForTab,
+    statusForTab,
+    mediaUrlForTab,
+    originalMediaUrlForTab,
+    transcriptForTab,
+    articlePreviewForTab,
+    activeWorkspaceTab,
+    activeWorkspaceContent,
+    activeWorkspaceResult,
+    activeWorkspaceStatus,
+    activeWorkspaceMediaUrl,
+    activeWorkspaceTranscript,
+  } = useWorkspaceTabProjectionController({
+    workspaceTabs,
+    activeWorkspaceTabId,
+    allContentItems,
+    selectedContentItem,
+    batchTasks,
+    result,
+    selectedMarkdownSourceText,
+    articlePreviews,
+    isActiveTask,
+    localApiRequestUrl,
+    apiBase: API,
   })
 
   const activeContentAiCalls = computed(() => {
@@ -697,27 +704,6 @@ export function useAppController() {
       return aiCallsByContentId[contentItemId]
     }
     return activeWorkspaceResult.value?.ai_calls || result.ai_calls || []
-  })
-
-  const activeWorkspaceStatus = computed(() => {
-    return activeWorkspaceContent.value?.status || activeWorkspaceResult.value?.status || activeWorkspaceTab.value?.status || 'inbox'
-  })
-
-  const activeWorkspaceMediaUrl = computed(() => {
-    const videoPath = activeWorkspaceResult.value?.video_path || activeWorkspaceContent.value?.video_path
-    if (!videoPath) return ''
-    return localApiRequestUrl(`${API}/media?path=${encodeURIComponent(videoPath)}`)
-  })
-
-  const activeWorkspaceTranscript = computed(() => {
-    if (activeWorkspaceResult.value?.transcript) return activeWorkspaceResult.value.transcript
-    if (['article', 'forum_post', 'forum_capture'].includes(activeWorkspaceContent.value?.content_type) && selectedContentItem.value?.id === activeWorkspaceContent.value.id) {
-      return selectedMarkdownSourceText.value
-    }
-    if (!activeWorkspaceContent.value && ['article', 'forum_post', 'forum_capture'].includes(selectedContentItem.value?.content_type)) {
-      return selectedMarkdownSourceText.value
-    }
-    return ''
   })
 
   const {
@@ -731,71 +717,6 @@ export function useAppController() {
     getFallbackContentItemId: () => result.content_item_id,
     getFallbackContentTitle: () => result.source_title,
   })
-
-  function workspaceTabById(tabId) {
-    return workspaceTabs.value.find((tab) => tab.id === tabId) || null
-  }
-
-  function contentForTab(tabId) {
-    const tab = workspaceTabById(tabId)
-    const contentItemId = tab?.content_item_id || (String(tabId || '').startsWith('content:') ? String(tabId).slice('content:'.length) : '')
-    if (!contentItemId) return null
-    // The library list intentionally omits runtime-only fields such as the
-    // retained original path. For the open item, always prefer its hydrated
-    // detail so PDF/image originals can render immediately.
-    if (selectedContentItem.value?.id === contentItemId) return selectedContentItem.value
-    return allContentItems.value.find((item) => item.id === contentItemId) || null
-  }
-
-  function resultForTab(tabId) {
-    const tab = workspaceTabById(tabId)
-    const contentItemId = tab?.content_item_id || (String(tabId || '').startsWith('content:') ? String(tabId).slice('content:'.length) : '')
-    if (!contentItemId) return null
-    const matchingTasks = batchTasks.value.filter((candidate) => candidate.content_item_id === contentItemId)
-    // The process dock can hold an older completed snapshot and a newer live
-    // retry/reprocessing task for the same item. The old global result used to
-    // win here, leaving the right assistant idle while the status bar (which
-    // reads the task queue) correctly showed “AI 总结”. The live task is the
-    // only authoritative source while it exists.
-    const activeTask = matchingTasks.find((candidate) => isActiveTask(candidate))
-    if (activeTask) return activeTask
-    if (result.content_item_id === contentItemId) return result
-    return matchingTasks[0] || null
-  }
-
-  function statusForTab(tabId) {
-    return contentForTab(tabId)?.status || resultForTab(tabId)?.status || workspaceTabById(tabId)?.status || 'inbox'
-  }
-
-  function mediaUrlForTab(tabId) {
-    const tabResult = resultForTab(tabId)
-    const tabContent = contentForTab(tabId)
-    const videoPath = tabResult?.video_path || tabContent?.video_path
-    if (!videoPath) return ''
-    return localApiRequestUrl(`${API}/media?path=${encodeURIComponent(videoPath)}`)
-  }
-
-  function originalMediaUrlForTab(tabId) {
-    const content = contentForTab(tabId)
-    const originalPath = content?.original_file_path
-    if (!originalPath) return ''
-    return localApiRequestUrl(`${API}/media?path=${encodeURIComponent(originalPath)}`)
-  }
-
-  function transcriptForTab(tabId) {
-    const tabResult = resultForTab(tabId)
-    if (tabResult?.transcript) return tabResult.transcript
-    const tabContent = contentForTab(tabId)
-    if (tabContent?.id && selectedContentItem.value?.id === tabContent.id) {
-      return selectedMarkdownSourceText.value
-    }
-    return ''
-  }
-
-  function articlePreviewForTab(tabId) {
-    const content = contentForTab(tabId)
-    return content?.id ? articlePreviews[content.id] || null : null
-  }
 
   const currentInsightHtml = computed(() => {
     // Pipeline text is rendered in the same flowing bubble as a manual
