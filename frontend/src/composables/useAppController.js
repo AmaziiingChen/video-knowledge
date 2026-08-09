@@ -85,6 +85,7 @@ import { useContentRecoveryController } from '../features/library/useContentReco
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
+import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -134,39 +135,16 @@ export function useAppController() {
   } = useQaSessionController()
 
   const activeView = ref('library')
-  const aiCallsByContentId = reactive({})
-  const dailyAiTokenUsage = ref({
-    period_start: '',
-    call_count: 0,
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    total_tokens: 0,
-    prompt_cache_hit_tokens: 0,
-    prompt_cache_miss_tokens: 0,
-    estimated_cost: 0,
-    unreported_count: 0,
-    by_type: [],
-    by_model: [],
-    image_call_count: 0,
-    image_count: 0,
-    image_estimated_cost: 0,
-    by_image_model: []
-  })
-  const openClawTokenUsage = ref({
-    available: false,
-    reason: '',
-    session_count: 0,
-    model_response_count: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    total_tokens: 0,
-    estimated_cost_usd: 0,
-    sessions: []
-  })
-  let aiTokenSummaryTimer = null
-  let aiTokenSummaryLoading = false
+  const {
+    aiCallsByContentId,
+    dailyAiTokenUsage,
+    openClawTokenUsage,
+    loadContentAiCalls,
+    loadAiTokenUsageSummary,
+    appendContentAiCall,
+    startAiTokenUsagePolling,
+    stopAiTokenUsagePolling,
+  } = useAiUsageController()
   const contentAnalysisTemplates = ref([])
   let inputParseTimer = null
   let inputParseRequestId = 0
@@ -1578,8 +1556,7 @@ export function useAppController() {
     loadPromptTemplates()
     loadQaShortcutTemplates()
     loadContentAnalysisTemplates()
-    loadAiTokenUsageSummary()
-    aiTokenSummaryTimer = window.setInterval(loadAiTokenUsageSummary, 15000)
+    startAiTokenUsagePolling()
     await loadTaskQueue()
     startTaskQueuePolling()
     await loadCompletionNotifications()
@@ -1606,10 +1583,7 @@ export function useAppController() {
     window.__knowledgeHubRemoveTrayNotificationListener?.()
     delete window.__knowledgeHubRemoveTrayNotificationListener
     disposeArticlePreviews()
-    if (aiTokenSummaryTimer) {
-      window.clearInterval(aiTokenSummaryTimer)
-      aiTokenSummaryTimer = null
-    }
+    stopAiTokenUsagePolling()
     cancelDeferredCookieProbe()
     if (contentStartupRetryTimer) {
       window.clearTimeout(contentStartupRetryTimer)
@@ -2845,76 +2819,6 @@ export function useAppController() {
     const format = String(item?.source_metadata?.file_format || '').toUpperCase()
     const filename = String(item?.source_metadata?.file_name || '')
     return ['HTML', 'HTM', 'XHTML'].includes(format) || /\.x?html?$/i.test(filename)
-  }
-
-  async function loadContentAiCalls(contentItemId) {
-    if (!contentItemId) return
-    try {
-      const res = await axios.get(`${API}/content/${contentItemId}/ai-calls`, { timeout: 10000 })
-      aiCallsByContentId[contentItemId] = Array.isArray(res.data) ? res.data : []
-    } catch {
-      // Token 统计失败不影响内容阅读或追问。
-    }
-  }
-
-  async function loadAiTokenUsageSummary() {
-    if (aiTokenSummaryLoading) return
-    aiTokenSummaryLoading = true
-    try {
-      const [knowledgeResult, openClawResult] = await Promise.allSettled([
-        axios.get(`${API}/ai-calls/summary`, { timeout: 10000 }),
-        axios.get(`${API}/openclaw/usage`, { timeout: 10000 })
-      ])
-      if (knowledgeResult.status === 'fulfilled') {
-        const data = knowledgeResult.value.data || {}
-        dailyAiTokenUsage.value = {
-          period_start: String(data.period_start || ''),
-          call_count: Number(data.call_count || 0),
-          prompt_tokens: Number(data.prompt_tokens || 0),
-          completion_tokens: Number(data.completion_tokens || 0),
-          total_tokens: Number(data.total_tokens || 0),
-          prompt_cache_hit_tokens: Number(data.prompt_cache_hit_tokens || 0),
-          prompt_cache_miss_tokens: Number(data.prompt_cache_miss_tokens || 0),
-          estimated_cost: Number(data.estimated_cost || 0),
-          unreported_count: Number(data.unreported_count || 0),
-          by_type: Array.isArray(data.by_type) ? data.by_type : [],
-          by_model: Array.isArray(data.by_model) ? data.by_model : [],
-          image_call_count: Number(data.image_call_count || 0),
-          image_count: Number(data.image_count || 0),
-          image_estimated_cost: Number(data.image_estimated_cost || 0),
-          by_image_model: Array.isArray(data.by_image_model) ? data.by_image_model : []
-        }
-      }
-      if (openClawResult.status === 'fulfilled') {
-        const data = openClawResult.value.data || {}
-        openClawTokenUsage.value = {
-          available: Boolean(data.available),
-          reason: String(data.reason || ''),
-          session_count: Number(data.session_count || 0),
-          model_response_count: Number(data.model_response_count || 0),
-          input_tokens: Number(data.input_tokens || 0),
-          output_tokens: Number(data.output_tokens || 0),
-          cache_read_tokens: Number(data.cache_read_tokens || 0),
-          cache_write_tokens: Number(data.cache_write_tokens || 0),
-          total_tokens: Number(data.total_tokens || 0),
-          estimated_cost_usd: Number(data.estimated_cost_usd || 0),
-          sessions: Array.isArray(data.sessions) ? data.sessions : []
-        }
-      }
-    } catch {
-      // 全局 Token 汇总不可用时保留上一份数据，不影响处理流程。
-    } finally {
-      aiTokenSummaryLoading = false
-    }
-  }
-
-  function appendContentAiCall(contentItemId, call) {
-    if (!contentItemId || !call) return
-    const existingCalls = Array.isArray(aiCallsByContentId[contentItemId])
-      ? aiCallsByContentId[contentItemId]
-      : []
-    aiCallsByContentId[contentItemId] = [...existingCalls, call]
-    void loadAiTokenUsageSummary()
   }
 
   async function openMarkdownDialog(item) {

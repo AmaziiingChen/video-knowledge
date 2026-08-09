@@ -49,7 +49,9 @@ lines.
   and shortcut handling now live in `features/library/useLibraryHistoryController.js`.
   Article preparation, platform credential status, completion-notification
   synchronization, content-detail/text-readiness hydration, and folder
-  loading/creation/renaming/pinning have their own controllers as well.
+  loading/creation/renaming/pinning have their own controllers as well. AI
+  call history, daily usage aggregation and its polling lifecycle now live in
+  `features/usage/useAiUsageController.js`.
   Content recovery actions (source text, reprocessing, retranscription,
   subtitles and redownloads) now live in
   `features/library/useContentRecoveryController.js` while reusing the durable
