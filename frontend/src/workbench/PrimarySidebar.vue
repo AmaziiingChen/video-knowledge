@@ -295,6 +295,7 @@ import PromptFileTree from './PromptFileTree.vue'
 import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 import { useTreeBoxSelectionController } from './useTreeBoxSelectionController.js'
+import { useVirtualLibraryTreeController } from './useVirtualLibraryTreeController.js'
 const folderIcon = 'folder'
 const highlighterIcon = 'highlighter'
 const trashIcon = 'trash'
@@ -471,10 +472,6 @@ const dragNodes = ref([])
 const dropState = ref(null)
 const selectedKeys = ref(new Set())
 const anchorKey = ref(null)
-const treeRef = ref(null)
-const treeScrollTop = ref(0)
-const treeViewportHeight = ref(0)
-const treeIsScrolling = ref(false)
 const contentContextMenu = ref(null)
 const separatorLayoutState = loadUserGroupSeparators()
 const userGroupSeparators = ref(separatorLayoutState.separators)
@@ -482,27 +479,11 @@ const separatorLayoutInitialized = ref(separatorLayoutState.initialized)
 const unreadRootOpen = ref(false)
 const pinnedRootOpen = ref(true)
 const TREE_ROW_HEIGHT = 26
-const TREE_VIRTUAL_OVERSCAN = 12
 const searchScopeOptions = [
   { value: 'all', label: '全部内容', description: '标题、摘要与正文' },
   { value: 'title', label: '文件名', description: '只匹配资料标题' },
   { value: 'source', label: '来源', description: '匹配来源名称与类型' },
 ]
-let treeResizeObserver = null
-let treeScrollEndTimer = null
-
-const {
-  selectionBox,
-  selectionBoxStyle,
-  startBoxSelection,
-  cancelBoxSelection,
-} = useTreeBoxSelectionController({
-  treeRef,
-  selectedKeys,
-  setSelectedKeys,
-  setAnchorKey: (key) => { anchorKey.value = key || anchorKey.value },
-})
-
 defineExpose({
   focusLibrarySearch() {
     librarySearchInput.value?.focus?.()
@@ -637,28 +618,32 @@ const renderedLibraryNodes = computed(() => {
   return result
 })
 
-const virtualTreeStart = computed(() => {
-  if (!renderedLibraryNodes.value.length) return 0
-  return Math.max(0, Math.floor(treeScrollTop.value / TREE_ROW_HEIGHT) - TREE_VIRTUAL_OVERSCAN)
+const {
+  treeRef,
+  treeIsScrolling,
+  virtualLibraryNodes,
+  virtualTreeCanvasStyle,
+  virtualTreeListStyle,
+  handleTreeScroll,
+  mountVirtualTree,
+  disposeVirtualTree,
+} = useVirtualLibraryTreeController({
+  renderedLibraryNodes,
+  onScrollStart: () => closeContentContextMenu(),
+  rowHeight: TREE_ROW_HEIGHT,
 })
 
-const virtualTreeEnd = computed(() => {
-  const viewportRows = Math.ceil(treeViewportHeight.value / TREE_ROW_HEIGHT)
-  return Math.min(
-    renderedLibraryNodes.value.length,
-    virtualTreeStart.value + viewportRows + TREE_VIRTUAL_OVERSCAN * 2
-  )
+const {
+  selectionBox,
+  selectionBoxStyle,
+  startBoxSelection,
+  cancelBoxSelection,
+} = useTreeBoxSelectionController({
+  treeRef,
+  selectedKeys,
+  setSelectedKeys,
+  setAnchorKey: (key) => { anchorKey.value = key || anchorKey.value },
 })
-
-const virtualLibraryNodes = computed(() => renderedLibraryNodes.value.slice(virtualTreeStart.value, virtualTreeEnd.value))
-
-const virtualTreeCanvasStyle = computed(() => ({
-  height: `${renderedLibraryNodes.value.length * TREE_ROW_HEIGHT}px`
-}))
-
-const virtualTreeListStyle = computed(() => ({
-  transform: `translateY(${virtualTreeStart.value * TREE_ROW_HEIGHT}px)`
-}))
 
 const selectedNodes = computed(() => {
   const selected = selectedKeys.value
@@ -752,33 +737,13 @@ function contentIcon(item) {
   return libraryContentIcon(item)
 }
 
-function handleTreeScroll(event) {
-  closeContentContextMenu()
-  treeScrollTop.value = event.currentTarget.scrollTop
-  treeIsScrolling.value = true
-  window.clearTimeout(treeScrollEndTimer)
-  treeScrollEndTimer = window.setTimeout(() => {
-    treeIsScrolling.value = false
-  }, 80)
-}
-
 onMounted(() => {
-  const tree = treeRef.value
-  if (!tree) return
-  treeScrollTop.value = tree.scrollTop
-  treeViewportHeight.value = tree.clientHeight
-  treeResizeObserver = new ResizeObserver(() => {
-    treeViewportHeight.value = tree.clientHeight
-  })
-  treeResizeObserver.observe(tree)
+  mountVirtualTree()
 })
 
 onBeforeUnmount(() => {
   cancelBoxSelection()
-  treeResizeObserver?.disconnect()
-  treeResizeObserver = null
-  window.clearTimeout(treeScrollEndTimer)
-  treeScrollEndTimer = null
+  disposeVirtualTree()
 })
 
 function isFolderOpen(id) {

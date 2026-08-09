@@ -69,6 +69,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `features/tasks/useTaskQueueController.js` | queue snapshots, compact-detail merging, task polling, cancellation and retry | single-task runner presentation, content hydration implementation, workbench selection |
 | `features/library/libraryTreeModel.js` | pure folder/content/unread/pinned tree-node construction and deterministic ordering | localStorage preferences, drag/drop, selection, virtual rendering and parent events |
 | `workbench/useTreeBoxSelectionController.js` | library-tree marquee selection, additive selection and pointer-listener cleanup | tree-node construction, drag/drop, context menus and persistent folder state |
+| `workbench/useVirtualLibraryTreeController.js` | fixed-row virtual window, scroll settling and ResizeObserver lifecycle | tree-node construction, drag/drop, selection and context-menu content |
 | `features/assistant/useSelectedTextContext.js` | selected quote normalization and its explicit assistant-input token | reader DOM selection, Q&A transport, document persistence |
 | `features/prompts/useWechatReportPromptController.js` | report-prompt loading, selection, editing and save boundary | prompt file tabs, report generation, account subscriptions |
 | `workbench/usePreviewFindController.js` | find-bar state, local highlighting, navigation and cleanup | deciding which reader DOM is active, webview implementation details |
