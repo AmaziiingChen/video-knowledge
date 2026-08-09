@@ -78,8 +78,9 @@ lines.
   previously listed third starter asset was no longer tracked.
 - [ ] Remove committed macOS helper binaries after an arm64 build proves the
   tracked Objective-C sources reproduce them.
-- [ ] Add generated SBOM/license review evidence to release artifacts; extend
-  Dependabot to GitHub Actions and evaluate immutable action pins.
+- [ ] Add generated SBOM/license review evidence to release artifacts; evaluate
+  immutable action pins.  Dependabot now covers GitHub Actions alongside npm
+  and pip dependencies.
 - [ ] Separate the unused external download-site instructions from the normal
   GitHub Release path.
 - [ ] Continue ratcheting every production source below 1,000 lines, or add a
