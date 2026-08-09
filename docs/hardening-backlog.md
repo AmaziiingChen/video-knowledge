@@ -46,13 +46,14 @@ lines.
   The independent trash transaction boundary now lives in
   `features/library/useLibraryTrashController.js`; history snapshots, undo/redo
   and shortcut handling now live in `features/library/useLibraryHistoryController.js`.
-  Article preparation, platform credential status and completion-notification
-  synchronization have their own controllers as well. Content recovery actions
-  (source text, reprocessing, retranscription, subtitles and redownloads) now
-  live in `features/library/useContentRecoveryController.js` while reusing the
-  durable task queue. Folder-tree ownership, task runtime, link import and
-  assistant sessions remain in the facade because they still share optimistic
-  updates, tab cleanup and durable queue state.
+  Article preparation, platform credential status, completion-notification
+  synchronization, and content-detail/text-readiness hydration have their own
+  controllers as well. Content recovery actions (source text, reprocessing,
+  retranscription, subtitles and redownloads) now live in
+  `features/library/useContentRecoveryController.js` while reusing the durable
+  task queue. Folder-tree ownership, task runtime, link import and assistant
+  sessions remain in the facade because they still share optimistic updates,
+  tab cleanup and durable queue state.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test

@@ -76,6 +76,7 @@ import { useSelectedTextContext } from '../features/assistant/useSelectedTextCon
 import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
+import { useContentReadinessController } from '../features/library/useContentReadinessController.js'
 import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
 import { useLibraryTrashController } from '../features/library/useLibraryTrashController.js'
 import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
@@ -345,6 +346,15 @@ export function useAppController() {
   } = useArticlePreparationController({
     currentContent: () => activeWorkspaceContent.value || selectedContentItem.value,
     notifyError: (message) => ElMessage.error(typeof message === 'string' ? message : 'OCR 优先解析失败'),
+  })
+  const {
+    getContentItemDetail,
+    mergeContentTextReadiness,
+    refreshContentTextReadiness,
+  } = useContentReadinessController({
+    allContentItems,
+    selectedContentItem,
+    applyContentFilter,
   })
   const {
     retryingContentId,
@@ -2896,51 +2906,6 @@ export function useAppController() {
     const format = String(item?.source_metadata?.file_format || '').toUpperCase()
     const filename = String(item?.source_metadata?.file_name || '')
     return ['HTML', 'HTM', 'XHTML'].includes(format) || /\.x?html?$/i.test(filename)
-  }
-
-  async function getContentItemDetail(contentItemId) {
-    if (!contentItemId) return null
-    try {
-      const res = await axios.get(`${API}/content/item/${contentItemId}`, { timeout: 10000 })
-      const detail = res.data
-      if (!detail?.id) return null
-      const existing = allContentItems.value.some((entry) => String(entry.id) === String(detail.id))
-      allContentItems.value = existing
-        ? allContentItems.value.map((entry) => (String(entry.id) === String(detail.id) ? detail : entry))
-        : [...allContentItems.value, detail]
-      // Detail hydration is also how a just-enqueued link enters the lazy
-      // file tree. Keep the presentation list in sync immediately instead of
-      // waiting for a terminal task refresh.
-      applyContentFilter()
-      return detail
-    } catch {
-      // A stale persisted tab or a backend restart must not prevent the rest
-      // of the workbench from opening.
-      return null
-    }
-  }
-
-  function mergeContentTextReadiness(contentItemId, readiness) {
-    if (!contentItemId || !readiness) return
-    allContentItems.value = allContentItems.value.map((item) => (
-      item.id === contentItemId ? { ...item, text_readiness: readiness } : item
-    ))
-    applyContentFilter()
-    if (selectedContentItem.value?.id === contentItemId) {
-      selectedContentItem.value = allContentItems.value.find((item) => item.id === contentItemId)
-        || { ...selectedContentItem.value, text_readiness: readiness }
-    }
-  }
-
-  async function refreshContentTextReadiness(contentItemId) {
-    if (!contentItemId) return null
-    try {
-      const res = await axios.get(`${API}/content/${contentItemId}/text-readiness`, { timeout: 10000 })
-      mergeContentTextReadiness(contentItemId, res.data)
-      return res.data
-    } catch {
-      return null
-    }
   }
 
   async function loadContentAiCalls(contentItemId) {
