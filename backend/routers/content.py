@@ -68,6 +68,7 @@ from services.content_presentation import (
     content_item_response as _item_to_response,
     readiness_response as _readiness_response,
 )
+from services.library_folder_tree import folder_tree_ids as _folder_tree_ids
 
 
 router = APIRouter()
@@ -1198,20 +1199,3 @@ def _is_descendant_folder(connection, candidate_id: str, parent_id: str) -> bool
         (parent_id, candidate_id),
     ).fetchall()
     return bool(rows)
-
-
-def _folder_tree_ids(connection, folder_id: str) -> list[str]:
-    rows = connection.execute(
-        """
-        WITH RECURSIVE folder_tree(id) AS (
-            SELECT id FROM library_folders WHERE id = ?
-            UNION ALL
-            SELECT library_folders.id
-            FROM library_folders
-            JOIN folder_tree ON library_folders.parent_folder_id = folder_tree.id
-        )
-        SELECT id FROM folder_tree
-        """,
-        (folder_id,),
-    ).fetchall()
-    return [row["id"] for row in rows]

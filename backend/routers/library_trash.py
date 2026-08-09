@@ -12,6 +12,7 @@ from services.content_deletion import (
     delete_content_item_data,
 )
 from services.database import connect, initialize_database, utc_now_iso
+from services.library_folder_tree import folder_tree_ids
 from services.repository import ContentRepository, new_id
 
 
@@ -25,23 +26,6 @@ class TrashEntryResponse(BaseModel):
     deleted_at: str
     content_type: str | None = None
     source_provider: str | None = None
-
-
-def _folder_tree_ids(connection, folder_id: str) -> list[str]:
-    rows = connection.execute(
-        """
-        WITH RECURSIVE folder_tree(id) AS (
-            SELECT id FROM library_folders WHERE id = ?
-            UNION ALL
-            SELECT library_folders.id
-            FROM library_folders
-            JOIN folder_tree ON library_folders.parent_folder_id = folder_tree.id
-        )
-        SELECT id FROM folder_tree
-        """,
-        (folder_id,),
-    ).fetchall()
-    return [row["id"] for row in rows]
 
 
 @router.get("/content/trash", response_model=list[TrashEntryResponse])
@@ -214,7 +198,7 @@ async def permanently_delete_library_trash_entry(entry_type: str, entry_id: str)
             ).fetchone()
             if row is None:
                 raise HTTPException(status_code=404, detail="回收站项目不存在")
-            folder_ids = _folder_tree_ids(connection, entry_id)
+            folder_ids = folder_tree_ids(connection, entry_id)
             placeholders = ",".join("?" for _ in folder_ids)
             content_rows = connection.execute(
                 f"SELECT * FROM content_items WHERE library_folder_id IN ({placeholders})",
