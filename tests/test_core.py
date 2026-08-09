@@ -4734,7 +4734,13 @@ class TaskApiTests(unittest.TestCase):
                         created = manager.create(
                             PipelineRequest(share_text="https://www.bilibili.com/video/BV1xx411c7mD")
                         )
-                        created.future.result(timeout=2)
+                        deadline = time.monotonic() + 2
+                        scheduled = manager.get(created.task_id)
+                        while scheduled.future is None and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                            scheduled = manager.get(created.task_id)
+                        self.assertIsNotNone(scheduled.future)
+                        scheduled.future.result(timeout=2)
 
                     current = manager.get(created.task_id)
                     self.assertEqual(current.status, "failed")
