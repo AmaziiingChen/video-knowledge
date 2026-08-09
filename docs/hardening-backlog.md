@@ -135,9 +135,11 @@ lines.
 - [ ] Continue ratcheting every production source below 1,000 lines, or add a
   narrowly documented generated/declarative exception. The group-report source
   summary cache now has its own database owner; the planner's JSON shape
-  compatibility and parsing now live in `group_report_plan_shape.py`. Report
-  normalization and writing remain the next intentional boundaries in the main
-  pipeline.
+  compatibility and parsing now live in `group_report_plan_shape.py`. The
+  legacy first-sync task adapter now lives in
+  `wechat_initial_sync_queue.py`, leaving account/subscription persistence and
+  collection orchestration in `wechat_subscription.py`. Report normalization
+  and writing remain the next intentional boundaries in the main pipeline.
 
 ## Non-negotiable compatibility checks
 
