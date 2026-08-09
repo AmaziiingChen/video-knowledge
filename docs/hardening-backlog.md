@@ -99,7 +99,9 @@ lines.
 - [ ] Separate the unused external download-site instructions from the normal
   GitHub Release path.
 - [ ] Continue ratcheting every production source below 1,000 lines, or add a
-  narrowly documented generated/declarative exception.
+  narrowly documented generated/declarative exception. The group-report source
+  summary cache now has its own database owner; report planning and writing
+  remain the next intentional boundaries in the main pipeline.
 
 ## Non-negotiable compatibility checks
 
