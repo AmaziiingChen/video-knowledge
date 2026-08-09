@@ -68,6 +68,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `workbench/usePreviewFindController.js` | find-bar state, local highlighting, navigation and cleanup | deciding which reader DOM is active, webview implementation details |
 | `services/group_report_models.py` | immutable report inputs, outputs and progress contracts | model calls, persistence, Markdown rendering |
 | `services/group_report_markdown.py` | deterministic citation and Markdown normalization | report planning, provider calls, summary cache, task state |
+| `routers/content_usage.py` | AI/OCR call history and daily usage observability HTTP transport | library content mutation, capture, folder or import behavior |
 
 The legacy composition files re-export or compose these boundaries so existing
 callers keep their API. Future contractions should extend the same owners rather
