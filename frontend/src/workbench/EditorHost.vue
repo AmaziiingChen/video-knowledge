@@ -662,6 +662,7 @@ import { useReadingProgressController } from './useReadingProgressController.js'
 import { useReaderSelectionController } from './useReaderSelectionController.js'
 import { useRemoteArticlePreviewController } from './useRemoteArticlePreviewController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
+import { dispatchEditorContentAction } from './editorContentActions.js'
 import { createEditorContentKind } from './editorContentKind.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
@@ -1115,27 +1116,7 @@ const activeContentActionMenuModel = computed(() => {
 function handleContentActionMenuSelect({ id, payload } = {}) {
   const tabId = activeContentTab.value?.id || ''
   const content = tabId ? props.contentForTab(tabId) : null
-  const sourceUrl = tabId ? sourceUrlForTab(tabId) : ''
-  switch (id) {
-    case 'copy-source': emit('copy-text', sourceUrl, '链接已复制'); break
-    case 'open-source': emit('open-external-link', sourceUrl); break
-    case 'toggle-remote-page': toggleWechatRemotePage(); break
-    case 'retry-source-text': emit('retry-source-text', content); break
-    case 'retry-processing': emit('retry-content-processing', content); break
-    case 'reprocess-local-source': emit('reprocess-local-source', content); break
-    case 'open-original-file': emit('open-original-file', content?.original_file_path || ''); break
-    case 'retranscribe-media': emit('retranscribe-video', content); break
-    case 'fetch-external-subtitle': emit('fetch-external-subtitle', content); break
-    case 'refresh-source-context': emit('refresh-source-context', content); break
-    case 'download-video': emit('redownload-video', content); break
-    case 'export-transcript': exportVideoSubtitles(tabId); break
-    case 'generate-cover': requestWechatCoverGeneration(tabId); break
-    case 'replan-cover': emit('replan-wechat-cover', content); break
-    case 'create-wechat-draft': emit('create-wechat-draft', content); break
-    case 'delete-content': emit('delete-content', content); break
-    case 'reveal-detail-path': emit('reveal-path', payload); break
-    case 'open-detail-url': emit('open-external-link', payload); break
-  }
+  dispatchEditorContentAction({ id, payload, tabId, content, sourceUrl: tabId ? sourceUrlForTab(tabId) : '', emit, toggleRemotePage: toggleWechatRemotePage, exportTranscript: exportVideoSubtitles, requestCover: requestWechatCoverGeneration })
 }
 
 function canRetranscribeMedia(tabId) {
