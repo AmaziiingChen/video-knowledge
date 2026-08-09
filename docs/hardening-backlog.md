@@ -63,7 +63,8 @@ lines.
   readers; each reader receives a mounted behavior test.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
   tree, drag, search and trash behavior at their owners.
-  Local tree-preference persistence and pure tree-node construction now live in
+  Local tree-preference persistence plus pure tree-node construction, unread
+  ancestry and folder paths now live in
   `features/library/libraryTreePreferences.js` and
   `features/library/libraryTreeModel.js`; marquee selection and virtual-row
   lifecycle now live in `workbench/useTreeBoxSelectionController.js` and

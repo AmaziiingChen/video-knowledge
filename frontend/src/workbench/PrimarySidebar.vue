@@ -275,7 +275,13 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { contentIsUnread } from '../features/library/contentReadState.js'
-import { buildLibraryTreeNodes, sortLibraryNodes } from '../features/library/libraryTreeModel.js'
+import {
+  buildLibraryTreeNodes,
+  libraryFolderPaths,
+  libraryTreeNodeTitle,
+  sortLibraryNodes,
+  unreadFolderCounts,
+} from '../features/library/libraryTreeModel.js'
 import { loadLibraryTreePreferences, loadOpenFolderIds as loadSavedOpenFolderIds, saveLibraryTreePreferences, saveOpenFolderIds as saveSavedOpenFolderIds } from '../features/library/libraryTreePreferences.js'
 import {
   createDefaultSeparators,
@@ -524,21 +530,11 @@ const folderContentCounts = computed(() => {
 })
 
 const folderUnreadCounts = computed(() => {
-  const foldersById = new Map(props.libraryFolders.map((folder) => [String(folder.id), folder]))
-  const counts = new Map(props.libraryFolders.map((folder) => [String(folder.id), 0]))
-  for (const item of props.libraryContentItems) {
-    if (!isUnreadContent(item)) continue
-    let folderId = item?.library_folder_id ? String(item.library_folder_id) : ''
-    const visited = new Set()
-    while (folderId && foldersById.has(folderId) && !visited.has(folderId)) {
-      visited.add(folderId)
-      counts.set(folderId, (counts.get(folderId) || 0) + 1)
-      folderId = foldersById.get(folderId)?.parent_folder_id
-        ? String(foldersById.get(folderId).parent_folder_id)
-        : ''
-    }
-  }
-  return counts
+  return unreadFolderCounts({
+    libraryFolders: props.libraryFolders,
+    libraryContentItems: props.libraryContentItems,
+    isUnreadContent,
+  })
 })
 
 function isUnreadContent(item) {
@@ -555,30 +551,9 @@ function nodeAriaLabel(node) {
   return ''
 }
 
-const folderPathById = computed(() => {
-  const folders = new Map(props.libraryFolders.map((folder) => [folder.id, folder]))
-  const paths = new Map()
-  const resolve = (folderId, visiting = new Set()) => {
-    if (!folderId || visiting.has(folderId)) return ''
-    if (paths.has(folderId)) return paths.get(folderId)
-    const folder = folders.get(folderId)
-    if (!folder) return ''
-    visiting.add(folderId)
-    const parentPath = resolve(folder.parent_folder_id || null, visiting)
-    visiting.delete(folderId)
-    const path = parentPath ? `${parentPath} / ${folder.name}` : folder.name
-    paths.set(folderId, path)
-    return path
-  }
-  for (const folderId of folders.keys()) resolve(folderId)
-  return paths
-})
+const folderPathById = computed(() => libraryFolderPaths(props.libraryFolders))
 
 const unreadContentItems = computed(() => sortLibraryNodes(props.libraryContentItems.filter(isUnreadContent)))
-
-function unreadSourcePath(item) {
-  return folderPathById.value.get(item?.library_folder_id) || item?.source_name || '资料库'
-}
 
 const visibleLibraryNodes = computed(() => buildLibraryTreeNodes({
   searchActive: searchActive.value,
@@ -728,9 +703,7 @@ watch(
 
 function contentNodeTitle(node) {
   if (!isContentNode(node)) return node?.name || ''
-  if (node.type === 'unread-content') return `${node.name}\n${unreadSourcePath(node.raw)}`
-  const source = [node.raw?.source_name, node.raw?.source_section].filter(Boolean).join(' · ')
-  return source ? `${node.name}\n${source}` : node.name
+  return libraryTreeNodeTitle(node, folderPathById.value)
 }
 
 function contentIcon(item) {
