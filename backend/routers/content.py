@@ -41,7 +41,6 @@ from services.cache import (
 from services.database import utc_now_iso
 from services.repository import new_id
 from services.repository import ContentItemRecord, ContentRepository
-from services.markdown_sync import save_markdown_draft_and_sync
 from services.local_file_imports import (
     extract_document_text,
     extract_html_document,
@@ -56,7 +55,6 @@ from services.local_file_imports import (
 )
 from services.pipeline_runner import PipelineRequest
 from services.task_manager import task_manager
-from services.search_index import upsert_source_text_document
 from services.content_presentation import (
     ContentItemResponse,
     ContentTextReadinessResponse,
@@ -576,71 +574,6 @@ async def remove_source_group_member(group_id: str, source_kind: str, source_id:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/content/import-markdown", response_model=ContentItemResponse)
-async def import_markdown_document(
-    file: UploadFile = File(...),
-    library_folder_id: str | None = Form(default=None),
-):
-    filename = str(file.filename or "").strip()
-    if not filename.lower().endswith((".md", ".markdown")):
-        raise HTTPException(status_code=400, detail="请选择 Markdown 文件")
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Markdown 文件为空")
-    if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="单个 Markdown 文件不能超过 8 MB")
-    try:
-        markdown = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Markdown 文件需要使用 UTF-8 编码") from exc
-    if not markdown.strip():
-        raise HTTPException(status_code=400, detail="Markdown 文件为空")
-
-    title = _markdown_import_title(markdown, filename)
-    content_hash = hashlib.sha256(raw).hexdigest()
-    canonical_id = f"local-markdown:{content_hash}"
-    initialize_database()
-    with connect() as connection:
-        external_root_id = ensure_external_markdown_folder(connection)
-        target_folder_id = external_root_id
-        if library_folder_id:
-            _ensure_folder_exists(connection, library_folder_id)
-            if library_folder_id != external_root_id and not _is_descendant_folder(
-                connection,
-                library_folder_id,
-                external_root_id,
-            ):
-                raise HTTPException(status_code=400, detail="导入 Markdown 只能存入“外部导入”文件夹或其子文件夹")
-            target_folder_id = library_folder_id
-        repository = ContentRepository(connection)
-        existing = repository.find_by_canonical_id(
-            source_provider="local_markdown",
-            canonical_source_id=canonical_id,
-        )
-        if existing:
-            item = existing
-        else:
-            item = repository.create_content_item(
-                source_provider="local_markdown",
-                content_type="document",
-                canonical_source_id=canonical_id,
-                title=title,
-                status="to_read",
-                library_folder_id=target_folder_id,
-                source_name="本地 Markdown",
-            )
-        connection.commit()
-
-    save_markdown_draft_and_sync(
-        markdown=markdown,
-        title=title,
-        obsidian_path=settings.obsidian_vault / "导入 Markdown" / f"{item.id}.md",
-        content_item_id=item.id,
-    )
-    upsert_source_text_document(content_key=item.id, title=item.title, transcript=markdown)
-    return _item_to_response(item)
-
-
 @router.post("/content/import-file", response_model=LocalFileImportResponse)
 async def import_local_file(
     file: UploadFile = File(...),
@@ -901,16 +834,6 @@ def _cache_entries_by_source_url(source_urls) -> dict[str, dict]:
         if entry:
             entries[source_url] = entry
     return entries
-
-
-def _markdown_import_title(markdown: str, filename: str) -> str:
-    heading = re.search(r"^\s{0,3}#\s+(.+?)\s*$", markdown, flags=re.MULTILINE)
-    if heading:
-        title = re.sub(r"\s+#*\s*$", "", heading.group(1)).strip()
-        if title:
-            return title[:200]
-    stem = Path(filename).stem.strip()
-    return (stem or "未命名 Markdown")[:200]
 
 
 def _ensure_folder_exists(connection, folder_id: str):
