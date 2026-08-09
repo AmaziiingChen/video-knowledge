@@ -57,11 +57,6 @@ from services.local_file_imports import (
 from services.pipeline_runner import PipelineRequest
 from services.task_manager import task_manager
 from services.search_index import upsert_source_text_document
-from services.knowledge_library import (
-    ensure_library_folder_directory,
-    relocate_managed_documents,
-    remove_empty_library_folder_directory,
-)
 from services.content_presentation import (
     ContentItemResponse,
     ContentTextReadinessResponse,
@@ -69,14 +64,8 @@ from services.content_presentation import (
     readiness_response as _readiness_response,
 )
 from services.library_folder_tree import (
-    folder_tree_ids as _folder_tree_ids,
     is_descendant_folder as _is_descendant_folder,
     require_folder,
-)
-from services.library_folder_presentation import (
-    LibraryFolderLocationResponse,
-    LibraryFolderResponse,
-    library_folder_response as _folder_response,
 )
 
 
@@ -154,19 +143,6 @@ class ContentUpdateRequest(BaseModel):
     title: str | None = None
     library_folder_id: str | None = None
     sort_order: float | None = None
-
-
-class FolderCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    parent_folder_id: str | None = None
-    sort_order: float = 0
-
-
-class FolderUpdateRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    parent_folder_id: str | None = None
-    sort_order: float | None = None
-    is_pinned: bool | None = None
 
 
 @router.get("/content", response_model=list[ContentItemResponse])
@@ -855,113 +831,6 @@ async def reprocess_local_source(content_item_id: str):
         connection.commit()
     task = task_manager.create(request, task_type="process_video" if kind in {"video", "audio"} else "import_document")
     return LocalFileImportResponse(item=_item_to_response(item), task_id=task.task_id, processing=True)
-
-
-@router.post("/content/folders", response_model=LibraryFolderResponse)
-async def create_library_folder(req: FolderCreateRequest):
-    initialize_database()
-    folder_id = new_id()
-    now = utc_now_iso()
-    try:
-        with connect() as connection:
-            if req.parent_folder_id:
-                _ensure_folder_exists(connection, req.parent_folder_id)
-            connection.execute(
-                """
-                INSERT INTO library_folders (
-                    id, name, parent_folder_id, sort_order, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (folder_id, req.name.strip(), req.parent_folder_id, req.sort_order, now, now),
-            )
-            connection.commit()
-            row = connection.execute("SELECT * FROM library_folders WHERE id = ?", (folder_id,)).fetchone()
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(status_code=400, detail="文件夹位置无效") from exc
-    ensure_library_folder_directory(folder_id)
-    return _folder_response(row)
-
-
-@router.get("/content/folders/{folder_id}/location", response_model=LibraryFolderLocationResponse)
-async def get_library_folder_location(folder_id: str):
-    """Resolve the local directory represented by a visible library folder."""
-    try:
-        return LibraryFolderLocationResponse(path=str(ensure_library_folder_directory(folder_id)))
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="文件夹不存在或已删除") from exc
-
-
-@router.patch("/content/folders/{folder_id}", response_model=LibraryFolderResponse)
-async def update_library_folder(folder_id: str, req: FolderUpdateRequest):
-    initialize_database()
-    try:
-        with connect() as connection:
-            current = _ensure_folder_exists(connection, folder_id)
-            old_folder_path = ensure_library_folder_directory(folder_id)
-            fields = req.model_fields_set
-            next_parent_id = req.parent_folder_id if "parent_folder_id" in fields else current["parent_folder_id"]
-            next_sort_order = req.sort_order if "sort_order" in fields else current["sort_order"]
-            next_is_pinned = req.is_pinned if "is_pinned" in fields else bool(current["is_pinned"])
-            if next_parent_id:
-                _ensure_folder_exists(connection, next_parent_id)
-                if next_parent_id == folder_id or _is_descendant_folder(connection, next_parent_id, folder_id):
-                    raise HTTPException(status_code=400, detail="不能移动到自身或子文件夹")
-            connection.execute(
-                """
-                UPDATE library_folders
-                SET name = ?,
-                    parent_folder_id = ?,
-                    sort_order = ?,
-                    is_pinned = ?,
-                    updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    current["name"] if req.name is None else req.name.strip(),
-                    next_parent_id,
-                    next_sort_order,
-                    int(bool(next_is_pinned)),
-                    utc_now_iso(),
-                    folder_id,
-                ),
-            )
-            connection.commit()
-            folder_ids = _folder_tree_ids(connection, folder_id)
-            placeholders = ",".join("?" for _ in folder_ids)
-            content_rows = connection.execute(
-                f"SELECT id FROM content_items WHERE library_folder_id IN ({placeholders}) AND deleted_at IS NULL",
-                folder_ids,
-            ).fetchall()
-            row = connection.execute("SELECT * FROM library_folders WHERE id = ?", (folder_id,)).fetchone()
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(status_code=400, detail="文件夹位置无效") from exc
-    ensure_library_folder_directory(folder_id)
-    relocate_managed_documents([str(content["id"]) for content in content_rows])
-    remove_empty_library_folder_directory(old_folder_path)
-    return _folder_response(row)
-
-
-@router.delete("/content/folders/{folder_id}", response_model=dict)
-async def delete_library_folder(folder_id: str):
-    initialize_database()
-    with connect() as connection:
-        _ensure_folder_exists(connection, folder_id)
-        folder_ids = _folder_tree_ids(connection, folder_id)
-        if folder_ids:
-            placeholders = ",".join("?" for _ in folder_ids)
-            deleted_at = utc_now_iso()
-            batch_id = new_id()
-            connection.execute(
-                f"UPDATE library_folders SET deleted_at = ?, trash_batch_id = ?, updated_at = ? WHERE id IN ({placeholders}) AND deleted_at IS NULL",
-                (deleted_at, batch_id, deleted_at, *folder_ids),
-            )
-            connection.execute(
-                f"UPDATE content_items SET deleted_at = ?, trash_batch_id = ?, updated_at = ? WHERE library_folder_id IN ({placeholders}) AND deleted_at IS NULL",
-                (deleted_at, batch_id, deleted_at, *folder_ids),
-            )
-        connection.commit()
-    return {"success": True}
 
 
 @router.patch("/content/{item_id}/status", response_model=ContentItemResponse)
