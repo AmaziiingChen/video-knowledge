@@ -663,6 +663,7 @@ import { useReaderSelectionController } from './useReaderSelectionController.js'
 import { useRemoteArticlePreviewController } from './useRemoteArticlePreviewController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
 import { dispatchEditorContentAction } from './editorContentActions.js'
+import { editorContentDetailRows } from './editorContentDetails.js'
 import { createEditorContentKind } from './editorContentKind.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
@@ -1050,36 +1051,13 @@ function contentDetailRows(tabId) {
   const content = props.contentForTab(tabId)
   const tab = props.workspaceTabById(tabId)
   const sourceUrl = sourceUrlForTab(tabId)
-  const sourceMetadata = content?.source_metadata || {}
   const readableText = readerTextForMetadata(tabId)
   const isTimedMedia = isTimedMediaTab(tabId)
   const isCurrentDocument = String(content?.id || '') === String(props.selectedContentItem?.id || '')
   const markdownPath = isCurrentDocument
     ? String(props.selectedMarkdownPath || content?.markdown_draft_path || '')
     : String(content?.markdown_draft_path || '')
-  const rows = [
-    { label: '来源', value: props.sourceProviderLabel(content?.source_provider) },
-    { label: '字符数', value: formatReadableCharacterCount(readableText), title: '按当前可阅读正文统计，不含空白字符' },
-    ...(!isTimedMedia ? [{
-      label: '文档大小',
-      value: formatDocumentSize(content),
-      title: '当前本地 Markdown 文档的实际 UTF-8 字节大小',
-    }] : []),
-    ...(isTimedMedia && content?.duration_seconds ? [{ label: '时长', value: props.formatDuration(content.duration_seconds) }] : []),
-    ...(sourceMetadata.file_format ? [{ label: '格式', value: String(sourceMetadata.file_format) }] : []),
-    ...(sourceMetadata.file_size_bytes ? [{ label: '原件大小', value: props.formatBytes(sourceMetadata.file_size_bytes) }] : []),
-    ...(sourceMetadata.width && sourceMetadata.height ? [{ label: '尺寸', value: `${sourceMetadata.width} × ${sourceMetadata.height}` }] : []),
-    ...(sourceMetadata.page_count ? [{ label: '页数', value: `${sourceMetadata.page_count} 页` }] : []),
-    ...(sourceMetadata.video_codec ? [{ label: '视频编码', value: String(sourceMetadata.video_codec) }] : []),
-    ...(sourceMetadata.audio_codec ? [{ label: '音频编码', value: String(sourceMetadata.audio_codec) }] : []),
-    ...(sourceMetadata.sample_rate ? [{ label: '采样率', value: `${(Number(sourceMetadata.sample_rate) / 1000).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} kHz` }] : []),
-    ...(sourceMetadata.channels ? [{ label: '声道', value: Number(sourceMetadata.channels) === 1 ? '单声道' : `${sourceMetadata.channels} 声道` }] : []),
-    { label: '导入时间', value: props.formatDateTime(content?.created_at || tab?.opened_at) },
-    { label: '修改时间', value: props.formatDateTime(content?.updated_at || tab?.opened_at) },
-    ...(markdownPath ? [{ label: '文件位置', value: markdownPath, title: markdownPath, kind: 'path' }] : []),
-    ...(hasRemoteSource(tabId) ? [{ label: '原文链接', value: sourceUrl, title: sourceUrl, kind: 'url' }] : []),
-  ]
-  return rows
+  return editorContentDetailRows({ content, tab, sourceUrl: hasRemoteSource(tabId) ? sourceUrl : '', readableText, markdownPath, isTimedMedia, format: { sourceProvider: props.sourceProviderLabel, characters: formatReadableCharacterCount, documentSize: formatDocumentSize, duration: props.formatDuration, bytes: props.formatBytes, dateTime: props.formatDateTime } })
 }
 
 const activeContentActionMenuModel = computed(() => {
