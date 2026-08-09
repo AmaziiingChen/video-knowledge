@@ -77,6 +77,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `services/creator_sync_policy.py` | creator subscription validation, processing-mode resolution and retry classification | browser capture, SQLite I/O and task creation |
 | `services/creator_source_registry.py` | creator subscription SQLite queries, normalization, membership anchors and sync-history persistence | browser capture, task creation and provider parsing |
 | `services/creator_source_urls.py` | validated creator-source URL parsing and canonical/capture URL selection | browser automation, SQLite I/O, task execution and UI state |
+| `services/creator_remote_payloads.py` | provider list-response parsing into normalized creator-video metadata | browser automation, SQLite I/O, task execution and source scheduling |
 | `services/group_report_markdown.py` | deterministic citation and Markdown normalization | report planning, provider calls, summary cache, task state |
 | `routers/content_usage.py` | AI/OCR call history and daily usage observability HTTP transport | library content mutation, capture, folder or import behavior |
 
