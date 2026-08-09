@@ -8,22 +8,11 @@ from pydantic import BaseModel
 from services.content_index import ensure_content_index_ready
 from services.content_presentation import ContentItemResponse, content_item_response
 from services.database import connect, initialize_database
+from services.library_folder_presentation import LibraryFolderResponse, library_folder_response
 from services.repository import ContentRepository
 
 
 router = APIRouter()
-
-
-class LibraryFolderResponse(BaseModel):
-    id: str
-    name: str
-    parent_folder_id: str | None = None
-    sort_order: float = 0
-    is_pinned: bool = False
-    presentation_group: str | None = None
-    content_count: int = 0
-    created_at: str
-    updated_at: str
 
 
 class FolderContentPageResponse(BaseModel):
@@ -31,26 +20,6 @@ class FolderContentPageResponse(BaseModel):
     total: int
     offset: int
     has_more: bool
-
-
-def _folder_response(row, *, content_count: int | None = None) -> LibraryFolderResponse:
-    return LibraryFolderResponse(
-        id=row["id"],
-        name=row["name"],
-        parent_folder_id=row["parent_folder_id"],
-        sort_order=float(row["sort_order"] or 0),
-        is_pinned=bool(row["is_pinned"]),
-        presentation_group=(str(row["presentation_group"] or "") or None)
-        if "presentation_group" in row.keys()
-        else None,
-        content_count=(
-            int(content_count)
-            if content_count is not None
-            else int(row["content_count"] or 0) if "content_count" in row.keys() else 0
-        ),
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
 
 
 def _ensure_folder_exists(connection, folder_id: str):
@@ -114,7 +83,10 @@ async def list_library_folders():
         aggregate_counts[folder_id] = total
         return total
 
-    return [_folder_response(row, content_count=count_descendants(str(row["id"]))) for row in rows]
+    return [
+        library_folder_response(row, content_count=count_descendants(str(row["id"])))
+        for row in rows
+    ]
 
 
 @router.get("/content/folders/{folder_id}/items", response_model=FolderContentPageResponse)

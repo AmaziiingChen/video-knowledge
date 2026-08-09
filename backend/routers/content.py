@@ -72,6 +72,10 @@ from services.library_folder_tree import (
     folder_tree_ids as _folder_tree_ids,
     is_descendant_folder as _is_descendant_folder,
 )
+from services.library_folder_presentation import (
+    LibraryFolderResponse,
+    library_folder_response as _folder_response,
+)
 
 
 router = APIRouter()
@@ -138,18 +142,6 @@ class ArticlePreviewResponse(BaseModel):
     attachments: list[dict[str, str]] = Field(default_factory=list)
     formatting_status: str = "not_applicable"
     formatting_detail: str = ""
-
-
-class LibraryFolderResponse(BaseModel):
-    id: str
-    name: str
-    parent_folder_id: str | None = None
-    sort_order: float = 0
-    is_pinned: bool = False
-    presentation_group: str | None = None
-    content_count: int = 0
-    created_at: str
-    updated_at: str
 
 
 class LibraryFolderLocationResponse(BaseModel):
@@ -1047,22 +1039,6 @@ def _cache_entries_by_source_url(source_urls) -> dict[str, dict]:
         if entry:
             entries[source_url] = entry
     return entries
-
-
-def _folder_response(row) -> LibraryFolderResponse:
-    return LibraryFolderResponse(
-        id=row["id"],
-        name=row["name"],
-        parent_folder_id=row["parent_folder_id"],
-        sort_order=float(row["sort_order"] or 0),
-        is_pinned=bool(row["is_pinned"]),
-        presentation_group=(str(row["presentation_group"] or "") or None)
-        if "presentation_group" in row.keys()
-        else None,
-        content_count=int(row["content_count"] or 0) if "content_count" in row.keys() else 0,
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
 
 
 def _markdown_import_title(markdown: str, filename: str) -> str:
