@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from html import unescape
-import ipaddress
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 import httpx
@@ -16,6 +15,7 @@ from services.wechat_browser import WECHAT_BROWSER_HEADERS, fetch_wechat_page
 from services.wechat_content_filters import apply_filters
 from services.campus_sources import fetch_campus_article
 from services.published_at import extract_published_at
+from services.public_url import get_public_http_response
 
 
 WECHAT_HEADERS = WECHAT_BROWSER_HEADERS
@@ -145,56 +145,34 @@ def _fetch_rss_article_html(url: str) -> tuple[str, str]:
     current_url = str(url or "").strip()
     try:
         with httpx.Client(headers=_RSS_ARTICLE_HEADERS, timeout=30.0, follow_redirects=False) as client:
-            for _ in range(_RSS_ARTICLE_MAX_REDIRECTS + 1):
-                _ensure_public_rss_url(current_url)
-                response = client.get(current_url)
-                if response.is_redirect:
-                    location = str(response.headers.get("location") or "").strip()
-                    if not location:
-                        raise ValueError("RSS 原文页面重定向地址无效")
-                    current_url = urljoin(current_url, location)
-                    continue
-                response.raise_for_status()
-                content_type = str(response.headers.get("content-type") or "").lower()
-                if content_type and "html" not in content_type and "xhtml" not in content_type:
-                    raise ValueError("RSS 原文链接未返回网页内容")
-                try:
-                    content_length = int(response.headers.get("content-length") or 0)
-                except ValueError:
-                    content_length = 0
-                if content_length > _RSS_ARTICLE_MAX_BYTES:
-                    raise ValueError("RSS 原文页面过大，已跳过抓取")
-                content = response.content
-                if len(content) > _RSS_ARTICLE_MAX_BYTES:
-                    raise ValueError("RSS 原文页面过大，已跳过抓取")
-                return str(response.url), response.text
+            response, final_url = get_public_http_response(
+                client,
+                current_url,
+                invalid_message="RSS 原文链接无效",
+                blocked_message="RSS 原文链接不可访问",
+                redirect_invalid_message="RSS 原文页面重定向地址无效",
+                redirect_limit_message="RSS 原文重定向次数过多",
+                max_redirects=_RSS_ARTICLE_MAX_REDIRECTS,
+            )
+            response.raise_for_status()
+            content_type = str(response.headers.get("content-type") or "").lower()
+            if content_type and "html" not in content_type and "xhtml" not in content_type:
+                raise ValueError("RSS 原文链接未返回网页内容")
+            try:
+                content_length = int(response.headers.get("content-length") or 0)
+            except ValueError:
+                content_length = 0
+            if content_length > _RSS_ARTICLE_MAX_BYTES:
+                raise ValueError("RSS 原文页面过大，已跳过抓取")
+            content = response.content
+            if len(content) > _RSS_ARTICLE_MAX_BYTES:
+                raise ValueError("RSS 原文页面过大，已跳过抓取")
+            return final_url, response.text
     except ValueError:
         raise
     except httpx.HTTPError as exc:
         raise ValueError(f"RSS 原文抓取失败：{exc}") from exc
     raise ValueError("RSS 原文重定向次数过多")
-
-
-def _ensure_public_rss_url(url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("RSS 原文链接无效")
-    host = parsed.hostname.lower().rstrip(".")
-    if host in {"localhost", "localhost.localdomain"}:
-        raise ValueError("RSS 原文链接不可访问")
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return
-    if (
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_reserved
-        or address.is_multicast
-        or address.is_unspecified
-    ):
-        raise ValueError("RSS 原文链接不可访问")
 
 
 def _rss_article_content(soup: BeautifulSoup):

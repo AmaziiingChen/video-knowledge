@@ -17,6 +17,7 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Artplayer from 'artplayer'
+import { localApiRequestUrl } from '../utils/localApiAuth.js'
 
 const props = defineProps({
   src: {
@@ -153,7 +154,8 @@ function parseVttTime(value) {
 
 function backendUrl(value) {
   const url = String(value || '').trim()
-  if (!url || /^[a-z][a-z\d+.-]*:\/\//iu.test(url)) return url
+  if (!url) return ''
+  if (/^[a-z][a-z\d+.-]*:\/\//iu.test(url)) return localApiRequestUrl(url)
   return new URL(url, props.src).href
 }
 

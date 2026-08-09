@@ -152,7 +152,9 @@ const {
 async function openConversation(conversationId) {
   if (asking.value || conversationId === activeConversationId.value) return
   try {
-    const response = await fetch(`${API}/knowledge/conversations/${encodeURIComponent(conversationId)}`)
+    const response = await fetch(localApiRequestUrl(`${API}/knowledge/conversations/${encodeURIComponent(conversationId)}`), {
+      headers: await localApiAuthHeaders(),
+    })
     const data = await response.json()
     if (!response.ok) throw Error(data.detail || '无法读取知识库对话')
     activeConversationId.value = data.id

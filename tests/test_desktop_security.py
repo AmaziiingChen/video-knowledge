@@ -43,12 +43,21 @@ def test_health_identifies_the_exact_desktop_backend_instance(monkeypatch):
     }
 
 
-def test_mutating_local_api_requires_the_desktop_instance_token(monkeypatch):
+def test_private_local_api_requires_the_desktop_instance_token(monkeypatch):
     monkeypatch.setenv("KNOWLEDGEHUB_INSTANCE_TOKEN", "desktop-launch-token")
     monkeypatch.setattr(runtime_components, "install_browser", lambda: {"state": "ready"})
 
     with TestClient(app) as client:
+        read_rejected = client.get("/api/config")
+        media_rejected = client.get("/api/media?path=/tmp/managed-media.mp4")
         rejected = client.post("/api/runtime-components/browser/install")
+        read_accepted = client.get(
+            "/api/config",
+            headers={
+                "Origin": "knowledgehub://app",
+                "X-KnowledgeHub-Token": "desktop-launch-token",
+            },
+        )
         accepted = client.post(
             "/api/runtime-components/browser/install",
             headers={
@@ -57,7 +66,10 @@ def test_mutating_local_api_requires_the_desktop_instance_token(monkeypatch):
             },
         )
 
+    assert read_rejected.status_code == 401
+    assert media_rejected.status_code == 401
     assert rejected.status_code == 401
+    assert read_accepted.status_code == 200
     assert accepted.status_code == 200
     assert accepted.json() == {"state": "ready"}
 
@@ -72,12 +84,12 @@ def test_source_mode_never_allows_an_unconfigured_mutating_api(monkeypatch):
     assert response.status_code == 503
 
 
-def test_mutating_local_api_rejects_an_untrusted_browser_origin(monkeypatch):
+def test_private_local_api_rejects_an_untrusted_browser_origin(monkeypatch):
     monkeypatch.setenv("KNOWLEDGEHUB_INSTANCE_TOKEN", "desktop-launch-token")
 
     with TestClient(app) as client:
-        response = client.post(
-            "/api/runtime-components/browser/install",
+        response = client.get(
+            "/api/config",
             headers={
                 "Origin": "https://attacker.invalid",
                 "X-KnowledgeHub-Token": "desktop-launch-token",

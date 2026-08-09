@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from config import settings
 from main import app
 from routers.content import _local_article_html
-from services import article_fetcher, paddle_ocr, wechat_reports
+from services import article_fetcher, paddle_ocr, public_url, wechat_reports
 from services.content_source_text import ContentSourceText
 from services.paddle_ocr import OcrImageResult
 
@@ -223,6 +223,11 @@ def test_pdf_json_lines_result_keeps_all_page_batches(monkeypatch):
             return JsonLinesResponse()
 
     monkeypatch.setattr(paddle_ocr, "direct_requests_session", StubSession)
+    monkeypatch.setattr(
+        public_url.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
 
     text = paddle_ocr._download_json_result("https://result.example.com/notice.json")
 

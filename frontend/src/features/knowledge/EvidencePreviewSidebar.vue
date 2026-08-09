@@ -75,7 +75,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import PreviewFindBar from '../../workbench/PreviewFindBar.vue'
-import { API_BASE as API } from '../../utils/localApiAuth.js'
+import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from '../../utils/localApiAuth.js'
 const ellipsisIcon = 'ellipsis'
 import { clearPreviewTextHighlights, highlightPreviewText } from '../../utils/previewTextSearch'
 
@@ -107,7 +107,9 @@ watch(
     if (!itemId) return
     loadingSource.value = true
     try {
-      const response = await fetch(`${API}/content/${encodeURIComponent(itemId)}/article-preview`)
+      const response = await fetch(localApiRequestUrl(`${API}/content/${encodeURIComponent(itemId)}/article-preview`), {
+        headers: await localApiAuthHeaders(),
+      })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw Error(payload.detail || '原文暂不可预览')
       if (request !== previewRequest) return
