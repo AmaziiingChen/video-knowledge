@@ -20,7 +20,6 @@ KNOWN_DEBT_BUDGETS = {
     "frontend/src/workbench/PrimarySidebar.vue": 1_650,
     "backend/services/wechat_publishing.py": 1_415,
     "backend/routers/content.py": 201,
-    "backend/services/wechat_subscription.py": 1_190,
     "backend/services/creator_sync.py": 985,
     "frontend/src/features/assistant/SecondarySidebar.vue": 1_743,
     "backend/services/knowledge_v2.py": 1_581,
