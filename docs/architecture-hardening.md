@@ -50,9 +50,12 @@ while the files are split into feature-owned modules.
 
 The second contraction ratchet moves publishing settings, cover tasks,
 selected-text context, preview-find state, report data contracts and Markdown
-normalization behind explicit owners. The corresponding legacy ceilings now
-match the smaller files; CI will reject putting those responsibilities back
-into the composition roots.
+normalization behind explicit owners. The remote original-page lifecycle is
+also isolated in `useRemoteArticlePreviewController.js`; it keeps Electron-only
+WebView access, cached-body fallback and bounded reader metadata together
+without giving guest pages access to local content. The corresponding legacy
+ceilings now match the smaller files; CI will reject putting those
+responsibilities back into the composition roots.
 
 ## Exit criteria
 

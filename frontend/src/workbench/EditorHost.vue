@@ -628,7 +628,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import katex from 'katex'
 import {
   Aim,
@@ -650,18 +650,6 @@ import {
 } from '../utils/reportReadingStats'
 import { remainingReadingMinutes } from './readingProgress.js'
 import { shouldShowArticlePreviewLoader } from '../features/library/articlePreviewLoadState.js'
-import {
-  parseWechatRemoteSelectionMessage,
-  wechatRemoteSelectionBridgeScript,
-} from './wechatRemoteSelection.js'
-import {
-  parseRemoteReadingProgressMessage,
-  remoteReadingProgressBridgeScript,
-} from './remoteReadingProgress.js'
-import {
-  parseRemoteOutlineMessage,
-  remoteOutlineBridgeScript,
-} from './remoteOutlineBridge.js'
 import PreviewFindBar from './PreviewFindBar.vue'
 import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
@@ -672,6 +660,7 @@ import { useMediaTranscriptWorkspaceController } from './useMediaTranscriptWorks
 import { useXhsGalleryController } from './useXhsGalleryController.js'
 import { useReadingProgressController } from './useReadingProgressController.js'
 import { useReaderSelectionController } from './useReaderSelectionController.js'
+import { useRemoteArticlePreviewController } from './useRemoteArticlePreviewController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
@@ -756,15 +745,8 @@ const contentHero = ref(null)
 const reportReader = ref(null)
 const reportMarkdown = ref(null)
 const activeArticlePreviewFrame = ref(null)
-const activeLocalHtmlRemoteWebview = ref(null)
 const articleOutlineRoot = ref(null)
-let localHtmlRemoteFindRequestId = null
-const wechatRemoteFindRequestIds = new Map()
 let removeDesktopPreviewFindListener = null
-const wechatRemotePages = reactive({})
-const localHtmlRemoteFailures = reactive({})
-const remoteReadingProgressByKey = reactive({})
-const remoteOutlines = reactive({})
 
 const {
   clearFootnoteReturn,
@@ -776,28 +758,6 @@ const {
   scrollRoot: reportReader,
   scopeKey: () => activeContentTab.value?.id || '',
 })
-const wechatRemoteWebviews = new Map()
-const wechatRemoteLoadTimers = new Map()
-const wechatRemoteFindListeners = new Map()
-function wechatRemoteScrollbarCss() {
-  const muted = getComputedStyle(document.documentElement).getPropertyValue('--vk-muted').trim()
-  return `
-    * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
-    *::-webkit-scrollbar { width: 6px !important; height: 6px !important; }
-    *::-webkit-scrollbar-track,
-    *::-webkit-scrollbar-corner { background: transparent !important; }
-    *::-webkit-scrollbar-thumb {
-      border: 2px solid transparent !important;
-      border-radius: 999px !important;
-      background: transparent !important;
-      background-clip: padding-box !important;
-    }
-    *:hover::-webkit-scrollbar-thumb {
-      background: color-mix(in srgb, ${muted} 26%, transparent) !important;
-      background-clip: padding-box !important;
-    }
-  `
-}
 const activeContentTab = computed(() => {
   if (props.activeWorkspaceTab) return props.activeWorkspaceTab
   if (!props.selectedContentItem?.id) return null
@@ -867,32 +827,62 @@ const {
   transcriptForTab: props.transcriptForTab,
 })
 
-const activeWechatContent = computed(() => {
-  const tab = activeContentTab.value
-  if (!tab || !isWechatArticleTab(tab.id)) return null
-  return props.contentForTab(tab.id) || null
+const remotePreviewCallbacks = {
+  clearSelectedTextAction: () => {},
+  handleSelection: () => {},
+  isFindOpen: () => false,
+  getFindQuery: () => '',
+  setFindResult: () => {},
+  resetFindResult: () => {},
+  scheduleFindRefresh: () => {},
+}
+const {
+  activeLocalHtmlRemotePage,
+  activeLocalHtmlRemoteWebview,
+  activeRemoteOutline,
+  activeRemoteOutlineKey,
+  activeRemoteOutlineVersion,
+  activeRemoteOutlineWebview,
+  activeRemoteReadingProgress,
+  activeWechatContent,
+  activeWechatRemotePage,
+  canOpenWechatRemotePage,
+  clearRemotePreviewFind,
+  disposeRemoteArticlePreviewController,
+  handleLocalHtmlRemoteConsoleMessage,
+  handleLocalHtmlRemoteFoundInPage,
+  handleLocalHtmlRemotePageFailed,
+  handleLocalHtmlRemotePageLoaded,
+  handleWechatRemoteConsoleMessage,
+  handleWechatRemotePageFailed,
+  handleWechatRemotePageLoaded,
+  isLocalHtmlRemoteVisible,
+  isWechatRemotePageVisible,
+  isWechatRemoteVisible,
+  navigateRemotePreviewFind,
+  openedWechatRemotePages,
+  previewFindMode,
+  refreshRemotePreviewFind,
+  scrollToRemoteOutlineEntry,
+  setWechatRemoteWebview,
+  toggleWechatRemotePage,
+  wechatRemoteActionLabel,
+  wechatRemoteWebviews,
+} = useRemoteArticlePreviewController({
+  activeContentTab,
+  workspaceTabs: () => props.workspaceTabs,
+  contentForTab: props.contentForTab,
+  isWechatArticleTab,
+  localHtmlOriginalPageUrl,
+  readerTextForMetadata,
+  clearSelectedTextAction: () => remotePreviewCallbacks.clearSelectedTextAction(),
+  handleWechatRemoteSelection: (payload) => remotePreviewCallbacks.handleSelection(payload),
+  onPreviewFindResult: (result) => remotePreviewCallbacks.setFindResult(result),
+  resetPreviewFindResult: () => remotePreviewCallbacks.resetFindResult(),
+  onPreviewFindRefresh: () => remotePreviewCallbacks.scheduleFindRefresh(),
+  isPreviewFindOpen: () => remotePreviewCallbacks.isFindOpen(),
+  getPreviewFindQuery: () => remotePreviewCallbacks.getFindQuery(),
 })
-
-const canEmbedWechatPage = computed(() => Boolean(window.knowledgeHubDesktop))
-const canOpenWechatRemotePage = computed(() => Boolean(
-  canEmbedWechatPage.value
-  && /^https:\/\/mp\.weixin\.qq\.com\//.test(String(activeWechatContent.value?.source_url || ''))
-))
-const activeWechatRemotePage = computed(() => {
-  const contentItemId = activeWechatContent.value?.id
-  return contentItemId ? wechatRemotePages[contentItemId] || null : null
-})
-const openedWechatRemotePages = computed(() => Object.values(wechatRemotePages))
-const isWechatRemoteVisible = computed(() => (
-  Boolean(activeWechatRemotePage.value && isWechatRemotePageVisible(activeWechatRemotePage.value))
-))
-const activeLocalHtmlRemotePage = computed(() => {
-  const tabId = activeContentTab.value?.id || ''
-  const sourceUrl = localHtmlOriginalPageUrl(tabId)
-  if (!canEmbedWechatPage.value || !tabId || !sourceUrl || localHtmlRemoteFailures[tabId]) return null
-  return { contentItemId: tabId, sourceUrl }
-})
-const isLocalHtmlRemoteVisible = computed(() => Boolean(activeLocalHtmlRemotePage.value))
 const {
   selectedTextAction,
   selectedTextActionStyle,
@@ -900,7 +890,7 @@ const {
   attachArticlePreviewSelectionFrame,
   clearSelectedTextAction,
   disposeReaderSelectionController,
-  handleWechatRemoteSelection,
+  handleWechatRemoteSelection: handleWechatRemoteSelectionFromReader,
   mountReaderSelectionController,
 } = useReaderSelectionController({
   activeContentTab,
@@ -911,6 +901,8 @@ const {
   wechatRemoteWebviews,
   onAsk: (selection) => emit('ask-about-selection', selection),
 })
+remotePreviewCallbacks.clearSelectedTextAction = clearSelectedTextAction
+remotePreviewCallbacks.handleSelection = handleWechatRemoteSelectionFromReader
 const {
   clearPreviewFindHighlights,
   closePreviewFind,
@@ -936,31 +928,15 @@ const {
   navigateRemote: navigateRemotePreviewFind,
   clearRemote: clearRemotePreviewFind,
 })
-const activeRemoteOutlineKey = computed(() => {
-  if (isWechatRemoteVisible.value) return `wechat:${activeWechatContent.value?.id || ''}`
-  if (isLocalHtmlRemoteVisible.value) return `local-html:${activeContentTab.value?.id || ''}`
-  return ''
-})
-const activeRemoteOutline = computed(() => (
-  remoteOutlines[activeRemoteOutlineKey.value] || { entries: [], activeId: '' }
-))
-const activeRemoteOutlineVersion = computed(() => (
-  `${activeRemoteOutlineKey.value}:${activeRemoteOutline.value.entries.map((entry) => entry.id).join('|')}`
-))
-const activeRemoteOutlineWebview = computed(() => {
-  if (isWechatRemoteVisible.value) return wechatRemoteWebviews.get(activeWechatContent.value?.id) || null
-  if (isLocalHtmlRemoteVisible.value) return activeLocalHtmlRemoteWebview.value || null
-  return null
-})
-function activeRemoteReadingProgressKey() {
-  if (isWechatRemoteVisible.value) return `wechat:${activeWechatContent.value?.id || ''}`
-  if (isLocalHtmlRemoteVisible.value) return `local-html:${activeContentTab.value?.id || ''}`
-  return ''
+remotePreviewCallbacks.isFindOpen = () => previewFindOpen.value
+remotePreviewCallbacks.getFindQuery = () => previewFindQuery.value
+remotePreviewCallbacks.setFindResult = setRemoteFindResult
+remotePreviewCallbacks.resetFindResult = () => {
+  previewFindMatchCount.value = 0
+  previewFindActiveIndex.value = -1
+  previewFindTruncated.value = false
 }
-const activeRemoteReadingProgress = computed(() => {
-  const key = activeRemoteReadingProgressKey()
-  return key ? remoteReadingProgressByKey[key] || null : null
-})
+remotePreviewCallbacks.scheduleFindRefresh = schedulePreviewFindRefresh
 const supportsReadingProgress = computed(() => {
   const tab = activeContentTab.value
   if (!tab) return false
@@ -999,36 +975,6 @@ const {
   isRemoteReadingVisible: () => isWechatRemoteVisible.value || isLocalHtmlRemoteVisible.value,
   readerTextForMetadata,
 })
-const wechatRemoteActionLabel = computed(() => {
-  if (isWechatRemoteVisible.value) return '查看缓存正文'
-  if (activeWechatRemotePage.value?.status === 'ready') return '在软件内打开原文'
-  if (activeWechatRemotePage.value?.status === 'failed') return '重新加载软件内原文'
-  if (activeWechatRemotePage.value?.status === 'loading') return '正在打开原文'
-  return '在软件内打开原文'
-})
-
-function ensureWechatRemotePageOpen() {
-  const content = activeWechatContent.value
-  if (!content || !canOpenWechatRemotePage.value || wechatRemotePages[content.id]) return
-  // The remote page is the primary reader for WeChat articles. It can render
-  // while the backend is still normalizing and indexing its local snapshot;
-  // a failed remote load naturally falls back to the local cache below.
-  wechatRemotePages[content.id] = {
-    contentItemId: content.id,
-    sourceUrl: content.source_url,
-    status: 'loading',
-    visible: true,
-    loadAttempt: 0,
-  }
-  scheduleWechatRemoteLoadTimeout(content.id)
-}
-
-watch(
-  () => [activeWechatContent.value?.id || '', activeWechatContent.value?.source_url || ''],
-  () => ensureWechatRemotePageOpen(),
-  { immediate: true },
-)
-
 watch(
   () => activeContentTab.value?.id || '',
   () => {
@@ -1043,31 +989,6 @@ watch(
   () => [isWechatRemoteVisible.value, isLocalHtmlRemoteVisible.value],
   () => scheduleReadingProgressRefresh(),
   { flush: 'post' }
-)
-
-watch(
-  () => props.workspaceTabs.map((tab) => tab.content_item_id || '').join('|'),
-  () => {
-    const openContentIds = new Set(props.workspaceTabs.map((tab) => tab.content_item_id).filter(Boolean))
-    const openTabIds = new Set(props.workspaceTabs.map((tab) => String(tab.id || '')).filter(Boolean))
-    for (const contentItemId of Object.keys(wechatRemotePages)) {
-      if (openContentIds.has(contentItemId)) continue
-      clearWechatRemoteLoadTimer(contentItemId)
-      delete wechatRemotePages[contentItemId]
-      setWechatRemoteWebview(contentItemId, null)
-      wechatRemoteFindRequestIds.delete(contentItemId)
-      delete remoteReadingProgressByKey[`wechat:${contentItemId}`]
-      delete remoteOutlines[`wechat:${contentItemId}`]
-    }
-    for (const key of Object.keys(remoteReadingProgressByKey)) {
-      if (!key.startsWith('local-html:')) continue
-      if (!openTabIds.has(key.slice('local-html:'.length))) delete remoteReadingProgressByKey[key]
-    }
-    for (const key of Object.keys(remoteOutlines)) {
-      if (!key.startsWith('local-html:')) continue
-      if (!openTabIds.has(key.slice('local-html:'.length))) delete remoteOutlines[key]
-    }
-  }
 )
 
 watch(() => activeContentTab.value?.id, () => {
@@ -1092,10 +1013,7 @@ watch(
 
 onBeforeUnmount(() => {
   disposeMediaTranscriptWorkspace()
-  for (const contentItemId of wechatRemoteLoadTimers.keys()) clearWechatRemoteLoadTimer(contentItemId)
-  for (const contentItemId of wechatRemoteWebviews.keys()) setWechatRemoteWebview(contentItemId, null)
-  wechatRemoteWebviews.clear()
-  wechatRemoteFindRequestIds.clear()
+  disposeRemoteArticlePreviewController()
   disposePreviewFindController()
   disposeReadingProgressController()
   disposeReaderSelectionController()
@@ -1258,50 +1176,6 @@ function localHtmlOriginalPageUrl(tabId) {
   return /^https:\/\//iu.test(sourceUrl) ? sourceUrl : ''
 }
 
-function handleLocalHtmlRemotePageFailed(contentItemId, event) {
-  if (Number(event?.errorCode) === -3) return
-  localHtmlRemoteFailures[contentItemId] = true
-}
-
-async function handleLocalHtmlRemotePageLoaded(event) {
-  const webview = event?.target || activeLocalHtmlRemoteWebview.value
-  try {
-    await webview?.executeJavaScript?.(remoteReadingProgressBridgeScript(
-      readableCharacterCount(readerTextForMetadata(activeContentTab.value?.id))
-    ))
-  } catch {
-    // The original source remains usable if the optional progress bridge is refused.
-  }
-  try {
-    await webview?.executeJavaScript?.(remoteOutlineBridgeScript())
-  } catch {
-    // A source page without readable headings simply has no outline rail.
-  }
-  if (previewFindOpen.value) schedulePreviewFindRefresh()
-}
-
-function handleLocalHtmlRemoteConsoleMessage(contentItemId, event) {
-  const webview = activeLocalHtmlRemoteWebview.value
-  if (!webview || event?.target !== webview || !isLocalHtmlRemoteVisible.value) return
-  const outline = parseRemoteOutlineMessage(event?.message)
-  if (outline && String(contentItemId) === String(activeContentTab.value?.id || '')) {
-    applyRemoteOutlineMessage(`local-html:${contentItemId}`, outline)
-    return
-  }
-  const progress = parseRemoteReadingProgressMessage(event?.message)
-  if (!progress || String(contentItemId) !== String(activeContentTab.value?.id || '')) return
-  remoteReadingProgressByKey[`local-html:${contentItemId}`] = progress
-}
-
-function handleLocalHtmlRemoteFoundInPage(event) {
-  const result = event?.result
-  if (!result || result.requestId !== localHtmlRemoteFindRequestId) return
-  setRemoteFindResult({
-    matchCount: result.matches,
-    activeMatchOrdinal: result.activeMatchOrdinal,
-  })
-}
-
 function isXiaohongshuArticleTab(tabId) {
   const content = props.contentForTab(tabId)
   return content?.source_provider === 'xiaohongshu' && content?.content_type === 'article'
@@ -1397,180 +1271,6 @@ function isCampusArticleTab(tabId) {
 
 function isWechatArticleTab(tabId) {
   return props.contentForTab(tabId)?.source_provider === 'wechat'
-}
-
-function clearWechatRemoteLoadTimer(contentItemId) {
-  const timer = wechatRemoteLoadTimers.get(contentItemId)
-  if (!timer) return
-  window.clearTimeout(timer)
-  wechatRemoteLoadTimers.delete(contentItemId)
-}
-
-function scheduleWechatRemoteLoadTimeout(contentItemId) {
-  clearWechatRemoteLoadTimer(contentItemId)
-  const timer = window.setTimeout(() => {
-    const page = wechatRemotePages[contentItemId]
-    if (!page || page.status !== 'loading') return
-    page.status = 'failed'
-    page.visible = false
-  }, 15000)
-  wechatRemoteLoadTimers.set(contentItemId, timer)
-}
-
-function setWechatRemoteWebview(contentItemId, webview) {
-  const previous = wechatRemoteWebviews.get(contentItemId)
-  const previousListener = wechatRemoteFindListeners.get(contentItemId)
-  if (previous && previousListener) previous.removeEventListener?.('found-in-page', previousListener)
-  wechatRemoteFindListeners.delete(contentItemId)
-  if (!webview) {
-    wechatRemoteWebviews.delete(contentItemId)
-    return
-  }
-  const listener = (event) => handleWechatRemoteFoundInPage(contentItemId, event)
-  webview.addEventListener?.('found-in-page', listener)
-  wechatRemoteFindListeners.set(contentItemId, listener)
-  wechatRemoteWebviews.set(contentItemId, webview)
-}
-
-function isWechatRemotePageVisible(page) {
-  return Boolean(
-    page?.visible
-    && page.status === 'ready'
-    && page.contentItemId === activeWechatContent.value?.id
-  )
-}
-
-async function handleWechatRemotePageLoaded(contentItemId, event) {
-  const page = wechatRemotePages[contentItemId]
-  const webview = event?.target || wechatRemoteWebviews.get(contentItemId)
-  if (!page || !webview || page.sourceUrl !== webview.src) return
-  try {
-    await webview.insertCSS(wechatRemoteScrollbarCss())
-  } catch {
-    // The original page remains readable when a particular guest page rejects injected CSS.
-  }
-  try {
-    await webview.executeJavaScript(wechatRemoteSelectionBridgeScript())
-  } catch {
-    // The page remains readable even when its guest renderer rejects the optional selection bridge.
-  }
-  try {
-    const tabId = props.workspaceTabs.find((tab) => (
-      String(tab.content_item_id || '') === String(contentItemId)
-    ))?.id || activeContentTab.value?.id
-    await webview.executeJavaScript(remoteReadingProgressBridgeScript(
-      readableCharacterCount(readerTextForMetadata(tabId))
-    ))
-  } catch {
-    // Progress is supplemental; do not let it block the original-page preview.
-  }
-  try {
-    await webview.executeJavaScript(remoteOutlineBridgeScript())
-  } catch {
-    // A source page without readable headings simply has no outline rail.
-  }
-  if (wechatRemoteWebviews.get(contentItemId) !== webview) return
-  clearWechatRemoteLoadTimer(contentItemId)
-  page.status = 'ready'
-  if (previewFindOpen.value) schedulePreviewFindRefresh()
-}
-
-function handleWechatRemoteFoundInPage(contentItemId, event) {
-  const webview = wechatRemoteWebviews.get(contentItemId)
-  const result = event?.result
-  if (!result || !webview || !isWechatRemoteVisible.value) return
-  if (result.requestId !== wechatRemoteFindRequestIds.get(contentItemId)) return
-  setRemoteFindResult({
-    matchCount: result.matches,
-    activeMatchOrdinal: result.activeMatchOrdinal,
-  })
-}
-
-function handleWechatRemoteConsoleMessage(contentItemId, event) {
-  const webview = wechatRemoteWebviews.get(contentItemId)
-  if (!webview || event?.target !== webview || !isWechatRemotePageVisible(wechatRemotePages[contentItemId])) return
-  const outline = parseRemoteOutlineMessage(event?.message)
-  if (outline) {
-    applyRemoteOutlineMessage(`wechat:${contentItemId}`, outline)
-    return
-  }
-  const progress = parseRemoteReadingProgressMessage(event?.message)
-  if (progress) {
-    remoteReadingProgressByKey[`wechat:${contentItemId}`] = progress
-    return
-  }
-  const selection = parseWechatRemoteSelectionMessage(event?.message)
-  if (!selection) return
-  handleWechatRemoteSelection({ contentItemId, webview, selection })
-}
-
-function applyRemoteOutlineMessage(key, message) {
-  if (message.kind === 'outline') {
-    remoteOutlines[key] = {
-      entries: message.entries,
-      activeId: message.activeId,
-    }
-    return
-  }
-  if (message.kind === 'active' && remoteOutlines[key]) {
-    remoteOutlines[key].activeId = message.activeId
-  }
-}
-
-function scrollToRemoteOutlineEntry(entry) {
-  const webview = activeRemoteOutlineWebview.value
-  const id = String(entry?.id || '')
-  if (!webview?.executeJavaScript || !id) return
-  void webview.executeJavaScript(
-    `window.__knowledgeHubRemoteOutlineScrollTo?.(${JSON.stringify(id)})`
-  ).catch(() => {})
-}
-
-function handleWechatRemotePageFailed(contentItemId, event) {
-  if (event?.target && event.target !== wechatRemoteWebviews.get(contentItemId)) return
-  if (Number(event?.errorCode) === -3) return
-  const page = wechatRemotePages[contentItemId]
-  if (!page) return
-  clearWechatRemoteLoadTimer(contentItemId)
-  page.status = 'failed'
-  page.visible = false
-}
-
-function toggleWechatRemotePage() {
-  const content = activeWechatContent.value
-  if (!content || !canOpenWechatRemotePage.value) return
-  clearSelectedTextAction()
-  const existing = wechatRemotePages[content.id]
-  if (!existing) {
-    wechatRemotePages[content.id] = {
-      contentItemId: content.id,
-      sourceUrl: content.source_url,
-      status: 'loading',
-      visible: true,
-      loadAttempt: 0,
-    }
-    scheduleWechatRemoteLoadTimeout(content.id)
-    return
-  }
-  if (existing.status === 'loading') return
-  if (existing.status === 'failed') {
-    reloadWechatRemotePage(existing)
-    return
-  }
-  existing.visible = !existing.visible
-}
-
-function reloadWechatRemotePage(page) {
-  if (!page?.sourceUrl) return
-  page.visible = true
-  page.status = 'loading'
-  scheduleWechatRemoteLoadTimeout(page.contentItemId)
-  const webview = wechatRemoteWebviews.get(page.contentItemId)
-  if (webview && typeof webview.reload === 'function') {
-    webview.reload()
-    return
-  }
-  page.loadAttempt += 1
 }
 
 function isReportTab(tabId) {
@@ -1721,52 +1421,6 @@ function articleAttachmentsForTab(tabId) {
   return Array.isArray(attachments) ? attachments : []
 }
 
-function previewFindMode() {
-  if (isWechatRemoteVisible.value) return 'wechat'
-  if (isLocalHtmlRemoteVisible.value) return 'local-html'
-  return 'local'
-}
-
-function refreshRemotePreviewFind(mode) {
-  if (mode === 'wechat') refreshWechatRemoteFind()
-  else if (mode === 'local-html') refreshLocalHtmlRemoteFind()
-}
-
-function clearRemotePreviewFind({ clearSelection = false } = {}) {
-  clearWechatRemoteFind({ clearSelection })
-  clearLocalHtmlRemoteFind({ clearSelection })
-}
-
-function navigateRemotePreviewFind(mode, query, direction) {
-  if (mode === 'wechat') {
-    const contentItemId = activeWechatContent.value?.id
-    const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
-    if (!contentItemId || !webview?.findInPage) return
-    try {
-      wechatRemoteFindRequestIds.set(contentItemId, webview.findInPage(query, {
-        forward: direction >= 0,
-        findNext: false,
-        matchCase: false,
-      }))
-    } catch {
-      wechatRemoteFindRequestIds.delete(contentItemId)
-    }
-    return
-  }
-  if (mode !== 'local-html') return
-  const webview = activeLocalHtmlRemoteWebview.value
-  if (!webview?.findInPage) return
-  try {
-    localHtmlRemoteFindRequestId = webview.findInPage(query, {
-      forward: direction >= 0,
-      findNext: false,
-      matchCase: false,
-    })
-  } catch {
-    localHtmlRemoteFindRequestId = null
-  }
-}
-
 function previewFindRoot() {
   const tab = activeContentTab.value
   if (!tab) return null
@@ -1787,72 +1441,6 @@ function seekMediaToPreviewFindMatch(match) {
   const startSeconds = Number(match.closest('.timeline-segment')?.dataset.startSeconds)
   if (!Number.isFinite(startSeconds)) return
   handleTimelineSegmentClick(tab.id, startSeconds)
-}
-
-function clearLocalHtmlRemoteFind({ clearSelection = false } = {}) {
-  const webview = activeLocalHtmlRemoteWebview.value
-  if (!webview?.stopFindInPage) return
-  try {
-    webview.stopFindInPage(clearSelection ? 'clearSelection' : 'keepSelection')
-  } catch {
-    // The remote page may have just been detached while tabs are switching.
-  }
-  localHtmlRemoteFindRequestId = null
-}
-
-function clearWechatRemoteFind({ clearSelection = false } = {}) {
-  const contentItemId = activeWechatContent.value?.id
-  const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
-  if (!contentItemId || !webview?.stopFindInPage) return
-  try {
-    webview.stopFindInPage(clearSelection ? 'clearSelection' : 'keepSelection')
-  } catch {
-    // The original-page preview may have just been detached while tabs are switching.
-  }
-  wechatRemoteFindRequestIds.delete(contentItemId)
-}
-
-function refreshLocalHtmlRemoteFind() {
-  const query = previewFindQuery.value.trim()
-  const webview = activeLocalHtmlRemoteWebview.value
-  previewFindMatchCount.value = 0
-  previewFindActiveIndex.value = -1
-  previewFindTruncated.value = false
-  if (!query || !webview?.findInPage) {
-    clearLocalHtmlRemoteFind({ clearSelection: !query })
-    return
-  }
-  try {
-    localHtmlRemoteFindRequestId = webview.findInPage(query, {
-      forward: true,
-      findNext: true,
-      matchCase: false,
-    })
-  } catch {
-    localHtmlRemoteFindRequestId = null
-  }
-}
-
-function refreshWechatRemoteFind() {
-  const query = previewFindQuery.value.trim()
-  const contentItemId = activeWechatContent.value?.id
-  const webview = contentItemId ? wechatRemoteWebviews.get(contentItemId) : null
-  previewFindMatchCount.value = 0
-  previewFindActiveIndex.value = -1
-  previewFindTruncated.value = false
-  if (!query || !contentItemId || !webview?.findInPage) {
-    clearWechatRemoteFind({ clearSelection: !query })
-    return
-  }
-  try {
-    wechatRemoteFindRequestIds.set(contentItemId, webview.findInPage(query, {
-      forward: true,
-      findNext: true,
-      matchCase: false,
-    }))
-  } catch {
-    wechatRemoteFindRequestIds.delete(contentItemId)
-  }
 }
 
 function handleArticlePreviewFrameReady(event) {

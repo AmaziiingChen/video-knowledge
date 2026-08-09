@@ -60,7 +60,12 @@ lines.
   sessions remain in the facade because they still share optimistic updates,
   tab cleanup and durable queue state.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
-  readers; each reader receives a mounted behavior test.
+  readers; each reader receives a mounted behavior test. Remote original-page
+  lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it
+  owns desktop-only eligibility, WebView listener/timer cleanup, local-snapshot
+  fallback, in-page find, bounded outline/progress messages and selection
+  forwarding. Report, article and media readers still need their own mounted
+  behavior boundaries.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
   tree, drag, search and trash behavior at their owners.
   Local tree-preference persistence plus pure tree-node construction, unread
