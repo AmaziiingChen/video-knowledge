@@ -68,7 +68,10 @@ from services.content_presentation import (
     content_item_response as _item_to_response,
     readiness_response as _readiness_response,
 )
-from services.library_folder_tree import folder_tree_ids as _folder_tree_ids
+from services.library_folder_tree import (
+    folder_tree_ids as _folder_tree_ids,
+    is_descendant_folder as _is_descendant_folder,
+)
 
 
 router = APIRouter()
@@ -1182,20 +1185,3 @@ def _ensure_folder_exists(connection, folder_id: str):
     if row is None:
         raise HTTPException(status_code=404, detail="文件夹不存在")
     return row
-
-
-def _is_descendant_folder(connection, candidate_id: str, parent_id: str) -> bool:
-    rows = connection.execute(
-        """
-        WITH RECURSIVE folder_tree(id) AS (
-            SELECT id FROM library_folders WHERE parent_folder_id = ?
-            UNION ALL
-            SELECT library_folders.id
-            FROM library_folders
-            JOIN folder_tree ON library_folders.parent_folder_id = folder_tree.id
-        )
-        SELECT id FROM folder_tree WHERE id = ? LIMIT 1
-        """,
-        (parent_id, candidate_id),
-    ).fetchall()
-    return bool(rows)
