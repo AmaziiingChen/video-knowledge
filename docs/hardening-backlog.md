@@ -87,8 +87,9 @@ lines.
   repeated pull-request/main checks cancel stale in-progress runs.
 - [ ] Establish auditable Python dependency constraints/lock data and add an
   incremental, explicit coverage baseline for high-risk boundaries. The base
-  manifest has removed its three verified-unused dependencies; reproducible
-  Python constraint/lock data remains outstanding.
+  manifest has removed its three verified-unused dependencies; exact
+  verification-tool pins now live in `requirements-dev.txt`, while complete
+  cross-platform runtime lock data remains outstanding.
 
 ## P2 — repository hygiene and release provenance
 
