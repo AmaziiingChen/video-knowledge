@@ -68,6 +68,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `features/integrations/usePlatformCredentialController.js` | manual platform-cookie saves, desktop login/forget confirmation and per-platform status refresh | credential-status polling, settings markup, task execution and data persistence |
 | `features/tasks/useTaskQueueController.js` | queue snapshots, compact-detail merging, task polling, cancellation and retry | single-task runner presentation, content hydration implementation, workbench selection |
 | `features/library/libraryTreeModel.js` | pure folder/content/unread/pinned tree-node construction and deterministic ordering | localStorage preferences, drag/drop, selection, virtual rendering and parent events |
+| `workbench/useTreeBoxSelectionController.js` | library-tree marquee selection, additive selection and pointer-listener cleanup | tree-node construction, drag/drop, context menus and persistent folder state |
 | `features/assistant/useSelectedTextContext.js` | selected quote normalization and its explicit assistant-input token | reader DOM selection, Q&A transport, document persistence |
 | `features/prompts/useWechatReportPromptController.js` | report-prompt loading, selection, editing and save boundary | prompt file tabs, report generation, account subscriptions |
 | `workbench/usePreviewFindController.js` | find-bar state, local highlighting, navigation and cleanup | deciding which reader DOM is active, webview implementation details |

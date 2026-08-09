@@ -294,6 +294,7 @@ import LibraryContextMenu from './LibraryContextMenu.vue'
 import PromptFileTree from './PromptFileTree.vue'
 import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
+import { useTreeBoxSelectionController } from './useTreeBoxSelectionController.js'
 const folderIcon = 'folder'
 const highlighterIcon = 'highlighter'
 const trashIcon = 'trash'
@@ -474,8 +475,6 @@ const treeRef = ref(null)
 const treeScrollTop = ref(0)
 const treeViewportHeight = ref(0)
 const treeIsScrolling = ref(false)
-const selectionBox = ref(null)
-const selectionStart = ref(null)
 const contentContextMenu = ref(null)
 const separatorLayoutState = loadUserGroupSeparators()
 const userGroupSeparators = ref(separatorLayoutState.separators)
@@ -491,6 +490,18 @@ const searchScopeOptions = [
 ]
 let treeResizeObserver = null
 let treeScrollEndTimer = null
+
+const {
+  selectionBox,
+  selectionBoxStyle,
+  startBoxSelection,
+  cancelBoxSelection,
+} = useTreeBoxSelectionController({
+  treeRef,
+  selectedKeys,
+  setSelectedKeys,
+  setAnchorKey: (key) => { anchorKey.value = key || anchorKey.value },
+})
 
 defineExpose({
   focusLibrarySearch() {
@@ -709,17 +720,6 @@ function moveUserSeparator(separatorId, target, position) {
   userGroupSeparators.value = separators
   saveUserGroupSeparators(separators)
 }
-
-const selectionBoxStyle = computed(() => {
-  const box = selectionBox.value
-  if (!box) return {}
-  return {
-    left: `${box.left}px`,
-    top: `${box.top}px`,
-    width: `${box.width}px`,
-    height: `${box.height}px`,
-  }
-})
 
 watch(
   () => props.libraryFolders.map((folder) => `${folder.id}:${folder.parent_folder_id || ''}:${folder.sort_order}:${folder.is_pinned ? 1 : 0}`).join('|'),
@@ -1398,76 +1398,6 @@ function requestDeleteSelected() {
   if (!selectedNodes.value.length) return
   emit('delete-selected', selectedNodes.value.map((node) => node.raw ? { ...node.raw, type: node.type } : node))
   selectedKeys.value = new Set()
-}
-
-function startBoxSelection(event) {
-  if (event.button !== 0) return
-  const target = event.target instanceof Element ? event.target : null
-  if (target?.closest('[data-node-key],button,input,.sidebar-tree-row-actions,.sidebar-selection-bar,.el-popper')) return
-  const tree = treeRef.value
-  if (!tree) return
-  tree.setPointerCapture?.(event.pointerId)
-  const rect = tree.getBoundingClientRect()
-  selectionStart.value = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top + tree.scrollTop,
-    additive: event.metaKey || event.ctrlKey,
-    base: new Set(event.metaKey || event.ctrlKey ? selectedKeys.value : []),
-  }
-  selectionBox.value = {
-    left: selectionStart.value.x,
-    top: selectionStart.value.y,
-    width: 0,
-    height: 0,
-  }
-  tree.addEventListener('pointermove', updateBoxSelection)
-  tree.addEventListener('pointerup', finishBoxSelection, { once: true })
-}
-
-function updateBoxSelection(event) {
-  const tree = treeRef.value
-  const start = selectionStart.value
-  if (!tree || !start) return
-  const rect = tree.getBoundingClientRect()
-  const currentX = event.clientX - rect.left
-  const currentY = event.clientY - rect.top + tree.scrollTop
-  const left = Math.min(start.x, currentX)
-  const top = Math.min(start.y, currentY)
-  const right = Math.max(start.x, currentX)
-  const bottom = Math.max(start.y, currentY)
-  selectionBox.value = {
-    left,
-    top,
-    width: right - left,
-    height: bottom - top,
-  }
-  const next = new Set(start.base)
-  tree.querySelectorAll('[data-node-key]').forEach((element) => {
-    const nodeRect = element.getBoundingClientRect()
-    const elementBox = {
-      left: nodeRect.left - rect.left,
-      right: nodeRect.right - rect.left,
-      top: nodeRect.top - rect.top + tree.scrollTop,
-      bottom: nodeRect.bottom - rect.top + tree.scrollTop,
-    }
-    const intersects = elementBox.left < right
-      && elementBox.right > left
-      && elementBox.top < bottom
-      && elementBox.bottom > top
-    if (intersects) next.add(element.dataset.nodeKey)
-  })
-  setSelectedKeys(next)
-}
-
-function finishBoxSelection() {
-  cancelBoxSelection()
-  anchorKey.value = [...selectedKeys.value].at(-1) || anchorKey.value
-}
-
-function cancelBoxSelection() {
-  treeRef.value?.removeEventListener('pointermove', updateBoxSelection)
-  selectionBox.value = null
-  selectionStart.value = null
 }
 
 </script>

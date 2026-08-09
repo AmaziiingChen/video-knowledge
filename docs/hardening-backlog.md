@@ -65,7 +65,8 @@ lines.
   tree, drag, search and trash behavior at their owners.
   Local tree-preference persistence and pure tree-node construction now live in
   `features/library/libraryTreePreferences.js` and
-  `features/library/libraryTreeModel.js`; drag/drop, selection and virtual-row
+  `features/library/libraryTreeModel.js`; marquee selection now lives in
+  `workbench/useTreeBoxSelectionController.js`. Drag/drop and virtual-row
   rendering stay in the sidebar until they have their own behavior boundaries.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
