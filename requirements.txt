@@ -18,4 +18,3 @@ beautifulsoup4>=4.12
 lxml==6.1.1
 Pillow>=11.0
 numpy>=1.26,<3
-pyinstaller>=6.0,<7.0

@@ -16,6 +16,10 @@ changing local verification behavior without a reviewed repository diff. When
 upgrading one of them, update its pin, run the applicable backend checks, and
 review the diff.
 
+`requirements-build.txt` pins the desktop packager separately. Install it only
+when running `python scripts/build_desktop_backend.py`; PyInstaller is a build
+tool and is not required to run KnowledgeHub.
+
 A complete pair of Linux and macOS runtime lock files, and any corresponding
 CI changes, are later explicit reproducibility work. Do not claim this small
 manifest is a substitute for that work.

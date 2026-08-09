@@ -72,6 +72,12 @@ cd ..
 python -m pip install -r requirements-dev.txt
 ```
 
+只有在本机生成桌面安装包时，才安装打包工具：
+
+```bash
+python -m pip install -r requirements-build.txt
+```
+
 运行时与验证工具依赖策略见 [Python dependency policy](docs/python-dependencies.md)。
 
 校园报告默认使用确定性的词法匹配。只有需要本地语义向量排序时，才安装可选依赖：
