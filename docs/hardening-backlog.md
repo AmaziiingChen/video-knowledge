@@ -184,8 +184,10 @@ lines.
   now documents only the normal GitHub Release DMG and SHA-256 path.
 - [ ] Continue ratcheting every production source below 1,000 lines, or add a
   narrowly documented generated/declarative exception. The group-report source
-  summary cache now has its own database owner; the planner's JSON shape
-  compatibility and parsing now live in `group_report_plan_shape.py`. The
+  summary cache now has its own database owner; source membership queries,
+  deterministic ordering and managed-text/Markdown material loading now live
+  in `group_report_sources.py`; the planner's JSON shape compatibility and
+  parsing now live in `group_report_plan_shape.py`. The
   legacy first-sync task adapter now lives in
   `wechat_initial_sync_queue.py`, while the paced all-subscription check
   adapter and its remote/authorization stop policy now live in
