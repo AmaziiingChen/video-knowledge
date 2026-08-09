@@ -70,9 +70,12 @@ lines.
   `features/library/useContentRecoveryController.js` while reusing the durable
   task queue. Source-group loading, guarded removal and editor lifecycle now
   live in `features/library/useLibrarySourceGroupController.js`. Folder-tree
+  mutation transactions (rename, move and recycle-bin deletion) now live in
+  `features/library/useLibraryMutationController.js`, preserving optimistic
+  updates, rollback, tab cleanup and durable history records. Folder-tree
   ownership, task runtime, link import and assistant sessions remain in the
-  facade because they still share optimistic updates, tab cleanup and durable
-  queue state. The active-reader EventSource lifecycle now lives in
+  facade because they still share durable queue state. The active-reader
+  EventSource lifecycle now lives in
   `features/tasks/useActiveTaskEventStreamController.js`, retaining task-ID
   validation, terminal cleanup and polling fallback behavior.
   Task status, status-bar, progress, log-level and display-label presentation
