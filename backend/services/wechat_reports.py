@@ -4,7 +4,7 @@ import json
 import re
 from hashlib import sha256
 from collections.abc import Callable
-from datetime import date, datetime, time as dt_time, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -31,6 +31,11 @@ from services.prompt_file_store import remove_report_prompt_files, sync_report_p
 from services.report_naming import (
     report_document_name as _report_document_name,
     report_title as _report_title,  # noqa: F401 - test and module compatibility
+)
+from services.report_time_rules import (
+    in_window as _in_window,
+    manual_report_window as _manual_report_window,
+    normalize_report_window as _normalize_report_window,
 )
 
 REPORT_PROMPT_TYPE = "group_context"
@@ -1135,17 +1140,6 @@ def _merge_report_generation_metadata(
         connection.commit()
 
 
-def _normalize_report_window(start: datetime, end: datetime) -> tuple[datetime, datetime]:
-    local_timezone = datetime.now().astimezone().tzinfo
-
-    def localize(value: datetime) -> datetime:
-        if value.tzinfo is None:
-            return value.replace(tzinfo=local_timezone)
-        return value.astimezone(local_timezone)
-
-    return localize(start), localize(end)
-
-
 def _editorial_prompt_type(
     report_type: str,
     window_start: datetime | None,
@@ -1279,35 +1273,6 @@ def _group_source_sort_key(row: dict) -> tuple[str, str, str]:
         str(row.get("source_name") or row.get("mp_name") or ""),
         str(row.get("content_item_id") or ""),
     )
-
-
-def _manual_report_window(report_type: str, end: date) -> tuple[datetime, datetime]:
-    timezone = datetime.now().astimezone().tzinfo
-    start_date = end if report_type == "daily" else end - timedelta(days=6)
-    return (
-        datetime.combine(start_date, dt_time.min, tzinfo=timezone),
-        datetime.combine(end, dt_time.max, tzinfo=timezone),
-    )
-
-
-def _in_window(value: str, start: datetime, end: datetime) -> bool:
-    published = _parse_publication_time(value, timezone=start.tzinfo)
-    return bool(published and start <= published <= end)
-
-
-def _parse_publication_time(value: str, *, timezone) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        if len(text) == 10:
-            return datetime.combine(date.fromisoformat(text), dt_time(hour=12), tzinfo=timezone)
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone)
-        return parsed.astimezone(timezone)
-    except ValueError:
-        return None
 
 
 def _placeholder_cover_data_url(report_type: str, period_end: date) -> str:
