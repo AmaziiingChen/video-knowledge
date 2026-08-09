@@ -673,6 +673,7 @@ import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
 import { usePreviewFindController } from './usePreviewFindController.js'
 import { useMediaTranscriptWorkspaceController } from './useMediaTranscriptWorkspaceController.js'
+import { useXhsGalleryController } from './useXhsGalleryController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
@@ -758,7 +759,6 @@ const reportReader = ref(null)
 const reportMarkdown = ref(null)
 const activeArticlePreviewFrame = ref(null)
 const activeLocalHtmlRemoteWebview = ref(null)
-const xhsGalleryTrack = ref(null)
 const articleOutlineRoot = ref(null)
 const selectedTextAction = ref(null)
 const readingProgress = ref(0)
@@ -825,8 +825,6 @@ const selectedTextActionStyle = computed(() => {
     '--reader-selection-tail-bottom': opensAbove ? '-4px' : 'auto',
   }
 })
-const xhsGalleryIndex = ref(0)
-
 const activeContentTab = computed(() => {
   if (props.activeWorkspaceTab) return props.activeWorkspaceTab
   if (!props.selectedContentItem?.id) return null
@@ -838,6 +836,20 @@ const activeContentTab = computed(() => {
     source_provider: props.selectedContentItem.source_provider,
     status: props.selectedContentItem.status,
   }
+})
+
+const {
+  xhsGalleryTrack,
+  xhsGalleryIndex,
+  xhsGalleryImageCount,
+  canNavigateXhsGallery,
+  scrollXhsGallery,
+  syncXhsGalleryPosition,
+  handleXhsGalleryKeydown,
+  resetXhsGallery,
+} = useXhsGalleryController({
+  activeContentTab,
+  articlePreviewForTab: props.articlePreviewForTab,
 })
 
 const {
@@ -1054,8 +1066,7 @@ watch(
 
 watch(() => activeContentTab.value?.id, () => {
   clearFootnoteReturn()
-  xhsGalleryIndex.value = 0
-  void nextTick(() => xhsGalleryTrack.value?.scrollTo({ left: 0, behavior: 'auto' }))
+  resetXhsGallery()
 })
 
 watch(
@@ -1347,42 +1358,10 @@ function shouldShowXhsTextCapturePreview(tabId) {
     || Boolean(preview?.loading)
 }
 
-function xhsGalleryImageCount(tabId) {
-  return props.articlePreviewForTab(tabId)?.gallery?.length || 0
-}
-
-function canNavigateXhsGallery(tabId, direction) {
-  const next = xhsGalleryIndex.value + direction
-  return next >= 0 && next < xhsGalleryImageCount(tabId)
-}
-
 function contentHeroLayoutStyle(tabId) {
   if (hasMediaTranscriptWorkspace(tabId)) return { '--media-height': `${mediaTranscriptHeight.value}%` }
   if (hasXhsImageTextLayout(tabId)) return { '--xhs-image-height': `${xhsImageTextHeight.value}%` }
   return null
-}
-
-function scrollXhsGallery(direction) {
-  const track = xhsGalleryTrack.value
-  if (!track) return
-  const count = xhsGalleryImageCount(activeContentTab.value?.id)
-  const next = Math.max(0, Math.min(Math.max(0, count - 1), xhsGalleryIndex.value + direction))
-  if (next === xhsGalleryIndex.value) return
-  xhsGalleryIndex.value = next
-  track.scrollTo({ left: next * track.clientWidth, behavior: 'smooth' })
-}
-
-function syncXhsGalleryPosition() {
-  const track = xhsGalleryTrack.value
-  if (!track || track.clientWidth <= 0) return
-  const count = xhsGalleryImageCount(activeContentTab.value?.id)
-  xhsGalleryIndex.value = Math.max(0, Math.min(Math.max(0, count - 1), Math.round(track.scrollLeft / track.clientWidth)))
-}
-
-function handleXhsGalleryKeydown(event) {
-  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-  event.preventDefault()
-  scrollXhsGallery(event.key === 'ArrowLeft' ? -1 : 1)
 }
 
 function articlePreviewHtml(tabId) {
