@@ -7,7 +7,11 @@ import re
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-import httpx
+try:
+    from curl_cffi.requests import RequestsError
+except ImportError:  # Keep service startup available in partial dev environments.
+    class RequestsError(Exception):
+        pass
 from services.cache import cache_dir_for_url
 from services.paddle_ocr import OcrImageResult, is_paddle_ocr_configured, recognize_wechat_images
 from services.paddle_ocr_settings import paddle_ocr_model
@@ -144,16 +148,17 @@ def fetch_rss_article(
 def _fetch_rss_article_html(url: str) -> tuple[str, str]:
     current_url = str(url or "").strip()
     try:
-        with httpx.Client(headers=_RSS_ARTICLE_HEADERS, timeout=30.0, follow_redirects=False) as client:
-            response, final_url = get_public_http_response(
-                client,
-                current_url,
-                invalid_message="RSS 原文链接无效",
-                blocked_message="RSS 原文链接不可访问",
-                redirect_invalid_message="RSS 原文页面重定向地址无效",
-                redirect_limit_message="RSS 原文重定向次数过多",
-                max_redirects=_RSS_ARTICLE_MAX_REDIRECTS,
-            )
+        response, final_url = get_public_http_response(
+            current_url,
+            invalid_message="RSS 原文链接无效",
+            blocked_message="RSS 原文链接不可访问",
+            redirect_invalid_message="RSS 原文页面重定向地址无效",
+            redirect_limit_message="RSS 原文重定向次数过多",
+            max_redirects=_RSS_ARTICLE_MAX_REDIRECTS,
+            headers=_RSS_ARTICLE_HEADERS,
+            timeout=30.0,
+        )
+        try:
             response.raise_for_status()
             content_type = str(response.headers.get("content-type") or "").lower()
             if content_type and "html" not in content_type and "xhtml" not in content_type:
@@ -168,9 +173,11 @@ def _fetch_rss_article_html(url: str) -> tuple[str, str]:
             if len(content) > _RSS_ARTICLE_MAX_BYTES:
                 raise ValueError("RSS 原文页面过大，已跳过抓取")
             return final_url, response.text
+        finally:
+            response.close()
     except ValueError:
         raise
-    except httpx.HTTPError as exc:
+    except RequestsError as exc:
         raise ValueError(f"RSS 原文抓取失败：{exc}") from exc
     raise ValueError("RSS 原文重定向次数过多")
 

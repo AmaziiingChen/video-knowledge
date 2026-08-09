@@ -212,17 +212,17 @@ def test_pdf_json_lines_result_keeps_all_page_batches(monkeypatch):
         def json(self):
             raise ValueError("Extra data")
 
-    class StubSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
+        def close(self):
             return None
 
+    class StubSession:
         def get(self, *_args, **_kwargs):
             return JsonLinesResponse()
 
-    monkeypatch.setattr(paddle_ocr, "direct_requests_session", StubSession)
+        def close(self):
+            return None
+
+    monkeypatch.setattr(public_url, "_new_pinned_curl_session", lambda *_args, **_kwargs: StubSession())
     monkeypatch.setattr(
         public_url.socket,
         "getaddrinfo",

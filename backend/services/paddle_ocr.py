@@ -24,7 +24,6 @@ from services.paddle_ocr_settings import (
 from services.ocr_call_logger import record_ocr_call
 from services.article_image_storage import write_article_image_preview
 from services.wechat_browser import WECHAT_BROWSER_HEADERS
-from services.network_policy import direct_requests_session
 from services.public_url import get_public_http_response
 from services.telemetry import record as record_telemetry
 from services.database import connect, initialize_database, utc_now_iso
@@ -631,19 +630,18 @@ def resume_pending_ocr_jobs() -> None:
 
 def _download_image(url: str, *, article_url: str) -> tuple[bytes, str, str]:
     headers = {**WECHAT_BROWSER_HEADERS, "Referer": article_url}
-    with direct_requests_session() as session:
-        response, final_url = get_public_http_response(
-            session,
-            url,
-            invalid_message="图片地址无效",
-            blocked_message="图片地址不可访问",
-            redirect_invalid_message="图片地址重定向地址无效",
-            redirect_limit_message="图片地址重定向次数过多",
-            max_redirects=5,
-            headers=headers,
-            timeout=30,
-            stream=True,
-        )
+    response, final_url = get_public_http_response(
+        url,
+        invalid_message="图片地址无效",
+        blocked_message="图片地址不可访问",
+        redirect_invalid_message="图片地址重定向地址无效",
+        redirect_limit_message="图片地址重定向次数过多",
+        max_redirects=5,
+        headers=headers,
+        timeout=30,
+        stream=True,
+    )
+    try:
         response.raise_for_status()
         content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
         if content_type and not content_type.startswith("image/"):
@@ -658,6 +656,8 @@ def _download_image(url: str, *, article_url: str) -> tuple[bytes, str, str]:
             if total > MAX_IMAGE_BYTES:
                 raise ValueError("图片超过 20MB，已跳过")
             chunks.append(chunk)
+    finally:
+        response.close()
     payload = b"".join(chunks)
     if not payload:
         raise ValueError("图片内容为空")
@@ -794,36 +794,38 @@ def _retry_delay_seconds(response, attempt: int) -> float:
 
 
 def _download_markdown(url: str) -> str:
-    with direct_requests_session() as session:
-        response, _ = get_public_http_response(
-            session,
-            url,
-            invalid_message="图片地址无效",
-            blocked_message="图片地址不可访问",
-            redirect_invalid_message="图片地址重定向地址无效",
-            redirect_limit_message="图片地址重定向次数过多",
-            max_redirects=5,
-            timeout=30,
-        )
+    response, _ = get_public_http_response(
+        url,
+        invalid_message="图片地址无效",
+        blocked_message="图片地址不可访问",
+        redirect_invalid_message="图片地址重定向地址无效",
+        redirect_limit_message="图片地址重定向次数过多",
+        max_redirects=5,
+        timeout=30,
+    )
+    try:
         response.raise_for_status()
         return _clean_markdown(response.text)
+    finally:
+        response.close()
 
 
 def _download_json_result(url: str) -> str:
-    with direct_requests_session() as session:
-        response, _ = get_public_http_response(
-            session,
-            url,
-            invalid_message="图片地址无效",
-            blocked_message="图片地址不可访问",
-            redirect_invalid_message="图片地址重定向地址无效",
-            redirect_limit_message="图片地址重定向次数过多",
-            max_redirects=5,
-            timeout=30,
-        )
+    response, _ = get_public_http_response(
+        url,
+        invalid_message="图片地址无效",
+        blocked_message="图片地址不可访问",
+        redirect_invalid_message="图片地址重定向地址无效",
+        redirect_limit_message="图片地址重定向次数过多",
+        max_redirects=5,
+        timeout=30,
+    )
+    try:
         response.raise_for_status()
         texts = [_extract_json_result_text(payload) for payload in _json_result_objects(response)]
         return "\n\n".join(text for text in texts if text).strip()
+    finally:
+        response.close()
 
 
 def _json_result_objects(response: Any) -> list[dict[str, Any]]:

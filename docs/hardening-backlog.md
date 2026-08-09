@@ -21,9 +21,10 @@ lines.
   trusted desktop renderer, and reject non-loopback desktop binds.
 - [x] Validate every untrusted HTTP URL and redirect hop after DNS resolution;
   reject mixed/private/non-global answers before the request is issued.
-- [ ] Add connection-level DNS pinning (or an equivalent transport guarantee)
-  for untrusted remote fetches, so a hostname cannot rebind after validation
-  but before the HTTP client opens its socket.
+- [x] Pin every untrusted remote-fetch hop to the public addresses that were
+  just validated, while retaining the URL host for HTTP Host, TLS SNI and
+  certificate validation; this closes the validation-to-connect DNS-rebinding
+  window without weakening redirect checks.
 
 ## P1 — maintainability, test truthfulness, and resource control
 
