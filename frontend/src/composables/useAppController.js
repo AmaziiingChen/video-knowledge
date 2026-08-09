@@ -399,9 +399,6 @@ export function useAppController() {
   const creatingPromptFolderId = ref(null)
   const promptEditorName = ref('')
   const promptEditorText = ref('')
-  const inboxItems = ref([])
-  const loadingInbox = ref(false)
-  const processingInboxIds = ref(new Set())
   const batchTasks = ref([])
   const batchTaskIds = ref([])
   const batchTaskNames = ref({})
@@ -3033,19 +3030,6 @@ export function useAppController() {
     }
   }
 
-  async function loadInboxItems() {
-    loadingInbox.value = true
-    try {
-      const res = await axios.get(`${API}/inbox`, { timeout: 10000 })
-      inboxItems.value = res.data || []
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '读取收件箱失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '读取收件箱失败')
-    } finally {
-      loadingInbox.value = false
-    }
-  }
-
   async function loadTaskQueue() {
     if (taskQueueSyncing) return
     taskQueueSyncing = true
@@ -3103,42 +3087,6 @@ export function useAppController() {
       // 队列加载失败不影响单条处理。
     } finally {
       taskQueueSyncing = false
-    }
-  }
-
-  async function processInboxItem(item) {
-    if (!item?.id || processingInboxIds.value.has(item.id)) return
-    processingInboxIds.value = new Set([...processingInboxIds.value, item.id])
-    try {
-      const res = await axios.post(`${API}/inbox/${item.id}/process`, {
-        ...asrRequestOptions(),
-        ...aiRequestOptions(),
-        use_cache: useCache.value
-      }, { timeout: 10000 })
-      const taskId = res.data.task_id
-      const taskSummary = {
-        ...res.data,
-        content_item_id: res.data.item?.id || item.id,
-        status: res.data.task_status || 'queued',
-      }
-      if (taskId) {
-        batchTaskNames.value[taskId] = item.title || item.source_url || `任务 ${taskId}`
-        batchTaskIds.value = [...new Set([...batchTaskIds.value, taskId])]
-        mergeBatchTasks([taskSummary])
-        await hydrateProgressiveTask(taskSummary, progressiveTaskSnapshots.get(taskId))
-        await pollBatchTasks()
-      }
-      await loadInboxItems()
-      await syncVisibleProgressiveContent(taskSummary)
-      clipboardStatus.value = '已创建处理任务'
-      ElMessage.success('已加入处理队列')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '创建处理任务失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '创建处理任务失败')
-    } finally {
-      const next = new Set(processingInboxIds.value)
-      next.delete(item.id)
-      processingInboxIds.value = next
     }
   }
 
