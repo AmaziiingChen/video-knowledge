@@ -13,6 +13,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python scripts/check_public_release_tree.py
+      - run: python scripts/check_architecture_budget.py
 
   backend:
     runs-on: ubuntu-latest

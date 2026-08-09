@@ -2,6 +2,9 @@
 
 KnowledgeHub is a macOS-first, local-data-first knowledge workbench. This document describes the runtime boundaries that contributors should preserve and the module ownership that the codebase is moving toward. Product scope lives in `docs/product-development-plan.md`; visual contracts live in `DESIGN.md`.
 
+The post-`v0.1.0` feature freeze, version policy, architecture debt budget and
+hardening exit criteria live in `docs/architecture-hardening.md`.
+
 ## Runtime map
 
 ```mermaid
