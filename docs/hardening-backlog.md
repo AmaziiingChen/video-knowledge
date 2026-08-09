@@ -37,6 +37,10 @@ lines.
   the next behavior-preserving slice.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
+  The first library boundary, debounced global search and result hydration, now
+  lives in `features/library/useLibrarySearchController.js`; tree presentation,
+  task runtime, imports and assistant sessions remain in the facade pending
+  their own behavior-preserving slices.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test

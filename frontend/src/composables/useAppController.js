@@ -76,6 +76,7 @@ import { useSelectedTextContext } from '../features/assistant/useSelectedTextCon
 import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
+import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
 
 export function useAppController() {
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
@@ -209,13 +210,6 @@ export function useAppController() {
   const useCache = ref(true)
   const autoDownloadBilibiliVideo = ref(false)
   const douyinVideoQuality = ref('standard')
-  const searchQuery = ref('')
-  const librarySearchScope = ref('all')
-  const searchResults = ref([])
-  const searchResultContentItems = ref([])
-  const searchingContent = ref(false)
-  const searchTimer = ref(null)
-  let searchRequestVersion = 0
   const libraryFolders = ref([])
   // Archive rows are intentionally opt-in. They are merged into the current
   // tree only after a user expands a folder or completes a history sync.
@@ -488,6 +482,15 @@ export function useAppController() {
   const sidebarContentItems = computed(() => {
     return contentItems.value
   })
+
+  const {
+    searchQuery,
+    librarySearchScope,
+    searchResults,
+    searchResultContentItems,
+    searchContent,
+    disposeLibrarySearchController,
+  } = useLibrarySearchController({ recordTelemetry })
 
   const sidebarTreeItems = computed(() => {
     return searchQuery.value.trim() ? searchResultContentItems.value : sidebarContentItems.value
@@ -1469,30 +1472,6 @@ export function useAppController() {
   })
   watch(autoQaShortcutRecognition, persistAssistantSettings)
   watch(selectedTheme, persistAppearanceSettings)
-  watch([searchQuery, librarySearchScope], ([value]) => {
-    const requestVersion = ++searchRequestVersion
-    if (searchTimer.value) {
-      clearTimeout(searchTimer.value)
-      searchTimer.value = null
-    }
-    const query = value.trim()
-    if (!query) {
-      searchResults.value = []
-      searchResultContentItems.value = []
-      searchingContent.value = false
-      return
-    }
-    if (query.length < 2) {
-      searchResults.value = []
-      searchResultContentItems.value = []
-      searchingContent.value = false
-      return
-    }
-    searchTimer.value = setTimeout(() => {
-      searchContent(requestVersion)
-    }, 350)
-  })
-
   onMounted(async () => {
     restoreAsrSettings()
     const hasLocalAiSettings = restoreAiSettings()
@@ -1599,10 +1578,7 @@ export function useAppController() {
       contentStartupRetryTimer = null
     }
     window.removeEventListener('keydown', handleLibraryHistoryShortcut)
-    if (searchTimer.value) {
-      clearTimeout(searchTimer.value)
-      searchTimer.value = null
-    }
+    disposeLibrarySearchController()
   })
 
   async function loadArticlePreparationStatus() {
@@ -3785,46 +3761,6 @@ export function useAppController() {
     } catch (e) {
       const msg = e.response?.data?.detail || e.message || '删除提示词失败'
       ElMessage.error(typeof msg === 'string' ? msg : '删除提示词失败')
-    }
-  }
-
-  async function searchContent(requestVersion = ++searchRequestVersion) {
-    const query = searchQuery.value.trim()
-    if (!query) {
-      searchResults.value = []
-      searchResultContentItems.value = []
-      searchingContent.value = false
-      return
-    }
-
-    searchingContent.value = true
-    try {
-      const res = await axios.get(`${API}/search`, {
-        params: { q: query, scope: librarySearchScope.value, limit: 200 },
-        timeout: 10000
-      })
-      if (requestVersion !== searchRequestVersion) return
-      const results = Array.isArray(res.data) ? res.data : []
-      const contentItemIds = results.map((item) => item.content_key).filter(Boolean)
-      const resolved = contentItemIds.length
-        ? await axios.post(`${API}/content/items/resolve`, { content_item_ids: contentItemIds }, { timeout: 10000 })
-        : { data: [] }
-      if (requestVersion !== searchRequestVersion) return
-      const itemsById = new Map((resolved.data || []).map((item) => [String(item.id), item]))
-      searchResults.value = results
-      searchResultContentItems.value = contentItemIds
-        .map((id) => itemsById.get(String(id)))
-        .filter(Boolean)
-      const count = searchResultContentItems.value.length
-      const bucket = count === 0 ? '0' : (count <= 5 ? '1_5' : (count <= 20 ? '6_20' : '20_plus'))
-      void recordTelemetry('search_completed', { result_count_bucket: bucket })
-    } catch (e) {
-      if (requestVersion !== searchRequestVersion) return
-      searchResultContentItems.value = []
-      const msg = e.response?.data?.detail || e.message || '搜索失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '搜索失败')
-    } finally {
-      if (requestVersion === searchRequestVersion) searchingContent.value = false
     }
   }
 
