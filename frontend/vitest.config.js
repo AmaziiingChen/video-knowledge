@@ -12,6 +12,7 @@ export default defineConfig({
         'src/workbench/LibraryContextMenu.vue',
         'src/workbench/ReportCoverPreview.vue',
         'src/workbench/reportCoverPresentation.js',
+        'src/features/integrations/usePlatformCredentialController.js',
       ],
       reporter: ['text', 'json-summary'],
       thresholds: {
