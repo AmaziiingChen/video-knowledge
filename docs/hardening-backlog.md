@@ -45,6 +45,11 @@ lines.
   `services/knowledge_chunking.py`; `knowledge_v2.py` re-exports the former
   public chunking symbols so existing router, script and test imports remain
   compatible.
+- [ ] Split `campus_digest_generation.py` by source identity, event clustering,
+  fact extraction and editorial-generation responsibilities. Pure source URL
+  canonicalization, identity normalization, hashing and text-shingle similarity
+  now live in `services/campus_digest_identity.py`; the remaining generation
+  and persistence flow will be separated in behavior-preserving slices.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
   The first library boundary, debounced global search and result hydration, now

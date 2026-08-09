@@ -11,7 +11,6 @@ import re
 from threading import Lock
 from time import perf_counter
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from config import settings
 from services.ai_call_logger import record_ai_call, tracked_llm_provider
@@ -23,6 +22,10 @@ from services.campus_digest_editorial import (
     write_category_section as _write_category_section,
     write_overview as _write_overview,
 )
+from services.campus_digest_identity import canonical_url as _canonical_url
+from services.campus_digest_identity import normalize_identity as _normalize_identity
+from services.campus_digest_identity import source_hash as _source_hash
+from services.campus_digest_identity import text_shingle_similarity as _text_shingle_similarity
 from services.database import connect, initialize_database, utc_now_iso
 from services.llm_provider import LLMMessage, LLMProvider, LLMResponse, LLMUsage, default_llm_provider
 from services.llm_settings import campus_embedding_enabled
@@ -1648,38 +1651,6 @@ def _hashed_embedding(text: str, dimensions: int = 384) -> list[float]:
             vector[bucket] += sign
     norm = math.sqrt(sum(value * value for value in vector)) or 1.0
     return [value / norm for value in vector]
-
-
-def _text_shingle_similarity(left: str, right: str) -> float:
-    def shingles(value: str) -> set[str]:
-        normalized = _normalize_identity(value)[:12_000]
-        if len(normalized) < 8:
-            return {normalized} if normalized else set()
-        return {normalized[index : index + 8] for index in range(0, len(normalized) - 7, 3)}
-
-    left_set = shingles(left)
-    right_set = shingles(right)
-    if not left_set or not right_set:
-        return 0.0
-    return len(left_set & right_set) / len(left_set | right_set)
-
-
-def _canonical_url(value: str) -> str:
-    parsed = urlsplit(str(value or "").strip())
-    query = [
-        (key, val)
-        for key, val in parse_qsl(parsed.query, keep_blank_values=True)
-        if key.lower() not in {"scene", "from", "isappinstalled", "share_token", "timestamp"}
-    ]
-    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"), urlencode(query), ""))
-
-
-def _normalize_identity(value: Any) -> str:
-    return re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", str(value or "")).lower()
-
-
-def _source_hash(material: str) -> str:
-    return hashlib.sha256(str(material or "").encode("utf-8")).hexdigest()
 
 
 def _chat_json(
