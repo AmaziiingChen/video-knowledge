@@ -67,6 +67,7 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `features/assistant/useSelectedTextContext.js` | selected quote normalization and its explicit assistant-input token | reader DOM selection, Q&A transport, document persistence |
 | `features/prompts/useWechatReportPromptController.js` | report-prompt loading, selection, editing and save boundary | prompt file tabs, report generation, account subscriptions |
 | `workbench/usePreviewFindController.js` | find-bar state, local highlighting, navigation and cleanup | deciding which reader DOM is active, webview implementation details |
+| `workbench/useMediaTranscriptWorkspaceController.js` | timed-media timeline state, reader split resizing, playback-following and cleanup | content ingestion, player implementation, article rendering and source persistence |
 | `services/group_report_models.py` | immutable report inputs, outputs and progress contracts | model calls, persistence, Markdown rendering |
 | `services/group_report_markdown.py` | deterministic citation and Markdown normalization | report planning, provider calls, summary cache, task state |
 | `routers/content_usage.py` | AI/OCR call history and daily usage observability HTTP transport | library content mutation, capture, folder or import behavior |

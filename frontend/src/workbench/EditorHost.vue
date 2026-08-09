@@ -655,10 +655,6 @@ import {
 import { shouldClaimReaderFocus } from './readerPointerFocus.js'
 import { shouldShowArticlePreviewLoader } from '../features/library/articlePreviewLoadState.js'
 import {
-  clampVerticalContentSplit,
-  verticalContentSplitBounds,
-} from './splitterDragState.js'
-import {
   parseWechatRemoteSelectionMessage,
   wechatRemoteSelectionBridgeScript,
 } from './wechatRemoteSelection.js'
@@ -676,8 +672,9 @@ import ReadingProgressControl from './ReadingProgressControl.vue'
 import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
 import { usePreviewFindController } from './usePreviewFindController.js'
+import { useMediaTranscriptWorkspaceController } from './useMediaTranscriptWorkspaceController.js'
 import { createContentActionMenuModel } from './contentActionMenuModel.js'
-import { activeTimelineSegmentKey, formatTimelineTime, mediaTranscriptState, timelineSegmentKey } from './mediaTranscriptModel.js'
+import { formatTimelineTime } from './mediaTranscriptModel.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
 const ArtAudioPlayer = defineAsyncComponent(() => import('./ArtAudioPlayer.vue'))
@@ -756,7 +753,6 @@ const emit = defineEmits([
 ])
 
 const activePlayer = ref(null)
-const isAudioPlaying = ref(false)
 const contentHero = ref(null)
 const reportReader = ref(null)
 const reportMarkdown = ref(null)
@@ -829,28 +825,7 @@ const selectedTextActionStyle = computed(() => {
     '--reader-selection-tail-bottom': opensAbove ? '-4px' : 'auto',
   }
 })
-const mediaTranscriptHeight = ref(readStoredVerticalSplit('knowledgehub.media-transcript-height.v1'))
-const mediaTranscriptResizing = ref(false)
-const xhsImageTextHeight = ref(readStoredVerticalSplit('knowledgehub.xhs-image-text-height.v1'))
-const xhsImageTextResizing = ref(false)
 const xhsGalleryIndex = ref(0)
-const currentPlaybackTime = ref(0)
-const activeTimelineKey = ref('')
-const transcriptAutoFollow = ref(true)
-const timelineSegmentRefs = new Map()
-let transcriptScrollTimer = null
-let mediaTranscriptResizeStart = null
-let xhsImageTextResizeStart = null
-let contentHeroResizeObserver = null
-
-function readStoredVerticalSplit(key) {
-  try {
-    const value = Number(localStorage.getItem(key))
-    return Number.isFinite(value) ? Math.max(25, Math.min(75, value)) : 56
-  } catch {
-    return 56
-  }
-}
 
 const activeContentTab = computed(() => {
   if (props.activeWorkspaceTab) return props.activeWorkspaceTab
@@ -863,6 +838,48 @@ const activeContentTab = computed(() => {
     source_provider: props.selectedContentItem.source_provider,
     status: props.selectedContentItem.status,
   }
+})
+
+const {
+  dispose: disposeMediaTranscriptWorkspace,
+  handleAudioPlaybackChange,
+  handleMediaTranscriptKeydown,
+  handlePlayerTimeUpdate,
+  handleTimelineSegmentClick,
+  handleXhsImageTextKeydown,
+  hasMediaTranscriptWorkspace,
+  hasTranscriptTimeline,
+  isAudioPlaying,
+  isTimelineSegmentActive,
+  mediaTranscriptHeight,
+  mediaTranscriptResizing,
+  mount: mountMediaTranscriptWorkspace,
+  pauseTranscriptAutoFollow,
+  resetActiveMediaState,
+  resumeTranscriptAutoFollow,
+  seekToTimestamp,
+  setTimelineSegmentRef,
+  shouldShowTranscriptGeneration,
+  startMediaTranscriptResize,
+  startXhsImageTextResize,
+  timelineSegmentsForTab,
+  transcriptAutoFollow,
+  transcriptGenerationDescription,
+  transcriptGenerationLabel,
+  verticalContentBounds,
+  xhsImageTextHeight,
+  xhsImageTextResizing,
+  toggleActiveAudioPlayback,
+} = useMediaTranscriptWorkspaceController({
+  contentHero,
+  activeContentTab,
+  activePlayer,
+  contentForTab: props.contentForTab,
+  isAudioTab,
+  isArticleTab,
+  isTimedMediaTab,
+  resultForTab: props.resultForTab,
+  transcriptForTab: props.transcriptForTab,
 })
 
 const activeWechatContent = computed(() => {
@@ -995,10 +1012,7 @@ watch(
 watch(
   () => activeContentTab.value?.id || '',
   () => {
-    currentPlaybackTime.value = 0
-    isAudioPlaying.value = false
-    activeTimelineKey.value = ''
-    transcriptAutoFollow.value = true
+    resetActiveMediaState()
     clearSelectedTextAction()
     detachReadingProgressFrame()
     readingProgress.value = 0
@@ -1038,29 +1052,11 @@ watch(
   }
 )
 
-watch(
-  () => [
-    activeContentTab.value?.id || '',
-    currentPlaybackTime.value,
-    timelineSegmentsForTab(activeContentTab.value?.id)
-      .map((segment) => `${segment.position}:${segment.start_seconds}`)
-      .join('|')
-  ],
-  () => {
-    activeTimelineKey.value = findActiveTimelineKey(activeContentTab.value?.id)
-  },
-  { flush: 'post' }
-)
-
 watch(() => activeContentTab.value?.id, () => {
   clearFootnoteReturn()
   xhsGalleryIndex.value = 0
   void nextTick(() => xhsGalleryTrack.value?.scrollTo({ left: 0, behavior: 'auto' }))
 })
-
-watch(activeTimelineKey, () => {
-  scheduleActiveTranscriptScroll()
-}, { flush: 'post' })
 
 watch(
   () => [
@@ -1078,18 +1074,11 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  stopMediaTranscriptResize()
-  stopXhsImageTextResize()
-  contentHeroResizeObserver?.disconnect()
-  contentHeroResizeObserver = null
+  disposeMediaTranscriptWorkspace()
   for (const contentItemId of wechatRemoteLoadTimers.keys()) clearWechatRemoteLoadTimer(contentItemId)
   for (const contentItemId of wechatRemoteWebviews.keys()) setWechatRemoteWebview(contentItemId, null)
   wechatRemoteWebviews.clear()
   wechatRemoteFindRequestIds.clear()
-  if (transcriptScrollTimer) {
-    clearTimeout(transcriptScrollTimer)
-    transcriptScrollTimer = null
-  }
   disposePreviewFindController()
   if (selectedTextActionRevealFrame) {
     window.cancelAnimationFrame(selectedTextActionRevealFrame)
@@ -1112,15 +1101,10 @@ onBeforeUnmount(() => {
   articlePreviewSelectionDocument = null
   removeDesktopPreviewFindListener?.()
   removeDesktopPreviewFindListener = null
-  timelineSegmentRefs.clear()
 })
 
 onMounted(() => {
-  constrainVerticalContentSplits()
-  if (typeof ResizeObserver === 'function') {
-    contentHeroResizeObserver = new ResizeObserver(() => constrainVerticalContentSplits())
-    if (contentHero.value) contentHeroResizeObserver.observe(contentHero.value)
-  }
+  mountMediaTranscriptWorkspace()
   window.addEventListener('keydown', handlePreviewFindShortcut, true)
   document.addEventListener('selectionchange', handleDocumentSelectionChange)
   document.addEventListener('pointerdown', handleSelectedTextPointerDown, true)
@@ -1129,14 +1113,6 @@ onMounted(() => {
   removeDesktopPreviewFindListener = window.knowledgeHubDesktop?.onPreviewFind?.(handleDesktopPreviewFindShortcut) || null
   scheduleReadingProgressRefresh()
 })
-
-watch(contentHero, (element, previousElement) => {
-  if (previousElement) contentHeroResizeObserver?.unobserve(previousElement)
-  if (element) {
-    contentHeroResizeObserver?.observe(element)
-    constrainVerticalContentSplits()
-  }
-}, { flush: 'post' })
 
 function contentDetailRows(tabId) {
   const content = props.contentForTab(tabId)
@@ -2302,274 +2278,6 @@ function formatDocumentSize(content) {
   const storedMarkdownSize = Number(content?.markdown_size_bytes || 0)
   const markdownSize = liveMarkdownSize || storedMarkdownSize
   return markdownSize > 0 ? props.formatBytes(markdownSize) : '—'
-}
-
-function timelineSegmentsForTab(tabId) {
-  const content = props.contentForTab(tabId)
-  return mediaTranscriptState({
-    isTimedMedia: isTimedMediaTab(tabId),
-    contentStatus: content?.status,
-    segments: content?.transcript_segments,
-    fallbackTranscript: props.transcriptForTab(tabId),
-    taskStatus: props.resultForTab(tabId)?.status,
-    taskStep: props.resultForTab(tabId)?.step,
-  }).timelineSegments
-}
-
-function hasTranscriptTimeline(tabId) {
-  // A source document can expose its text through transcriptForTab for search
-  // and reader metadata. That text is not timed media, so it must never turn
-  // a Markdown/report reader into the timed-media transcript workspace.
-  return mediaTranscriptState({ isTimedMedia: isTimedMediaTab(tabId), segments: props.contentForTab(tabId)?.transcript_segments, fallbackTranscript: props.transcriptForTab(tabId) }).hasTimeline
-}
-
-function shouldShowTranscriptGeneration(tabId) {
-  const task = props.resultForTab(tabId) || {}
-  return mediaTranscriptState({ isTimedMedia: isTimedMediaTab(tabId), contentStatus: props.contentForTab(tabId)?.status, segments: props.contentForTab(tabId)?.transcript_segments, fallbackTranscript: props.transcriptForTab(tabId), taskStatus: task.status, taskStep: task.step }).showGeneration
-}
-
-function hasMediaTranscriptWorkspace(tabId) {
-  return hasTranscriptTimeline(tabId) || shouldShowTranscriptGeneration(tabId)
-}
-
-function transcriptGenerationLabel(tabId) {
-  return mediaTranscriptState({ taskStep: props.resultForTab(tabId)?.step }).label
-}
-
-function transcriptGenerationDescription(tabId) {
-  return mediaTranscriptState({ taskStep: props.resultForTab(tabId)?.step }).description
-}
-
-function verticalContentBounds() {
-  return verticalContentSplitBounds(contentHero.value?.clientHeight || 0)
-}
-
-function clampVerticalContentHeight(value) {
-  return clampVerticalContentSplit(value, contentHero.value?.clientHeight || 0)
-}
-
-function constrainVerticalContentSplits() {
-  mediaTranscriptHeight.value = clampVerticalContentHeight(mediaTranscriptHeight.value)
-  xhsImageTextHeight.value = clampVerticalContentHeight(xhsImageTextHeight.value)
-}
-
-function persistVerticalContentSplit(key, value) {
-  try {
-    localStorage.setItem(key, String(value))
-  } catch {
-    // The current layout remains usable when storage is unavailable.
-  }
-}
-
-function startMediaTranscriptResize(event) {
-  const container = contentHero.value
-  if (!container) return
-  const rect = container.getBoundingClientRect()
-  if (rect.height <= 0) return
-  event.preventDefault()
-  stopMediaTranscriptResize()
-  lockTextSelection()
-  mediaTranscriptResizeStart = {
-    top: rect.top,
-    height: rect.height,
-    pointerId: event.pointerId,
-    element: event.currentTarget,
-  }
-  mediaTranscriptResizing.value = true
-  event.currentTarget.setPointerCapture?.(event.pointerId)
-  window.addEventListener('pointermove', resizeMediaTranscript)
-  window.addEventListener('pointerup', stopMediaTranscriptResize)
-  window.addEventListener('pointercancel', stopMediaTranscriptResize)
-}
-
-function resizeMediaTranscript(event) {
-  if (!mediaTranscriptResizeStart || event.pointerId !== mediaTranscriptResizeStart.pointerId) return
-  event.preventDefault()
-  const offset = event.clientY - mediaTranscriptResizeStart.top
-  const next = Math.round((offset / mediaTranscriptResizeStart.height) * 100)
-  mediaTranscriptHeight.value = clampVerticalContentHeight(next)
-}
-
-function stopMediaTranscriptResize(event, shouldPersist = event?.type === 'pointerup') {
-  if (event?.pointerId !== undefined && mediaTranscriptResizeStart && event.pointerId !== mediaTranscriptResizeStart.pointerId) return
-  window.removeEventListener('pointermove', resizeMediaTranscript)
-  window.removeEventListener('pointerup', stopMediaTranscriptResize)
-  window.removeEventListener('pointercancel', stopMediaTranscriptResize)
-  const resizeStart = mediaTranscriptResizeStart
-  mediaTranscriptResizeStart = null
-  if (resizeStart?.element?.hasPointerCapture?.(resizeStart.pointerId)) {
-    resizeStart.element.releasePointerCapture?.(resizeStart.pointerId)
-  }
-  const wasResizing = mediaTranscriptResizing.value
-  mediaTranscriptResizing.value = false
-  unlockTextSelection()
-  if (shouldPersist && wasResizing) {
-    persistVerticalContentSplit('knowledgehub.media-transcript-height.v1', mediaTranscriptHeight.value)
-  }
-}
-
-function handleMediaTranscriptKeydown(event) {
-  const bounds = verticalContentBounds()
-  let next = mediaTranscriptHeight.value
-  if (event.key === 'ArrowUp') next -= 5
-  else if (event.key === 'ArrowDown') next += 5
-  else if (event.key === 'Home') next = bounds.min
-  else if (event.key === 'End') next = bounds.max
-  else return
-  event.preventDefault()
-  mediaTranscriptHeight.value = clampVerticalContentHeight(next)
-  persistVerticalContentSplit('knowledgehub.media-transcript-height.v1', mediaTranscriptHeight.value)
-}
-
-function startXhsImageTextResize(event) {
-  const container = contentHero.value
-  if (!container) return
-  const rect = container.getBoundingClientRect()
-  if (rect.height <= 0) return
-  event.preventDefault()
-  stopXhsImageTextResize()
-  lockTextSelection()
-  xhsImageTextResizeStart = {
-    top: rect.top,
-    height: rect.height,
-    pointerId: event.pointerId,
-    element: event.currentTarget,
-  }
-  xhsImageTextResizing.value = true
-  event.currentTarget.setPointerCapture?.(event.pointerId)
-  window.addEventListener('pointermove', resizeXhsImageText)
-  window.addEventListener('pointerup', stopXhsImageTextResize)
-  window.addEventListener('pointercancel', stopXhsImageTextResize)
-}
-
-function resizeXhsImageText(event) {
-  if (!xhsImageTextResizeStart || event.pointerId !== xhsImageTextResizeStart.pointerId) return
-  event.preventDefault()
-  const offset = event.clientY - xhsImageTextResizeStart.top
-  const next = Math.round((offset / xhsImageTextResizeStart.height) * 100)
-  xhsImageTextHeight.value = clampVerticalContentHeight(next)
-}
-
-function stopXhsImageTextResize(event, shouldPersist = event?.type === 'pointerup') {
-  if (event?.pointerId !== undefined && xhsImageTextResizeStart && event.pointerId !== xhsImageTextResizeStart.pointerId) return
-  window.removeEventListener('pointermove', resizeXhsImageText)
-  window.removeEventListener('pointerup', stopXhsImageTextResize)
-  window.removeEventListener('pointercancel', stopXhsImageTextResize)
-  const resizeStart = xhsImageTextResizeStart
-  xhsImageTextResizeStart = null
-  if (resizeStart?.element?.hasPointerCapture?.(resizeStart.pointerId)) {
-    resizeStart.element.releasePointerCapture?.(resizeStart.pointerId)
-  }
-  const wasResizing = xhsImageTextResizing.value
-  xhsImageTextResizing.value = false
-  unlockTextSelection()
-  if (shouldPersist && wasResizing) {
-    persistVerticalContentSplit('knowledgehub.xhs-image-text-height.v1', xhsImageTextHeight.value)
-  }
-}
-
-function handleXhsImageTextKeydown(event) {
-  const bounds = verticalContentBounds()
-  let next = xhsImageTextHeight.value
-  if (event.key === 'ArrowUp') next -= 5
-  else if (event.key === 'ArrowDown') next += 5
-  else if (event.key === 'Home') next = bounds.min
-  else if (event.key === 'End') next = bounds.max
-  else return
-  event.preventDefault()
-  xhsImageTextHeight.value = clampVerticalContentHeight(next)
-  persistVerticalContentSplit('knowledgehub.xhs-image-text-height.v1', xhsImageTextHeight.value)
-}
-
-function lockTextSelection() {
-  window.getSelection?.()?.removeAllRanges()
-  document.body.classList.add('workspace-resizing')
-}
-
-function unlockTextSelection() {
-  document.body.classList.remove('workspace-resizing')
-}
-
-function handlePlayerTimeUpdate(seconds) {
-  const value = Number(seconds)
-  currentPlaybackTime.value = Number.isFinite(value) ? value : 0
-}
-
-function handleAudioPlaybackChange(playing) {
-  isAudioPlaying.value = Boolean(playing)
-}
-
-function toggleActiveAudioPlayback() {
-  if (!isAudioTab(activeContentTab.value?.id)) return
-  void activePlayer.value?.togglePlayback?.()
-}
-
-function isTimelineSegmentActive(tabId, segment) {
-  return timelineSegmentKey(tabId, segment) === activeTimelineKey.value
-}
-
-function findActiveTimelineKey(tabId) {
-  if (!tabId || tabId !== activeContentTab.value?.id) return ''
-  return activeTimelineSegmentKey({ tabId, activeTabId: activeContentTab.value?.id, segments: timelineSegmentsForTab(tabId), playbackTime: currentPlaybackTime.value })
-}
-
-function setTimelineSegmentRef(tabId, segment, el) {
-  const key = timelineSegmentKey(tabId, segment)
-  if (el) {
-    timelineSegmentRefs.set(key, el)
-  } else {
-    timelineSegmentRefs.delete(key)
-  }
-}
-
-function scheduleActiveTranscriptScroll() {
-  if (!transcriptAutoFollow.value || !activeTimelineKey.value) return
-  if (transcriptScrollTimer) clearTimeout(transcriptScrollTimer)
-  transcriptScrollTimer = setTimeout(async () => {
-    transcriptScrollTimer = null
-    await nextTick()
-    if (!transcriptAutoFollow.value) return
-    timelineSegmentRefs.get(activeTimelineKey.value)?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center'
-    })
-  }, 90)
-}
-
-function pauseTranscriptAutoFollow() {
-  transcriptAutoFollow.value = false
-}
-
-function resumeTranscriptAutoFollow() {
-  transcriptAutoFollow.value = true
-  scheduleActiveTranscriptScroll()
-}
-
-function handleTimelineSegmentClick(tabId, seconds) {
-  const value = Number(seconds)
-  if (Number.isFinite(value)) {
-    currentPlaybackTime.value = value
-    activeTimelineKey.value = findActiveTimelineKey(tabId)
-  }
-  transcriptAutoFollow.value = true
-  scheduleActiveTranscriptScroll()
-  seekMedia(tabId, seconds)
-}
-
-function seekMedia(tabId, seconds) {
-  const value = Number(seconds)
-  if (!Number.isFinite(value)) return
-  if (tabId !== activeContentTab.value?.id) return
-  activePlayer.value?.seek(value)
-}
-
-function seekToTimestamp(seconds) {
-  const tab = activeContentTab.value
-  if (!tab || isArticleTab(tab.id) || !activePlayer.value) return false
-  const value = Number(seconds)
-  if (!Number.isFinite(value) || value < 0) return false
-  handleTimelineSegmentClick(tab.id, value)
-  return true
 }
 
 function focusSourceReader() {
