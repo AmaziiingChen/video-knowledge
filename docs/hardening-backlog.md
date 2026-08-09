@@ -133,6 +133,11 @@ lines.
   The user-triggered article reading endpoint now lives in
   `routers/content_preview.py`; background capture remains a separate
   follow-up cut.
+- [ ] Split `campus_sources.py` by source catalog, list discovery, procurement
+  adapters and article extraction. OCR-document Markdown rendering, math-token
+  marking and table-header promotion now live in
+  `services/campus_document_rendering.py`; `campus_sources.py` retains its
+  public renderer import and private caller alias for compatibility.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now

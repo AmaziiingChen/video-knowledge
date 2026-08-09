@@ -13,7 +13,10 @@ import requests
 
 from services.network_policy import direct_requests_session
 from bs4 import BeautifulSoup, Tag
-from markdown_it import MarkdownIt
+from services.campus_document_rendering import (
+    render_document_markdown_html,  # noqa: F401 - public compatibility re-export
+    text_to_article_html as _text_to_article_html,
+)
 from services.paddle_ocr import OcrImageResult, recognize_document_bytes
 from services.published_at import extract_published_at
 
@@ -59,15 +62,6 @@ _PROCUREMENT_PROVIDER_HOST = "provider.yuncaitong.cn"
 _PROCUREMENT_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9]{8,80}$")
 _PROCUREMENT_PUBLISH_FRAGMENT_RE = re.compile(r"(?:^|/)publish/([A-Za-z0-9]{8,80})(?:$|/)")
 _CHINA_TIMEZONE = timezone(timedelta(hours=8))
-_DOCUMENT_MARKDOWN_RENDERER = MarkdownIt("commonmark", {"html": True})
-_DOCUMENT_MATH_BLOCK_RE = re.compile(
-    r"(?P<dollar>\$\$\s*(?P<dollar_value>[\s\S]*?)\s*\$\$)|"
-    r"(?P<bracket>\\\[\s*(?P<bracket_value>[\s\S]*?)\s*\\\])"
-)
-_DOCUMENT_MATH_INLINE_RE = re.compile(
-    r"(?P<dollar>\$(?!\$)\s*(?P<dollar_value>[^\n$]{1,4000}?)\s*\$(?!\$))|"
-    r"(?P<paren>\\\(\s*(?P<paren_value>[^\n]{1,4000}?)\s*\\\))"
-)
 _PROCUREMENT_SECTION_PARAMS: dict[str, dict[str, object]] = {
     "采购公告": {
         "type": ("ZCXQ", "YQXQ", "BYXQ", "CSXQ"),
@@ -1023,96 +1017,6 @@ def _procurement_document_ocr_metadata(ocr: OcrImageResult) -> dict[str, object]
         "cloud_submitted": ocr.cloud_submitted,
         "error": ocr.error,
     }
-
-
-def render_document_markdown_html(text: str) -> str:
-    """Render PaddleOCR document Markdown for the existing article reader.
-
-    PaddleOCR intentionally returns Markdown for document OCR: headings and
-    lists retain their document structure, while complex tables are emitted as
-    embedded HTML.  Treating every line as escaped text made both forms appear
-    literally in the reader.  The article preview normalizer remains the
-    security boundary for this generated fragment.
-    """
-    prepared = _replace_document_math_tokens(str(text or "").strip())
-    rendered = _DOCUMENT_MARKDOWN_RENDERER.render(prepared)
-    rendered = _promote_document_table_headers(rendered)
-    return "<article class=\"procurement-pdf-content\">" + rendered + "</article>"
-
-
-def _replace_document_math_tokens(text: str) -> str:
-    """Mark constrained LaTeX tokens for the reader's deterministic renderer.
-
-    OCR models commonly emit spaces just inside ``$`` delimiters.  CommonMark
-    does not understand LaTeX, so retain the original document semantics in a
-    safe data attribute instead of treating it as literal prose.  The iframe
-    renderer later turns only these marked values into MathML with KaTeX.
-    """
-    def replacement(match: re.Match[str], *, display: bool) -> str:
-        value = next((match.group(name) for name in ("dollar_value", "bracket_value", "paren_value") if match.groupdict().get(name) is not None), "")
-        expression = str(value or "").strip()
-        if not _looks_like_document_math(expression):
-            return match.group(0)
-        encoded = html.escape(expression, quote=True)
-        fallback = html.escape(expression)
-        return (
-            f'<span class="article-math" data-latex="{encoded}" '
-            f'data-display="{"block" if display else "inline"}">{fallback}</span>'
-        )
-
-    text = _DOCUMENT_MATH_BLOCK_RE.sub(lambda match: replacement(match, display=True), text)
-    return _DOCUMENT_MATH_INLINE_RE.sub(lambda match: replacement(match, display=False), text)
-
-
-def _looks_like_document_math(expression: str) -> bool:
-    if not expression or len(expression) > 4000 or "\x00" in expression:
-        return False
-    # Do not mistake currency fragments for math.  OCR LaTeX normally carries
-    # a command, braces, or an explicit mathematical operator/subscript.
-    return bool(re.search(r"\\[A-Za-z]+|[{}_^]|(?:<=|>=|≤|≥|≈|≠|=)", expression))
-
-
-def _text_to_article_html(text: str) -> str:
-    """Compatibility alias for existing procurement PDF callers."""
-    return render_document_markdown_html(text)
-
-
-_DOCUMENT_TABLE_HEADER_HINT_RE = re.compile(
-    r"(?:序号|项目|名称|型号|规格|数量|单位|品牌|预算|金额|日期|时间|联系人|地址|内容|要求|类别|标的|备注|姓名|学院|结果)"
-)
-
-
-def _promote_document_table_headers(fragment: str) -> str:
-    """Give OCR document tables semantic headers without losing merged cells."""
-    soup = BeautifulSoup(fragment, "html.parser")
-    for table in soup.find_all("table"):
-        rows = table.find_all("tr")
-        if not rows:
-            continue
-        header_rows = [rows[0]]
-        first_cells = rows[0].find_all(["td", "th"], recursive=False)
-        if any(str(cell.get("colspan") or "1") not in {"", "1"} for cell in first_cells) and len(rows) > 1:
-            header_rows.append(rows[1])
-        for row in header_rows:
-            cells = row.find_all(["td", "th"], recursive=False)
-            if not _looks_like_document_header_row(cells):
-                continue
-            for cell in cells:
-                if cell.name == "td":
-                    cell.name = "th"
-                if not cell.get("scope"):
-                    cell["scope"] = "colgroup" if str(cell.get("colspan") or "1") not in {"", "1"} else "col"
-    return "".join(str(node) for node in soup.contents)
-
-
-def _looks_like_document_header_row(cells: list[Tag]) -> bool:
-    if len(cells) < 2 or any(not cell.get_text(" ", strip=True) for cell in cells):
-        return False
-    labels = [cell.get_text(" ", strip=True) for cell in cells]
-    if any(len(label) > 32 for label in labels):
-        return False
-    hits = sum(bool(_DOCUMENT_TABLE_HEADER_HINT_RE.search(label)) for label in labels)
-    return hits >= max(1, (len(labels) + 1) // 2)
 
 
 def _procurement_fallback_article(
