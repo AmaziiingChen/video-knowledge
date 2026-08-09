@@ -72,6 +72,8 @@ lines.
 - [x] Extract report-generation SSE decoding from `App.vue`; preserve local
   capability headers, fragmented event handling and explicit server errors in
   `features/reports/reportEventStream.js` with protocol-level tests.
+- [x] Extract WeChat RSS copying and credential-free subscription export from
+  `App.vue` into `features/wechat/useWechatFeedExportController.js`.
 - [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
   tree, drag, search and trash behavior at their owners.
   Local tree-preference persistence plus pure tree-node construction, unread

@@ -870,6 +870,7 @@ import { useWechatFilterController } from './features/wechat/useWechatFilterCont
 import { useWechatReportGroupController } from './features/wechat/useWechatReportGroupController.js'
 import { useWechatSubscriptionSyncController } from './features/wechat/useWechatSubscriptionSyncController.js'
 import { useWechatSubscriptionManagementController } from './features/wechat/useWechatSubscriptionManagementController.js'
+import { useWechatFeedExportController } from './features/wechat/useWechatFeedExportController.js'
 import { useLibrarySourceGroupController } from './features/library/useLibrarySourceGroupController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
@@ -1785,6 +1786,11 @@ const {
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 
+const { copyWeChatRss, exportWeChatSubscriptions } = useWechatFeedExportController({
+  feedApi: WECHAT_FEED_API,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
 function formatWeChatInterval(minutes) {
   const value = Number(minutes)
   if (!Number.isFinite(value) || value <= 0) return '自动检查'
@@ -2194,33 +2200,6 @@ async function consumeWeChatReportStream(groupId, reportType, options, onProgres
   payload.include_external_imports = options.includeExternalImports === true
   if (options?.fileName) payload.file_name = options.fileName
   return consumeReportEventStream(`${WECHAT_REPORT_GROUP_API}/${groupId}/generate-stream`, payload, onProgress)
-}
-
-async function copyWeChatRss(subscriptionId = '') {
-  const suffix = subscriptionId ? `/rss/${subscriptionId}.xml` : '/rss.xml'
-  const url = `${WECHAT_FEED_API}${suffix}`
-  try {
-    await navigator.clipboard.writeText(url)
-    ElMessage.success(subscriptionId ? '单公众号 RSS 地址已复制' : '聚合 RSS 地址已复制')
-  } catch {
-    ElMessage.error('无法复制 RSS 地址，请检查系统剪贴板权限')
-  }
-}
-
-async function exportWeChatSubscriptions() {
-  try {
-    const response = await axios.get(`${WECHAT_FEED_API}/subscriptions.json`, { timeout: 10000 })
-    const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'knowledgehub-wechat-subscriptions.json'
-    anchor.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('订阅配置已导出，不包含登录凭据')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '导出订阅配置失败'))
-  }
 }
 
 function statusbarDirectoryName(value) {
