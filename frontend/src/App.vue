@@ -1680,8 +1680,6 @@ const wechatSyncIntervalOptions = [
   { label: '每 12 小时', value: 720 },
   { label: '每天', value: 1440 }
 ]
-const wechatInitialSyncPollTimers = new Map()
-const wechatInitialSyncImportedCounts = new Map()
 let wechatInitialSyncListPollTimer = null
 let wechatIncrementalLibraryRefreshInFlight = false
 let wechatIncrementalLibraryRefreshQueued = false
@@ -2035,12 +2033,6 @@ function upsertWeChatSubscription(subscription) {
   ))
 }
 
-function stopWeChatInitialSyncPolling(subscriptionId) {
-  const timer = wechatInitialSyncPollTimers.get(subscriptionId)
-  if (timer) clearTimeout(timer)
-  wechatInitialSyncPollTimers.delete(subscriptionId)
-}
-
 async function refreshLibraryForWeChatIncrement() {
   if (wechatIncrementalLibraryRefreshInFlight) {
     wechatIncrementalLibraryRefreshQueued = true
@@ -2058,50 +2050,6 @@ async function refreshLibraryForWeChatIncrement() {
       void refreshLibraryForWeChatIncrement()
     }
   }
-}
-
-function pollWeChatInitialSync(subscription, accountId, fakeid, attempt = 0) {
-  stopWeChatInitialSyncPolling(subscription.id)
-  const timer = setTimeout(async () => {
-    try {
-      const response = await axios.get(
-        `${WECHAT_SUBSCRIPTION_API}/${subscription.id}/initial-sync`,
-        { timeout: 10000 }
-      )
-      const status = response.data?.status || 'idle'
-      if (status === 'queued' || status === 'running') {
-        const importedCount = Number(response.data?.imported_count || 0)
-        const previousImportedCount = Number(wechatInitialSyncImportedCounts.get(subscription.id) || 0)
-        if (importedCount > previousImportedCount) {
-          wechatInitialSyncImportedCounts.set(subscription.id, importedCount)
-          void refreshLibraryForWeChatIncrement()
-        }
-        setWeChatSubscriptionState(accountId, fakeid, 'checking')
-        pollWeChatInitialSync(subscription, accountId, fakeid, attempt + 1)
-        return
-      }
-      const subscriptionResponse = await axios.get(
-        `${WECHAT_SUBSCRIPTION_API}/${subscription.id}`,
-        { timeout: 10000 }
-      )
-      upsertWeChatSubscription(subscriptionResponse.data)
-      await refreshLibraryForWeChatIncrement()
-      setWeChatSubscriptionState(accountId, fakeid)
-      stopWeChatInitialSyncPolling(subscription.id)
-      wechatInitialSyncImportedCounts.delete(subscription.id)
-      if (status === 'failed') ElMessage.warning(`${subscription.mp_name || '公众号'}已订阅，但首次检查失败，可稍后手动检查`)
-    } catch (error) {
-      if (attempt < 120) {
-        pollWeChatInitialSync(subscription, accountId, fakeid, attempt + 1)
-        return
-      }
-      setWeChatSubscriptionState(accountId, fakeid)
-      stopWeChatInitialSyncPolling(subscription.id)
-      wechatInitialSyncImportedCounts.delete(subscription.id)
-      ElMessage.warning(`${subscription.mp_name || '公众号'}已订阅，首次检查仍在后台进行`)
-    }
-  }, attempt ? 1500 : 500)
-  wechatInitialSyncPollTimers.set(subscription.id, timer)
 }
 
 async function subscribeWeChatAccount(item) {
@@ -3189,7 +3137,6 @@ onBeforeUnmount(() => {
   disposeWechatCoverController()
   disposeWechatDraftController()
   stopWeChatInitialSyncListPolling()
-  for (const subscriptionId of wechatInitialSyncPollTimers.keys()) stopWeChatInitialSyncPolling(subscriptionId)
 })
 
 </script>
