@@ -64,7 +64,8 @@ lines.
   AI/OCR call history and daily usage now live in `routers/content_usage.py`;
   listing, import, content mutation and capture remain separate follow-up cuts.
 - [ ] Add direct tests for public-tree, DMG validation and backend packaging
-  scripts; add bounded job timeouts and persist release measurements.
+  scripts; persist release measurements.  Verify jobs now have bounded
+  timeouts and repeated pull-request/main checks cancel stale in-progress runs.
 - [ ] Establish auditable Python dependency constraints/lock data and add an
   incremental, explicit coverage baseline for high-risk boundaries.
 
@@ -78,8 +79,9 @@ lines.
   previously listed third starter asset was no longer tracked.
 - [ ] Remove committed macOS helper binaries after an arm64 build proves the
   tracked Objective-C sources reproduce them.
-- [ ] Add generated SBOM/license review evidence to release artifacts; extend
-  Dependabot to GitHub Actions and evaluate immutable action pins.
+- [ ] Add generated SBOM/license review evidence to release artifacts; evaluate
+  immutable action pins.  Dependabot now covers GitHub Actions alongside npm
+  and pip dependencies.
 - [ ] Separate the unused external download-site instructions from the normal
   GitHub Release path.
 - [ ] Continue ratcheting every production source below 1,000 lines, or add a
