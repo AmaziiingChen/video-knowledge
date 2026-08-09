@@ -11,15 +11,15 @@ MAX_NEW_SOURCE_LINES = 1_000
 # These are ceilings, not targets. Ratchet a value down whenever a refactor
 # shrinks the file; never raise one to make CI green.
 KNOWN_DEBT_BUDGETS = {
-    "frontend/src/composables/useAppController.js": 5_359,
-    "frontend/src/workbench/EditorHost.vue": 4_551,
-    "frontend/src/App.vue": 3_894,
+    "frontend/src/composables/useAppController.js": 4_720,
+    "frontend/src/workbench/EditorHost.vue": 4_510,
+    "frontend/src/App.vue": 3_144,
     "backend/services/database.py": 167,
     "backend/services/group_report_pipeline.py": 2_507,
     "frontend/src/styles/app.css": 2_410,
     "frontend/src/workbench/PrimarySidebar.vue": 2_307,
     "backend/services/wechat_publishing.py": 2_075,
-    "backend/routers/content.py": 1_989,
+    "backend/routers/content.py": 826,
     "backend/services/wechat_subscription.py": 1_964,
     "backend/services/creator_sync.py": 1_904,
     "frontend/src/features/assistant/SecondarySidebar.vue": 1_837,
