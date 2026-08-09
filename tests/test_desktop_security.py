@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from fastapi.testclient import TestClient
 
+from desktop_server import backend_host
 from main import app
 from routers import runtime_components
 
@@ -82,3 +85,16 @@ def test_mutating_local_api_rejects_an_untrusted_browser_origin(monkeypatch):
         )
 
     assert response.status_code == 403
+
+
+def test_desktop_server_refuses_to_listen_on_a_network_interface(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGEHUB_BACKEND_HOST", "0.0.0.0")
+
+    with pytest.raises(SystemExit, match="仅允许监听本机回环地址"):
+        backend_host()
+
+
+def test_desktop_server_accepts_the_explicit_ipv6_loopback_host(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGEHUB_BACKEND_HOST", "::1")
+
+    assert backend_host() == "::1"

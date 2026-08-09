@@ -8,6 +8,7 @@ from services.campus_source_scheduler import campus_source_scheduler
 from services.content_index import ensure_content_index_ready
 from services.creator_scheduler import creator_subscription_scheduler
 from services.database import connect, initialize_database
+from services.favorite_scheduler import favorite_subscription_scheduler
 from services.forum_capture_repository import repair_forum_capture_document_types
 from services.knowledge_library import ensure_library_layout, recover_legacy_report_documents
 from services.llm_settings import apply_saved_llm_settings
@@ -87,6 +88,7 @@ async def start_application() -> None:
         except Exception:
             continue
     creator_subscription_scheduler.start()
+    favorite_subscription_scheduler.start()
     rss_subscription_scheduler.start()
     report_group_scheduler.start()
     campus_digest_scheduler.start()
@@ -110,5 +112,6 @@ async def stop_application() -> None:
     wechat_subscription_scheduler.stop()
     wechat_public_album_scheduler.stop()
     creator_subscription_scheduler.stop()
+    favorite_subscription_scheduler.stop()
     rss_subscription_scheduler.stop()
     report_group_scheduler.stop()

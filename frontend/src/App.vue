@@ -832,7 +832,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SvgMaskIcon from './components/SvgMaskIcon.vue'
@@ -850,10 +850,7 @@ import EditorHost from './workbench/EditorHost.vue'
 import ProcessLogDock from './workbench/ProcessLogDock.vue'
 import PrimarySidebar from './workbench/PrimarySidebar.vue'
 import { normalizeWorkspacePaneVisibility } from './workbench/paneVisibilityState.js'
-import {
-  isSinglePaneWorkspaceView,
-  preloadWorkspaceViewModules,
-} from './workbench/workspaceViewLoading.js'
+import { isSinglePaneWorkspaceView } from './workbench/workspaceViewLoading.js'
 import { formatReportTaskWindow } from './features/reports/reportGenerationPresentation.js'
 import SecondarySidebar from './features/assistant/SecondarySidebar.vue'
 import { useAppController } from './composables/useAppController'
@@ -875,16 +872,6 @@ const loadReportsWorkspace = () => import('./features/reports/ReportsWorkspace.v
 const loadKnowledgeWorkspace = () => import('./features/knowledge/KnowledgeWorkspace.vue')
 const loadKnowledgeSidebar = () => import('./features/knowledge/KnowledgeSidebar.vue')
 const loadEvidencePreviewSidebar = () => import('./features/knowledge/EvidencePreviewSidebar.vue')
-const workspaceViewModuleLoaders = [
-  loadWeChatManager,
-  loadCampusManager,
-  loadCreatorWorkspace,
-  loadRssWorkspace,
-  loadReportsWorkspace,
-  loadKnowledgeWorkspace,
-  loadKnowledgeSidebar,
-  loadEvidencePreviewSidebar,
-]
 const WeChatManager = defineAsyncComponent(loadWeChatManager)
 const CampusManager = defineAsyncComponent(loadCampusManager)
 const CreatorWorkspace = defineAsyncComponent(loadCreatorWorkspace)
@@ -3938,14 +3925,6 @@ watch(processLogHeight, (value) => {
 
 watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
   localStorage.setItem(WORKSPACE_PANE_VISIBILITY_KEY, JSON.stringify({ primary, context }))
-})
-
-onMounted(() => {
-  // The desktop development build is served directly from ``dist``. A later
-  // build replaces hashed lazy chunks on disk while the current window still
-  // references the old names. Load the lightweight workspace modules after
-  // the first paint so view switching remains an in-memory operation.
-  void preloadWorkspaceViewModules(workspaceViewModuleLoaders)
 })
 
 onBeforeUnmount(() => {
