@@ -25,7 +25,7 @@ KNOWN_DEBT_BUDGETS = {
     "frontend/src/features/assistant/SecondarySidebar.vue": 1_743,
     "backend/services/knowledge_v2.py": 1_581,
     "backend/services/campus_digest_generation.py": 1_748,
-    "backend/services/campus_sources.py": 1_575,
+    "backend/services/campus_sources.py": 1_529,
     "backend/services/pipeline_runner.py": 1_665,
     "backend/services/downloader.py": 1_613,
     "backend/services/wechat_reports.py": 1_475,

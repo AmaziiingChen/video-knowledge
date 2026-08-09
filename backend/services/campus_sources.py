@@ -13,6 +13,13 @@ import requests
 
 from services.network_policy import direct_requests_session
 from bs4 import BeautifulSoup, Tag
+from services.campus_html_content import (
+    absolutize_content_urls as _absolutize_content_urls,
+    article_attachment_scope as _article_attachment_scope,
+    attachment_name_from_url as _attachment_name_from_url,
+    candidate_nodes as _candidate_nodes,
+    dedupe_attachments as _dedupe_attachments,
+)
 from services.campus_document_rendering import (
     render_document_markdown_html,  # noqa: F401 - public compatibility re-export
     text_to_article_html as _text_to_article_html,
@@ -1184,44 +1191,6 @@ def _append_same_origin_iframe_content(
     return attachments
 
 
-def _absolutize_content_urls(content: Tag, base_url: str) -> None:
-    for image in content.find_all("img"):
-        src = str(image.get("data-src") or image.get("data-original") or image.get("src") or "").strip()
-        if src:
-            image["src"] = urljoin(base_url, src)
-            image.attrs.pop("data-src", None)
-            image.attrs.pop("data-original", None)
-    for anchor in content.find_all("a", href=True):
-        anchor["href"] = urljoin(base_url, str(anchor.get("href") or ""))
-
-
-def _dedupe_attachments(value: list[dict[str, str]]) -> list[dict[str, str]]:
-    attachments: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for attachment in value:
-        url = str(attachment.get("url") or "")
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        attachments.append(attachment)
-    return attachments
-
-
-def _article_attachment_scope(content: Tag) -> Tag:
-    """Keep attachment discovery inside the article wrapper when possible."""
-    form = content.find_parent("form", attrs={"name": "_newscontent_fromname"})
-    if isinstance(form, Tag):
-        return form
-
-    parent = content.parent
-    if isinstance(parent, Tag):
-        grandparent = parent.parent
-        if isinstance(grandparent, Tag):
-            return grandparent
-        return parent
-    return content
-
-
 def _extract_attachments(scope: Tag, base_url: str, *, download_type: str) -> list[dict[str, str]]:
     attachments: list[dict[str, str]] = []
     seen_urls: set[str] = set()
@@ -1261,21 +1230,6 @@ def _extract_attachments(scope: Tag, base_url: str, *, download_type: str) -> li
 def is_campus_attachment_blacklisted(name: str) -> bool:
     normalized = _clean_title(name)
     return any(keyword in normalized for keyword in _ATTACHMENT_NAME_BLACKLIST)
-
-
-def _attachment_name_from_url(url: str) -> str:
-    path_name = urlparse(url).path.rsplit("/", 1)[-1]
-    return path_name if "." in path_name else "查看附件"
-
-
-def _candidate_nodes(soup: BeautifulSoup, selectors: Iterable[str]) -> Iterable[Tag]:
-    seen: set[int] = set()
-    for selector in selectors:
-        for node in soup.select(selector):
-            if not isinstance(node, Tag) or id(node) in seen:
-                continue
-            seen.add(id(node))
-            yield node
 
 
 def _parse_list_node(node: Tag, *, source: CampusSource, section: str) -> CampusArticle | None:
