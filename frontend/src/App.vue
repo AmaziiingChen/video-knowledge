@@ -846,7 +846,6 @@ import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from './util
 import WorkbenchShell from './workbench/WorkbenchShell.vue'
 import WorkspaceTabs from './workbench/WorkspaceTabs.vue'
 import WorkspaceChromeActions from './workbench/WorkspaceChromeActions.vue'
-import EditorHost from './workbench/EditorHost.vue'
 import ProcessLogDock from './workbench/ProcessLogDock.vue'
 import PrimarySidebar from './workbench/PrimarySidebar.vue'
 import { normalizeWorkspacePaneVisibility } from './workbench/paneVisibilityState.js'
@@ -879,6 +878,7 @@ const loadKnowledgeWorkspace = () => import('./features/knowledge/KnowledgeWorks
 const loadKnowledgeSidebar = () => import('./features/knowledge/KnowledgeSidebar.vue')
 const loadEvidencePreviewSidebar = () => import('./features/knowledge/EvidencePreviewSidebar.vue')
 const WeChatManager = defineAsyncComponent(loadWeChatManager)
+const EditorHost = defineAsyncComponent(() => import('./workbench/EditorHost.vue'))
 const CampusManager = defineAsyncComponent(loadCampusManager)
 const CreatorWorkspace = defineAsyncComponent(loadCreatorWorkspace)
 const RssWorkspace = defineAsyncComponent(loadRssWorkspace)
