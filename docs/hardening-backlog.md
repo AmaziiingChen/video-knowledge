@@ -68,6 +68,12 @@ lines.
   now live in `features/tasks/taskDisplayPresentation.js` with pure boundary
   tests; queue transport and durable task mutation remain in their existing
   controllers.
+- [ ] Split `SecondarySidebar.vue` into conversation, composer and task-status
+  surfaces. Its model normalization, shortcut filtering, empty state, external
+  citation, OCR hint and text-preview rules now live in
+  `features/assistant/assistantPresentation.js` with pure boundary tests;
+  menus, composer focus/resize and conversation scrolling remain local UI
+  behavior.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it

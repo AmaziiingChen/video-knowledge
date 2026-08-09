@@ -327,7 +327,20 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
-import { starterPromptsForContent } from './starterPrompts'
+import {
+  assistantAiModelOptions,
+  assistantQuestionPlaceholder,
+  assistantSelectedModelLabel,
+  conversationEmptyState,
+  customContentActionLabel,
+  externalImportCitation as externalImportCitationForContent,
+  hasExportableConversation as hasExportableConversationForContent,
+  ocrAssistantPresentation,
+  qaShortcutButtons as buildQaShortcutButtons,
+  selectedTextPreview,
+  shortcutSuggestions as findShortcutSuggestions,
+  summaryTitleMarkdown,
+} from './assistantPresentation.js'
 const summaryIcon = 'apple.intelligence'
 const customActionIcon = 'dot.scope'
 const exportIcon = 'arrow.down.document'
@@ -543,139 +556,56 @@ let conversationScrollFrame = null
 let historyRestorePosition = null
 let sendLaunchTimer = null
 const aiModelOptions = computed(() => {
-  const models = [
-    normalizeAiModelOption(props.selectedAiModel),
-    ...props.availableAiModels,
-    { value: 'deepseek-v4-flash:enabled', label: 'V4 Flash Thinking' },
-    { value: 'deepseek-v4-pro:enabled', label: 'V4 Pro Thinking' }
-  ].map(normalizeAiModelOption).filter(Boolean)
-  const seen = new Set()
-  return models.filter((model) => {
-    if (seen.has(model.value)) return false
-    seen.add(model.value)
-    return true
-  })
+  return assistantAiModelOptions(props.selectedAiModel, props.availableAiModels)
 })
-
-function summaryTitleMarkdown(title) {
-  const safeTitle = String(title || '')
-    .replace(/\r?\n/gu, ' ')
-    .replace(/([\\`*_{}\[\]<>()#+.!|])/gu, '\\$1')
-    .trim()
-  return safeTitle ? `# ${safeTitle}` : ''
-}
 
 const selectedAiModelLabel = computed(() => {
-  return aiModelOptions.value.find((model) => model.value === props.selectedAiModel)?.label
-    || normalizeAiModelOption(props.selectedAiModel)?.label
-    || 'V4 Flash'
+  return assistantSelectedModelLabel(props.selectedAiModel, aiModelOptions.value)
 })
 const customActionLabel = computed(() => {
-  return props.contentAnalysisTemplates.find((template) => template?.is_active)?.name?.trim()
-    || props.contentAnalysisTemplates[0]?.name?.trim()
-    || '自定义按钮'
+  return customContentActionLabel(props.contentAnalysisTemplates)
 })
 const customActionLoading = computed(() => props.askingQuestion && !props.generatingAiSummary)
-const externalImportCitation = computed(() => {
-  const content = props.contentContext || {}
-  if (!['local_file', 'local_markdown'].includes(String(content.source_provider || ''))) return null
-  const imported = new Date(content.created_at || '')
-  const importedAt = Number.isNaN(imported.getTime())
-    ? '时间未知'
-    : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' }).format(imported)
-  return {
-    title: String(content.title || '外部资料').trim() || '外部资料',
-    importedAt,
-  }
-})
-const qaShortcutButtons = computed(() => {
-  return props.qaShortcutTemplates
-    .filter((template) => template?.template?.trim())
-    .map((template) => ({
-      id: template.id,
-      name: template.name || '快捷',
-      template: template.template
-    }))
-})
-const shortcutQuery = computed(() => {
-  const match = String(props.questionInput || '').match(/(?:^|\s)@([^\s@]*)$/u)
-  return match ? match[1] : null
-})
+const externalImportCitation = computed(() => externalImportCitationForContent(props.contentContext))
+const qaShortcutButtons = computed(() => buildQaShortcutButtons(props.qaShortcutTemplates))
 const shortcutSuggestions = computed(() => {
-  if (shortcutQuery.value === null) return []
-  const query = shortcutQuery.value.trim().toLocaleLowerCase()
-  return qaShortcutButtons.value
-    .filter((shortcut) => !query || shortcut.name.toLocaleLowerCase().includes(query))
-    .slice(0, 5)
+  return findShortcutSuggestions(props.questionInput, qaShortcutButtons.value)
 })
-const hasExportableConversation = computed(() => Boolean(
-  props.currentInsightHtml
-  || props.qaHistory.some((item) => item?.question || item?.answer)
-))
-const starterPrompts = computed(() => starterPromptsForContent(props.contentContext))
-const hasConversationContent = computed(() => Boolean(
-  props.currentInsightHtml
-  || props.generatingAiSummary
-  || props.generatingSummaryText
-  || props.qaHistory.length
-))
-const showConversationEmptyState = computed(() => Boolean(
-  !hasConversationContent.value
-  && !props.qaHistoryLoading
-  && !props.qaHistoryLoadingMore
-  && !props.qaHistoryError
-))
-const hasSelectedConversationContent = computed(() => Boolean(props.conversationKey))
-const isConversationStarterReady = computed(() => Boolean(
-  hasSelectedConversationContent.value && props.currentQaEnabled
-))
-const emptyStateIcon = computed(() => (
-  isConversationStarterReady.value ? emptyConversationIcon : emptyDocumentIcon
-))
-const emptyStateHeading = computed(() => {
-  if (!hasSelectedConversationContent.value) return '选择一条资料'
-  return isConversationStarterReady.value ? '从这里开始提问' : '正在准备这条资料'
-})
-const emptyStateDetail = computed(() => {
-  if (!hasSelectedConversationContent.value) return '选择资料后，可在这里基于原文提问。'
-  if (isConversationStarterReady.value) return '选择一个问题即可开始，也可以直接输入你的问题。'
-  return props.currentQaHint || '正在加载正文、字幕或转写内容。'
-})
-const ocrStatus = computed(() => String(props.articleOcrStatus?.status || 'unavailable'))
-const showOcrControl = computed(() => [
-  'capture_pending', 'capturing', 'pending', 'queued', 'running'
-].includes(ocrStatus.value))
-const canPrioritizeOcr = computed(() => [
-  'capture_pending', 'pending', 'queued'
-].includes(ocrStatus.value) && !props.prioritizingArticleOcr && !props.articleOcrStatus?.priority)
-const ocrControlLabel = computed(() => {
-  if (props.prioritizingArticleOcr || (props.articleOcrStatus?.priority && ['capture_pending', 'queued'].includes(ocrStatus.value))) return '优先解析中'
-  if (ocrStatus.value === 'capturing' || ocrStatus.value === 'running') return '解析中'
-  if (ocrStatus.value === 'completed') return 'OCR 已完成'
-  return 'OCR'
-})
-const ocrControlTooltip = computed(() => {
-  if (ocrStatus.value === 'completed') return '当前文章的图片文字已解析'
-  if (ocrStatus.value === 'capturing') return '正在优先获取正文，随后解析图片文字'
-  if (ocrStatus.value === 'running') return '正在解析当前文章的图片文字'
-  if (props.articleOcrStatus?.priority) return '当前文章已移至 OCR 队列前列'
-  return '优先解析当前文章中的图片文字'
-})
-const ocrInputHint = computed(() => {
-  if (['capture_pending', 'capturing', 'pending', 'queued', 'running'].includes(ocrStatus.value)) {
-    return '图片文字仍在解析；现在生成仅包含正文。'
-  }
-  if (ocrStatus.value === 'completed' && Number(props.articleOcrStatus?.image_count || 0) > 0) {
-    return '图片文字已解析；后续摘要和快捷命令将使用完整内容。'
-  }
-  return ''
-})
+const hasExportableConversation = computed(() => hasExportableConversationForContent(props.currentInsightHtml, props.qaHistory))
+const emptyState = computed(() => conversationEmptyState({
+  conversationKey: props.conversationKey,
+  currentQaEnabled: props.currentQaEnabled,
+  currentQaHint: props.currentQaHint,
+  currentInsightHtml: props.currentInsightHtml,
+  generatingAiSummary: props.generatingAiSummary,
+  generatingSummaryText: props.generatingSummaryText,
+  qaHistory: props.qaHistory,
+  qaHistoryLoading: props.qaHistoryLoading,
+  qaHistoryLoadingMore: props.qaHistoryLoadingMore,
+  qaHistoryError: props.qaHistoryError,
+  contentContext: props.contentContext,
+  emptyDocumentIcon,
+  emptyConversationIcon,
+}))
+const showConversationEmptyState = computed(() => emptyState.value.show)
+const isConversationStarterReady = computed(() => emptyState.value.ready)
+const emptyStateIcon = computed(() => emptyState.value.icon)
+const emptyStateHeading = computed(() => emptyState.value.heading)
+const emptyStateDetail = computed(() => emptyState.value.detail)
+const starterPrompts = computed(() => emptyState.value.starterPrompts)
+const ocrPresentation = computed(() => ocrAssistantPresentation(props.articleOcrStatus, props.prioritizingArticleOcr))
+const showOcrControl = computed(() => ocrPresentation.value.show)
+const canPrioritizeOcr = computed(() => ocrPresentation.value.canPrioritize)
+const ocrControlLabel = computed(() => ocrPresentation.value.label)
+const ocrControlTooltip = computed(() => ocrPresentation.value.tooltip)
+const ocrInputHint = computed(() => ocrPresentation.value.inputHint)
 const questionPlaceholder = computed(() => {
-  if (ocrInputHint.value) return ocrInputHint.value
-  if (props.selectedTextContext) return '围绕选中文本提问…'
-  if (props.currentQaHint) return props.currentQaHint
-  if (props.currentQaEnabled) return '追问当前内容…'
-  return '选择内容后追问'
+  return assistantQuestionPlaceholder({
+    ocrInputHint: ocrInputHint.value,
+    selectedTextContext: props.selectedTextContext,
+    currentQaHint: props.currentQaHint,
+    currentQaEnabled: props.currentQaEnabled,
+  })
 })
 
 function selectAiModel(model) {
@@ -727,25 +657,6 @@ function askStarterPrompt(prompt) {
   emit('ask-question', prompt)
 }
 
-function normalizeAiModelOption(option) {
-  const rawValue = typeof option === 'string' ? option : option?.value
-  if (!rawValue) return null
-  let value = rawValue
-  if (value === 'deepseek-chat') value = 'deepseek-v4-flash:enabled'
-  if (value === 'deepseek-reasoner') value = 'deepseek-v4-flash:enabled'
-  if (value === 'deepseek-v4-flash' || value === 'deepseek-v4-pro') value = `${value}:enabled`
-  if (value.endsWith(':disabled')) value = value.replace(':disabled', ':enabled')
-
-  const defaultLabels = {
-    'deepseek-v4-flash:enabled': 'V4 Flash Thinking',
-    'deepseek-v4-pro:enabled': 'V4 Pro Thinking'
-  }
-  return {
-    value,
-    label: (typeof option === 'object' && option?.label) || defaultLabels[value] || value
-  }
-}
-
 function handleAskKeydown(event) {
   if (event.isComposing) return
   triggerQuestionSend()
@@ -779,11 +690,6 @@ function triggerQuestionSend() {
     sendLaunchTimer = null
   }, 600)
   emit('ask-question')
-}
-
-function selectedTextPreview(value) {
-  const text = String(value || '').replace(/\s+/gu, ' ').trim()
-  return text.length > 68 ? `${text.slice(0, 67)}…` : text
 }
 
 watch(() => props.selectedTextContext?.id || '', async (contextId) => {
