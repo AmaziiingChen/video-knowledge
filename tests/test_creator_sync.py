@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from services import creator_sync
+from services import creator_source_registry
 from services.creator_sync import CreatorPreview, CreatorSyncError, CreatorVideo
 from routers.creator_sources import _preview_response
 from services.database import connect, initialize_database
@@ -818,5 +819,31 @@ def test_creator_source_identity_is_stable_when_tracking_query_changes(monkeypat
 
         assert first.source_id == second.source_id
         assert len(creator_sync.list_creator_sources()) == 1
+    finally:
+        settings.data_dir = old_data_dir
+
+
+def test_creator_source_registry_tracks_due_enabled_sources(monkeypatch, tmp_path):
+    from config import settings
+
+    old_data_dir = settings.data_dir
+    settings.data_dir = Path(tmp_path)
+    try:
+        preview = CreatorPreview(
+            provider="douyin",
+            source_kind="profile",
+            source_url="https://www.douyin.com/user/tester",
+            creator_key="tester",
+            creator_name="测试作者",
+            videos=[],
+        )
+        monkeypatch.setattr(creator_sync, "preview_creator_source", lambda **_kwargs: preview)
+        created = creator_sync.sync_creator_source(source_url=preview.source_url)
+
+        assert creator_source_registry.source_identity("douyin", "profile", "tester") == "douyin:profile:tester"
+        assert creator_source_registry.due_creator_source_ids("9999-01-01T00:00:00+00:00") == [created.source_id]
+
+        creator_source_registry.update_creator_source(created.source_id, enabled=False)
+        assert creator_source_registry.due_creator_source_ids("9999-01-01T00:00:00+00:00") == []
     finally:
         settings.data_dir = old_data_dir
