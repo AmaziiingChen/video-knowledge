@@ -34,7 +34,8 @@ lines.
   Account authorization, QR polling, transfer and account-search state now live
   in `features/wechat/useWechatAccountController.js`; the remaining sync,
   filters and report-group state machine remains deliberately in `App.vue` for
-  the next behavior-preserving slice.
+  the next behavior-preserving slice.  Single/bulk sync task ownership now
+  lives in `features/wechat/useWechatSubscriptionSyncController.js`.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
   The first library boundary, debounced global search and result hydration, now
