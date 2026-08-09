@@ -5,7 +5,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from routers.tasks import TaskResponse, _to_response
+from presentation.task_responses import TaskResponse, to_task_response
 from services.task_manager import task_manager
 from services.wechat_discovery import (
     WeChatDiscoveryError,
@@ -104,7 +104,7 @@ async def sync_wechat_public_album_source(source_id: str):
     except Exception as exc:
         fail_discovery_submission(run["id"], str(exc))
         raise HTTPException(status_code=500, detail="合集检查任务创建失败") from exc
-    return StartWeChatDiscoveryResponse(run=run, task=_to_response(task))
+    return StartWeChatDiscoveryResponse(run=run, task=to_task_response(task))
 
 
 @router.get("/wechat-discovery/runs", response_model=list[dict[str, Any]])
@@ -176,7 +176,7 @@ async def start_wechat_discovery(req: StartWeChatDiscoveryRequest):
     except Exception as exc:
         fail_discovery_submission(run["id"], str(exc))
         raise HTTPException(status_code=500, detail="公众号导入任务创建失败") from exc
-    return StartWeChatDiscoveryResponse(run=run, task=_to_response(task))
+    return StartWeChatDiscoveryResponse(run=run, task=to_task_response(task))
 
 
 @router.post(
@@ -218,4 +218,4 @@ async def import_reviewed_wechat_candidates(
         if isinstance(exc, WeChatDiscoveryError):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         raise HTTPException(status_code=500, detail="公众号候选导入任务创建失败") from exc
-    return StartWeChatDiscoveryResponse(run=run, task=_to_response(task))
+    return StartWeChatDiscoveryResponse(run=run, task=to_task_response(task))

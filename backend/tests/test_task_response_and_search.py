@@ -2,6 +2,7 @@ import asyncio
 import inspect
 from types import SimpleNamespace
 
+from presentation.task_responses import to_task_response
 from routers import search as search_router
 from routers import tasks as tasks_router
 from services.pipeline_runner import PipelineResponse
@@ -20,8 +21,8 @@ def test_task_queue_response_omits_historical_heavy_payloads():
         ),
     )
 
-    queue_response = tasks_router._to_response(record, include_heavy_payload=False)
-    detail_response = tasks_router._to_response(record)
+    queue_response = to_task_response(record, include_heavy_payload=False)
+    detail_response = to_task_response(record)
 
     assert queue_response.transcript is None
     assert queue_response.summary is None

@@ -259,6 +259,7 @@
 import axios from 'axios'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { API_BASE as API } from '../../utils/localApiAuth.js'
 
 import {
   albumSourceScheduleText,
@@ -274,7 +275,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue', 'library-changed'])
-const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
 const inputRef = ref(null)
 const inputText = ref('')
 const discoveryStrategy = ref('direct')

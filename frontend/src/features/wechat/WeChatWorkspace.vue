@@ -380,6 +380,7 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import HistorySyncDialog from '../../components/HistorySyncDialog.vue'
 import { requestDestructiveConfirmation } from '../../composables/useDestructiveConfirm'
 
@@ -485,7 +486,7 @@ function saveFilter() {
     text_patterns: filterDraft.text_patterns.split('\n').map((item) => item.trim()).filter(Boolean)
   }, () => Object.assign(filterDraft, { name: '', subscription_id: '', selectors: '', text_patterns: '' }))
 }
-function createGroup() { emit('create-report-group', { name: groupDraft.trim() }, () => { groupDraft.value = '' }) }
+function createGroup() { emit('create-report-group', { name: groupDraft.value.trim() }, () => { groupDraft.value = '' }) }
 
 async function requestAccountRemoval(account) {
   const subscriptionCount = Number(account.subscription_count || 0)

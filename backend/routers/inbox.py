@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from presentation.inbox_responses import InboxItemResponse, to_inbox_item_response
 from services.inbox import capture_link_to_inbox, list_inbox_items, process_inbox_item
 from services.pipeline_runner import WHISPER_MODELS
-from services.repository import ContentItemRecord
 
 
 router = APIRouter()
@@ -28,21 +28,6 @@ class InboxProcessRequest(BaseModel):
     use_cache: bool = True
 
 
-class InboxItemResponse(BaseModel):
-    id: str
-    content_type: str
-    source_provider: str
-    source_url: str | None = None
-    canonical_source_id: str | None = None
-    title: str
-    cover_url: str | None = None
-    duration_seconds: float | None = None
-    status: str
-    series_id: str | None = None
-    created_at: str
-    updated_at: str
-
-
 class InboxCaptureResponse(BaseModel):
     item: InboxItemResponse
     created: bool
@@ -55,26 +40,9 @@ class InboxProcessResponse(BaseModel):
     task_status: str
 
 
-def _item_to_response(item: ContentItemRecord) -> InboxItemResponse:
-    return InboxItemResponse(
-        id=item.id,
-        content_type=item.content_type,
-        source_provider=item.source_provider,
-        source_url=item.source_url,
-        canonical_source_id=item.canonical_source_id,
-        title=item.title,
-        cover_url=item.cover_url,
-        duration_seconds=item.duration_seconds,
-        status=item.status,
-        series_id=item.series_id,
-        created_at=item.created_at,
-        updated_at=item.updated_at,
-    )
-
-
 @router.get("/inbox", response_model=list[InboxItemResponse])
 async def get_inbox(limit: int = 100):
-    return [_item_to_response(item) for item in list_inbox_items(limit=max(1, min(limit, 500)))]
+    return [to_inbox_item_response(item) for item in list_inbox_items(limit=max(1, min(limit, 500)))]
 
 
 @router.post("/inbox/capture", response_model=InboxCaptureResponse)
@@ -83,7 +51,7 @@ async def capture_inbox_link(req: InboxCaptureRequest):
     if result.error or result.item is None:
         raise HTTPException(status_code=400, detail=result.error or "收件箱捕获失败")
     return InboxCaptureResponse(
-        item=_item_to_response(result.item),
+        item=to_inbox_item_response(result.item),
         created=result.created,
         duplicate=result.duplicate,
     )
@@ -112,7 +80,7 @@ async def process_inbox_item_endpoint(item_id: str, req: InboxProcessRequest):
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return InboxProcessResponse(
-        item=_item_to_response(item),
+        item=to_inbox_item_response(item),
         task_id=task.task_id,
         task_status=task.status,
     )

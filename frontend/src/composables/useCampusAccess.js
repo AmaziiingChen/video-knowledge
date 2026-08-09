@@ -2,8 +2,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
+import { API_BASE } from '../utils/localApiAuth.js'
 
-const CAMPUS_API = 'http://127.0.0.1:8000/api/campus-sources'
+const CAMPUS_API = `${API_BASE}/campus-sources`
 const CAMPUS_SCHEDULER_TICK_MS = 60_000
 const CAMPUS_HISTORY_MAX = 300
 const GWT_IMPORT_BATCH_SIZE = 50

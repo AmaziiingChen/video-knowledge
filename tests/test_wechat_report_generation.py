@@ -954,28 +954,6 @@ def retired_group_pipeline_handles_mixed_new_and_legacy_section_schemas_without_
     assert all(item["status"] == "cited" for item in result.source_coverage)
 
 
-def retired_event_block_splitter_preserves_multiple_written_events():
-    sections = _parse_sections({
-        "sections": [{
-            "title": "实践动态",
-            "events": [
-                {"id": "E001", "title": "事件甲", "source_ids": ["S001"], "presentation": "paragraph"},
-                {"id": "E002", "title": "事件乙", "source_ids": ["S002"], "presentation": "paragraph"},
-            ],
-        }]
-    })
-
-    blocks = _split_event_blocks(
-        "### 事件甲\n\n甲事实[^S001]。\n\n### 事件乙\n\n乙事实[^S002]。",
-        sections[0].events,
-    )
-
-    assert blocks == {
-        "E001": "甲事实[^S001]。",
-        "E002": "乙事实[^S002]。",
-    }
-
-
 def retired_event_writer_falls_back_to_validated_ledger_instead_of_citation_placeholder():
     provider = GroupPipelineProvider([
         "一篇摘要",

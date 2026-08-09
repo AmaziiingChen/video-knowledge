@@ -8,23 +8,25 @@ jobs:
   public-release-tree:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - run: python scripts/check_public_release_tree.py
+      - run: python scripts/check_architecture_budget.py
 
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.txt
-      - run: python -m pip install pip-audit pytest
+      - run: python -m pip install pip-audit pytest ruff
       - run: pip-audit -r requirements.txt
+      - run: ruff check --select E9,F63,F7,F82 backend tests scripts
       - run: python -m pytest
 
   frontend:
@@ -35,15 +37,18 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm audit --package-lock-only --audit-level=high
-      - run: npm test
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run test:coverage
       - run: npm run check:reachability
       - run: npm run build
       - run: npm run build:public-report
@@ -56,8 +61,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm

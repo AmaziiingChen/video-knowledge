@@ -16,13 +16,10 @@ import {
 import { promptTemplateDisplayName, promptTemplatePersistedName } from '../config/promptInterface'
 import { appearanceThemes, DESKTOP_ASR_POLICY, normalizeAppearanceTheme } from '../config/desktopPresentation'
 import {
-  clampPanePercent,
-  clampPaneWidth,
   makeContentTab,
   tabIdForContent
 } from '../workbench/workspaceModel'
 import { qaHistoryForPrompt, savedQaHistoryItems } from '../features/assistant/qaHistory'
-import { clearQaSessionState, createQaSession, qaSessionKey } from '../features/assistant/qaSessionState'
 import { matchQaShortcut } from '../features/assistant/qaShortcutMatcher'
 import {
   assistantSummaryFromMarkdown,
@@ -39,7 +36,7 @@ import {
   taskContentSnapshot
 } from './contentRefreshState'
 import { waitForDesktopBackend } from './backendStartupGate.js'
-import { localApiAuthHeaders, localApiRequestUrl } from '../utils/localApiAuth.js'
+import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from '../utils/localApiAuth.js'
 import {
   aiCallTypeLabel,
   cacheHitLabel,
@@ -72,34 +69,63 @@ import {
   markInterruptedReportLogs,
   persistReportLogHistory,
 } from '../features/logs/processLogHistory.js'
-import {
-  readArticlePreviewCache,
-  removeArticlePreviewCache,
-  writeArticlePreviewCache,
-} from '../features/library/articlePreviewCache.js'
-import {
-  pendingArticlePreview,
-  revealArticlePreviewLoader,
-} from '../features/library/articlePreviewLoadState.js'
-import { normalizeContentReadState, uniqueIds } from '../features/library/contentReadState.js'
+import { useArticlePreviewController } from '../features/library/useArticlePreviewController.js'
+import { useOpenClawController } from '../features/integrations/useOpenClawController.js'
+import { useQaSessionController } from '../features/assistant/useQaSessionController.js'
+import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
+import { useClipboardController } from '../features/integrations/useClipboardController.js'
+import { useContentReadState } from '../features/library/useContentReadState.js'
 
 export function useAppController() {
-  const API = 'http://127.0.0.1:8000/api'
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
-  const WORKSPACE_TABS_KEY = 'video-knowledge.workspace-tabs.v1'
-  const WORKSPACE_LAYOUT_KEY = 'video-knowledge.workspace-layout.v1'
   const ASR_SETTINGS_KEY = 'video-knowledge.asr-settings.v1'
   const AI_SETTINGS_KEY = 'video-knowledge.ai-settings.v1'
   const ASSISTANT_SETTINGS_KEY = 'video-knowledge.assistant-settings.v1'
-  const LEGACY_TELEGRAM_SETTINGS_KEY = 'video-knowledge.telegram-settings.v1'
   const APPEARANCE_SETTINGS_KEY = 'video-knowledge.appearance-settings.v1'
   const themeOptions = appearanceThemes
+  const {
+    workspaceTabs,
+    activeWorkspaceTabId,
+    workspaceLayout,
+    restoreWorkspaceState,
+    handleWorkspaceResize
+  } = useWorkspaceState()
+  const {
+    openclawRunning,
+    openclawScanning,
+    openclawConnectionItems,
+    openclawStatusTone,
+    openclawStatusText,
+    startOpenClawStatusPolling,
+    stopOpenClawStatusPolling,
+    loadOpenClawStatus,
+    startOpenClawGateway
+  } = useOpenClawController()
+  const {
+    questionInput,
+    qaHistory,
+    qaHistoryLoading,
+    qaHistoryLoadingMore,
+    qaHistoryHasMore,
+    qaHistoryError,
+    askingQuestion,
+    generatingAiSummary,
+    generatingSummaryText,
+    startingNewChat,
+    lastQaSaved,
+    ensureQaSession,
+    isQaSessionActive,
+    activateQaSession,
+    detachQaSession,
+    syncQaSessionIfActive,
+    refreshQaSessionHistory,
+    clearQaSession,
+    resetActiveQaSession
+  } = useQaSessionController()
 
   const activeView = ref('library')
   const completionNotifications = ref([])
   let completionNotificationTimer = null
-  const workspaceTabs = ref([])
-  const activeWorkspaceTabId = ref('')
   const aiCallsByContentId = reactive({})
   const dailyAiTokenUsage = ref({
     period_start: '',
@@ -136,12 +162,6 @@ export function useAppController() {
   let deferredCookieProbeUsesIdleCallback = false
   let aiTokenSummaryLoading = false
   const contentAnalysisTemplates = ref([])
-  const workspaceLayout = reactive({
-    primary: 22,
-    editor: 50,
-    context: 28
-  })
-  let workspaceLayoutPersistTimer = null
   let inputParseTimer = null
   let inputParseRequestId = 0
   const openSections = ref(['source', 'timings'])
@@ -253,9 +273,15 @@ export function useAppController() {
   const selectedContentItem = ref(null)
   const canUndoLibraryAction = computed(() => libraryUndoStack.value.length > 0 && !applyingLibraryHistory.value)
   const canRedoLibraryAction = computed(() => libraryRedoStack.value.length > 0 && !applyingLibraryHistory.value)
-  const articlePreviews = reactive({})
-  const articlePreviewFormattingTimers = new Map()
-  const articlePreviewLoadingTimers = new Map()
+  const {
+    articlePreviews,
+    disposeArticlePreviews,
+    loadArticlePreview,
+    resetArticlePreview,
+    updatePendingArticlePreviewReadiness,
+  } = useArticlePreviewController({
+    refreshContentTextReadiness: (contentItemId) => refreshContentTextReadiness(contentItemId),
+  })
   const articlePreparationStatus = ref({
     active_content_item_id: '',
     active_count: 0,
@@ -325,54 +351,19 @@ export function useAppController() {
   const articleSnapshotPreviewedTaskIds = new Set()
   const mediaSnapshotPreviewedTaskIds = new Set()
   const transcriptSnapshotPreviewedTaskIds = new Set()
-  const questionInput = ref('')
   const selectedTextContext = ref(null)
   const selectedTextContextToken = '@选中文本'
   const autoQaShortcutRecognition = ref(true)
-  const qaHistory = ref([])
-  const qaHistoryLoading = ref(false)
-  const qaHistoryLoadingMore = ref(false)
-  const qaHistoryHasMore = ref(false)
-  const qaHistoryError = ref('')
-  // The assistant panel is mounted once, but a user may keep several articles
-  // open and switch between them while an SSE response is still arriving.
-  // Keep the transient state with the content item instead of in one global
-  // history, then mirror only the active session to the panel props below.
-  const qaSessionsByContentId = reactive({})
-  const activeQaSessionId = ref('')
-  const CONTENT_VIEW_STATE_KEY = 'knowledgehub.content-view-state.v1'
-  const restoredContentViewState = loadContentViewState()
-  const viewedContentIds = ref(restoredContentViewState.viewedContentIds)
-  const explicitlyUnreadContentIds = ref(restoredContentViewState.explicitlyUnreadContentIds)
-  const contentViewedBefore = ref(restoredContentViewState.viewedBefore)
-  let contentViewStateInitialized = restoredContentViewState.initialized
-  let contentViewStateNeedsBaselineMigration = restoredContentViewState.needsBaselineMigration
-  let contentViewTimer = null
-  const askingQuestion = ref(false)
-  const generatingAiSummary = ref(false)
-  const generatingSummaryText = ref('')
-  const startingNewChat = ref(false)
-  const lastQaSaved = ref(false)
-  const clipboardWatching = ref(false)
-  const clipboardTimer = ref(null)
-  const clipboardScanning = ref(false)
-  const clipboardStatus = ref('未开启')
-  const clipboardCapturedLinks = ref([])
-  const openclawRunning = ref(false)
-  const openclawScanning = ref(false)
-  const openclawState = ref('unknown')
-  const openclawStatus = ref('正在读取状态')
-  const openclawBridge = ref({})
-  const openclawTimer = ref(null)
-  const telegramWatching = ref(false)
-  const telegramTimer = ref(null)
-  const telegramScanning = ref(false)
-  const telegramStatus = ref('未配置')
-  const telegramCapturedLinks = ref([])
-  const telegramBotToken = ref('')
-  const telegramAllowedUserIds = ref('')
-  const telegramReplyEnabled = ref(true)
-  const telegramConfigured = ref(false)
+  const {
+    viewedContentIds,
+    explicitlyUnreadContentIds,
+    contentViewedBefore,
+    reconcileContentViewState,
+    scheduleContentViewed,
+    setContentViewedState
+  } = useContentReadState({
+    isCurrentContent: (contentItemId) => String(selectedContentItem.value?.id || '') === contentItemId
+  })
   const obsidianVaultPath = ref('')
   const markdownExportPath = ref('')
   const obsidianAutoWrite = ref(false)
@@ -384,70 +375,7 @@ export function useAppController() {
   const cookieTimer = ref(null)
   let lastDouyinCookieAlertState = ''
 
-  function ensureQaSession(contentItemId) {
-    const id = qaSessionKey(contentItemId)
-    if (!qaSessionsByContentId[id]) {
-      qaSessionsByContentId[id] = createQaSession()
-    }
-    return qaSessionsByContentId[id]
-  }
-
-  function isQaSessionActive(contentItemId) {
-    return activeQaSessionId.value === qaSessionKey(contentItemId)
-  }
-
-  function syncQaSessionToPanel(session) {
-    questionInput.value = session.draft
-    qaHistory.value = session.history
-    askingQuestion.value = session.asking
-    generatingAiSummary.value = session.generatingSummary
-    generatingSummaryText.value = session.generatingSummaryText
-    lastQaSaved.value = session.lastSaved
-    qaHistoryLoading.value = session.historyLoading
-    qaHistoryLoadingMore.value = session.historyLoadingMore
-    qaHistoryHasMore.value = session.historyHasMore
-    qaHistoryError.value = session.historyError
-  }
-
-  function activateQaSession(contentItemId) {
-    const session = ensureQaSession(contentItemId)
-    activeQaSessionId.value = qaSessionKey(contentItemId)
-    syncQaSessionToPanel(session)
-    return session
-  }
-
-  function detachQaSession() {
-    activeQaSessionId.value = ''
-    questionInput.value = ''
-    qaHistory.value = []
-    askingQuestion.value = false
-    generatingAiSummary.value = false
-    generatingSummaryText.value = ''
-    lastQaSaved.value = false
-    qaHistoryLoading.value = false
-    qaHistoryLoadingMore.value = false
-    qaHistoryHasMore.value = false
-    qaHistoryError.value = ''
-  }
-
-  function syncQaSessionIfActive(contentItemId, session) {
-    if (isQaSessionActive(contentItemId)) syncQaSessionToPanel(session)
-  }
-
-  function refreshQaSessionHistory(contentItemId, session) {
-    session.history = [...session.history]
-    if (isQaSessionActive(contentItemId)) qaHistory.value = session.history
-  }
-
-  function clearQaSession(contentItemId, session = ensureQaSession(contentItemId)) {
-    clearQaSessionState(session)
-    syncQaSessionIfActive(contentItemId, session)
-  }
-
   watch(questionInput, (value) => {
-    if (!activeQaSessionId.value) return
-    const session = qaSessionsByContentId[activeQaSessionId.value]
-    if (session) session.draft = value
     const activeContentItemId = String(activeWorkspaceContent.value?.id || result.content_item_id || '')
     if (selectedTextContext.value?.contentItemId === activeContentItemId && !hasSelectedTextContextToken(value)) {
       selectedTextContext.value = null
@@ -1006,50 +934,6 @@ export function useAppController() {
 
   const batchLinkCount = computed(() => extractBatchLinks(batchShareText.value).length)
 
-  const clipboardStatusText = computed(() => {
-    if (clipboardWatching.value) return clipboardStatus.value || '监听中'
-    if (clipboardCapturedLinks.value.length) return `最近捕获 ${clipboardCapturedLinks.value.length} 条`
-    return clipboardStatus.value || '未开启'
-  })
-
-  const telegramStatusText = computed(() => {
-    if (telegramWatching.value) return telegramStatus.value || '监听中'
-    if (telegramCapturedLinks.value.length) return `最近捕获 ${telegramCapturedLinks.value.length} 条`
-    return telegramStatus.value || (telegramConfigured.value ? '未开启' : '未配置')
-  })
-
-  const openclawStatusText = computed(() => {
-    if (openclawScanning.value) return '正在检查 OpenClaw Gateway…'
-    if (openclawBridge.value.automation_ready) return '微信链接自动处理已就绪'
-    if (openclawRunning.value) return openclawStatus.value || 'OpenClaw Gateway 已连接'
-    if (openclawState.value === 'not_installed') return 'OpenClaw 服务未安装，点击安装并启动'
-    if (openclawState.value === 'unavailable') return '未找到 OpenClaw CLI'
-    return openclawStatus.value || 'OpenClaw 未运行，点击启动'
-  })
-
-  const openclawStatusTone = computed(() => {
-    if (openclawBridge.value.automation_ready) return 'is-active'
-    if (openclawRunning.value) return 'is-warning'
-    return ['error', 'unavailable'].includes(openclawState.value) ? 'is-invalid' : 'is-warning'
-  })
-
-  const openclawTranscriptMirrorEnabled = computed(() => Boolean(openclawBridge.value.conversation_mapping?.transcript_mirror_enabled))
-  const openclawTranscriptRetentionDays = computed(() => Number(openclawBridge.value.conversation_mapping?.transcript_retention_days || 30))
-
-  const openclawConnectionItems = computed(() => {
-    const bridge = openclawBridge.value || {}
-    const statusClass = (state, readyStates) => readyStates.includes(state) ? 'is-valid' : (
-      ['missing', 'offline', 'error', 'unavailable'].includes(state) ? 'is-invalid' : 'is-warning'
-    )
-    return [
-      { key: 'gateway', label: 'OpenClaw', detail: openclawStatus.value || '正在读取 Gateway 状态', stateClass: statusClass(openclawState.value, ['running']) },
-      { key: 'wechat', label: '微信', detail: bridge.wechat?.detail || '正在确认微信通道', stateClass: statusClass(bridge.wechat?.state, ['running']) },
-      { key: 'mcp', label: 'KnowledgeHub', detail: bridge.mcp?.detail || '正在确认 MCP 配置', stateClass: statusClass(bridge.mcp?.state, ['configured']) },
-      { key: 'backend', label: '本机处理', detail: bridge.backend?.detail || '正在确认本机后端', stateClass: statusClass(bridge.backend?.state, ['running']) },
-      { key: 'conversation', label: '会话任务', detail: bridge.conversation_mapping?.detail || '正在确认会话映射', stateClass: statusClass(bridge.conversation_mapping?.state, ['ready']) }
-    ]
-  })
-
   const modelProfileOptions = computed(() => {
     return preferredModelOrder
       .filter((model) => availableModels.value.includes(model))
@@ -1543,88 +1427,6 @@ export function useAppController() {
     transcriptSnapshotPreviewedTaskIds.add(task.task_id)
   }
 
-  function restoreWorkspaceState() {
-    try {
-      const savedTabs = JSON.parse(localStorage.getItem(WORKSPACE_TABS_KEY) || '{}')
-      workspaceTabs.value = Array.isArray(savedTabs.tabs) ? savedTabs.tabs.filter((tab) => tab?.id) : []
-      activeWorkspaceTabId.value = workspaceTabs.value.some((tab) => tab.id === savedTabs.activeTabId)
-        ? savedTabs.activeTabId
-        : workspaceTabs.value[0]?.id || ''
-    } catch {
-      workspaceTabs.value = []
-      activeWorkspaceTabId.value = ''
-    }
-
-    try {
-      const savedLayout = JSON.parse(localStorage.getItem(WORKSPACE_LAYOUT_KEY) || '{}')
-      if (Number.isFinite(Number(savedLayout.primary))) {
-        workspaceLayout.primary = clampPanePercent(Number(savedLayout.primary), 8, 45, 22)
-        workspaceLayout.context = clampPanePercent(Number(savedLayout.context), 12, 65, 28)
-        workspaceLayout.editor = clampPanePercent(100 - workspaceLayout.primary - workspaceLayout.context, 18, 80, 50)
-      } else if (Number.isFinite(Number(savedLayout.left)) || Number.isFinite(Number(savedLayout.right))) {
-        const left = clampPaneWidth(Number(savedLayout.left), 120, 680, 250)
-        const right = clampPaneWidth(Number(savedLayout.right), 220, 980, 340)
-        const total = Math.max(1024, left + right + 520)
-        workspaceLayout.primary = clampPanePercent((left / total) * 100, 8, 45, 22)
-        workspaceLayout.context = clampPanePercent((right / total) * 100, 12, 65, 28)
-        workspaceLayout.editor = clampPanePercent(100 - workspaceLayout.primary - workspaceLayout.context, 18, 80, 50)
-      }
-    } catch {
-      workspaceLayout.primary = 22
-      workspaceLayout.editor = 50
-      workspaceLayout.context = 28
-    }
-    normalizeWorkspaceLayout()
-  }
-
-  function persistWorkspaceTabs() {
-    localStorage.setItem(WORKSPACE_TABS_KEY, JSON.stringify({
-      tabs: workspaceTabs.value,
-      activeTabId: activeWorkspaceTabId.value
-    }))
-  }
-
-  function persistWorkspaceLayout() {
-    if (workspaceLayoutPersistTimer) {
-      clearTimeout(workspaceLayoutPersistTimer)
-    }
-    workspaceLayoutPersistTimer = setTimeout(() => {
-      workspaceLayoutPersistTimer = null
-      writeWorkspaceLayout()
-    }, 180)
-  }
-
-  function writeWorkspaceLayout() {
-    localStorage.setItem(WORKSPACE_LAYOUT_KEY, JSON.stringify({
-      primary: workspaceLayout.primary,
-      editor: workspaceLayout.editor,
-      context: workspaceLayout.context
-    }))
-  }
-
-  function handleWorkspaceResize(payload) {
-    const panes = payload?.panes || []
-    if (panes.length === 2) {
-      workspaceLayout.primary = clampPanePercent(panes[0].size, 8, 45, workspaceLayout.primary)
-      workspaceLayout.editor = clampPanePercent(panes[1].size, 50, 92, workspaceLayout.editor)
-      return
-    }
-    if (panes.length < 3) return
-    workspaceLayout.primary = clampPanePercent(panes[0].size, 8, 45, workspaceLayout.primary)
-    workspaceLayout.editor = clampPanePercent(panes[1].size, 18, 80, workspaceLayout.editor)
-    workspaceLayout.context = clampPanePercent(panes[2].size, 12, 65, workspaceLayout.context)
-    normalizeWorkspaceLayout()
-  }
-
-  function normalizeWorkspaceLayout() {
-    workspaceLayout.primary = clampPanePercent(workspaceLayout.primary, 8, 45, 22)
-    workspaceLayout.context = clampPanePercent(workspaceLayout.context, 12, 65, 28)
-    if (workspaceLayout.primary + workspaceLayout.context > 82) {
-      workspaceLayout.context = clampPanePercent(82 - workspaceLayout.primary, 12, 65, 28)
-    }
-    workspaceLayout.editor = clampPanePercent(100 - workspaceLayout.primary - workspaceLayout.context, 18, 80, 50)
-  }
-
   // Audio and video share one predictable desktop baseline.  The runtime
   // resolves `auto` to the host-native implementation; no user preference or
   // stale localStorage value can change a new task's ASR configuration.
@@ -1632,6 +1434,25 @@ export function useAppController() {
 
   const aiRequestOptions = () => ({
     ai_model: selectedAiModel.value
+  })
+
+  const {
+    clipboardWatching,
+    clipboardScanning,
+    clipboardStatus,
+    clipboardStatusText,
+    stopClipboardStatusPolling,
+    toggleClipboardWatching,
+    loadClipboardStatus
+  } = useClipboardController({
+    activeView,
+    aiRequestOptions,
+    asrRequestOptions,
+    batchTaskIds,
+    batchTaskNames,
+    pollBatchTasks,
+    recordTelemetry,
+    useCache
   })
 
   const appearanceRequestOptions = () => ({ theme: selectedTheme.value })
@@ -1670,8 +1491,6 @@ export function useAppController() {
     }
   }
 
-  watch(workspaceTabs, persistWorkspaceTabs, { deep: true })
-  watch(activeWorkspaceTabId, persistWorkspaceTabs)
   watch(
     () => [
       activeWorkspaceTab.value?.content_item_id || '',
@@ -1680,7 +1499,6 @@ export function useAppController() {
     () => syncTaskEventStreamForActiveContent(),
     { flush: 'post' }
   )
-  watch(workspaceLayout, persistWorkspaceLayout)
   watch(selectedAiModel, (model) => {
     assistantAiModel.value = model
     persistAiSettings()
@@ -1806,8 +1624,7 @@ export function useAppController() {
     stopCompletionNotificationPolling()
     window.__knowledgeHubRemoveTrayNotificationListener?.()
     delete window.__knowledgeHubRemoveTrayNotificationListener
-    for (const timer of articlePreviewLoadingTimers.values()) window.clearTimeout(timer)
-    articlePreviewLoadingTimers.clear()
+    disposeArticlePreviews()
     if (aiTokenSummaryTimer) {
       window.clearInterval(aiTokenSummaryTimer)
       aiTokenSummaryTimer = null
@@ -2085,398 +1902,6 @@ export function useAppController() {
     }
   }
 
-  function stopClipboardStatusPolling() {
-    if (clipboardTimer.value) {
-      clearInterval(clipboardTimer.value)
-      clipboardTimer.value = null
-    }
-  }
-
-  function startOpenClawStatusPolling() {
-    if (openclawTimer.value) return
-    // The backend caches OpenClaw CLI checks too; a relaxed cadence avoids
-    // repeatedly launching diagnostic processes while retaining useful status.
-    openclawTimer.value = setInterval(loadOpenClawStatus, 30000)
-  }
-
-  function stopOpenClawStatusPolling() {
-    if (openclawTimer.value) {
-      clearInterval(openclawTimer.value)
-      openclawTimer.value = null
-    }
-  }
-
-  function applyOpenClawStatus(data) {
-    openclawRunning.value = Boolean(data.gateway_running)
-    openclawState.value = data.state || 'unknown'
-    openclawStatus.value = data.detail || '状态未知'
-    openclawBridge.value = data || {}
-  }
-
-  async function loadOpenClawStatus(forceRefresh = false) {
-    try {
-      const res = await axios.get(`${API}/openclaw-gateway`, {
-        params: forceRefresh ? { refresh: true } : undefined,
-        timeout: 30000
-      })
-      applyOpenClawStatus(res.data)
-    } catch (e) {
-      openclawRunning.value = false
-      openclawState.value = 'error'
-      openclawStatus.value = e.response?.data?.detail || e.message || '读取 OpenClaw 状态失败'
-    }
-  }
-
-  async function startOpenClawGateway() {
-    if (openclawRunning.value) {
-      openclawScanning.value = true
-      try {
-        await loadOpenClawStatus(true)
-        if (openclawRunning.value) {
-          ElMessage.success(openclawStatus.value || 'OpenClaw Gateway 运行正常')
-        } else {
-          ElMessage.warning(openclawStatus.value || 'OpenClaw Gateway 未响应')
-        }
-      } finally {
-        openclawScanning.value = false
-      }
-      return
-    }
-    openclawScanning.value = true
-    try {
-      const res = await axios.post(`${API}/openclaw-gateway/start`, {}, { timeout: 60000 })
-      applyOpenClawStatus(res.data)
-      if (!openclawRunning.value) throw new Error(openclawStatus.value || 'OpenClaw Gateway 未能启动')
-      ElMessage.success('OpenClaw Gateway 已启动')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '启动 OpenClaw Gateway 失败'
-      openclawRunning.value = false
-      openclawStatus.value = typeof msg === 'string' ? msg : '启动 OpenClaw Gateway 失败'
-      ElMessage.error(openclawStatus.value)
-    } finally {
-      openclawScanning.value = false
-    }
-  }
-
-  async function saveOpenClawConversationSettings(nextSettings) {
-    const payload = {
-      transcript_mirror_enabled: Boolean(nextSettings?.transcript_mirror_enabled),
-      transcript_retention_days: Number(nextSettings?.transcript_retention_days || openclawTranscriptRetentionDays.value || 30)
-    }
-    try {
-      const res = await axios.put(`${API}/openclaw/conversation-settings`, payload, { timeout: 30000 })
-      openclawBridge.value = {
-        ...openclawBridge.value,
-        conversation_mapping: {
-          ...(openclawBridge.value.conversation_mapping || {}),
-          ...res.data,
-          state: 'ready',
-          configured: true,
-          detail: res.data.transcript_mirror_enabled
-            ? `会话—任务映射已启用；完整对话本地保留 ${res.data.transcript_retention_days} 天`
-            : '会话—任务映射已启用；完整对话仅在你主动开启后保存'
-        }
-      }
-      ElMessage.success(payload.transcript_mirror_enabled ? '已开启本机完整对话镜像' : '已停止保存新的完整对话')
-    } catch (e) {
-      const message = e.response?.data?.detail || e.message || '保存 OpenClaw 对话隐私设置失败'
-      ElMessage.error(message)
-    }
-  }
-
-  function stopTelegramStatusPolling() {
-    if (telegramTimer.value) {
-      clearInterval(telegramTimer.value)
-      telegramTimer.value = null
-    }
-  }
-
-  async function toggleClipboardWatching(enabled) {
-    if (enabled) {
-      await startClipboardWatching()
-    } else {
-      stopClipboardWatching()
-    }
-  }
-
-  async function startClipboardWatching() {
-    clipboardScanning.value = true
-    try {
-      const res = await axios.post(`${API}/clipboard-watcher/start`, {
-        ...asrRequestOptions(),
-        ...aiRequestOptions(),
-        use_cache: useCache.value,
-        poll_interval: 2.5,
-        capture_mode: 'task'
-      }, { timeout: 10000 })
-      const freshIds = applyClipboardStatus(res.data)
-      startClipboardStatusPolling()
-      if (freshIds.length) await pollBatchTasks()
-      ElMessage.success('本机剪贴板监听已开启')
-      void recordTelemetry('clipboard_listener_changed', { state: 'enabled' })
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '开启监听失败'
-      clipboardWatching.value = false
-      clipboardStatus.value = typeof msg === 'string' ? msg : '开启监听失败'
-      ElMessage.error(clipboardStatus.value)
-    } finally {
-      clipboardScanning.value = false
-    }
-  }
-
-  async function stopClipboardWatching() {
-    clipboardScanning.value = true
-    try {
-      const res = await axios.post(`${API}/clipboard-watcher/stop`, {}, { timeout: 10000 })
-      stopClipboardStatusPolling()
-      applyClipboardStatus(res.data)
-      ElMessage.success('本机剪贴板监听已停止')
-      void recordTelemetry('clipboard_listener_changed', { state: 'disabled' })
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '停止监听失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '停止监听失败')
-    } finally {
-      clipboardScanning.value = false
-    }
-  }
-
-  function startClipboardStatusPolling() {
-    if (clipboardTimer.value) return
-    clipboardTimer.value = setInterval(loadClipboardStatus, 2000)
-  }
-
-  async function loadClipboardStatus() {
-    try {
-      const res = await axios.get(`${API}/clipboard-watcher`, { timeout: 10000 })
-      const freshIds = applyClipboardStatus(res.data)
-      if (res.data.running) startClipboardStatusPolling()
-      if (freshIds.length) await pollBatchTasks()
-    } catch (e) {
-      if (clipboardWatching.value) {
-        clipboardStatus.value = e.message || '读取监听状态失败'
-      }
-    }
-  }
-
-  function applyClipboardStatus(data) {
-    const wasRunning = clipboardWatching.value
-    clipboardWatching.value = Boolean(data.running)
-    clipboardStatus.value = data.last_error
-      || (data.running ? '本机监听中' : '未开启')
-    clipboardCapturedLinks.value = (data.captured_links || [])
-      .map((item) => item.link || item)
-      .filter(Boolean)
-      .slice(0, 6)
-
-    const captured = data.captured_links || []
-    for (const item of captured) {
-      if (item?.task_id && !batchTaskNames.value[item.task_id]) {
-        batchTaskNames.value[item.task_id] = item.link || `任务 ${item.task_id}`
-      }
-    }
-    const ids = data.created_task_ids || []
-    const freshIds = ids.filter((id) => !batchTaskIds.value.includes(id))
-    if (freshIds.length) {
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, ...freshIds])]
-      activeView.value = 'library'
-    }
-
-    if (wasRunning && !data.running) {
-      stopClipboardStatusPolling()
-    }
-    return freshIds
-  }
-
-  async function toggleTelegramWatching(enabled) {
-    if (enabled) {
-      await startTelegramWatching()
-    } else {
-      await stopTelegramWatching()
-    }
-  }
-
-  async function startTelegramWatching() {
-    telegramScanning.value = true
-    try {
-      const token = telegramBotToken.value.trim()
-      const allowedUserIds = parseTelegramAllowedUserIds(telegramAllowedUserIds.value)
-      if (!token && !telegramConfigured.value) throw new Error('请先在设置里填写 Telegram Bot Token')
-      if (!allowedUserIds.length) throw new Error('请先在设置里填写 Telegram 用户 ID')
-      await persistTelegramSettings()
-      const res = await axios.post(`${API}/telegram-watcher/start`, {
-        ...(token ? { bot_token: token } : {}),
-        allowed_user_ids: allowedUserIds,
-        reply_enabled: telegramReplyEnabled.value,
-        ...asrRequestOptions(),
-        ...aiRequestOptions(),
-        use_cache: useCache.value
-      }, { timeout: 10000 })
-      const freshIds = applyTelegramStatus(res.data)
-      startTelegramStatusPolling()
-      if (freshIds.length) await pollBatchTasks()
-      ElMessage.success('Telegram 监听已开启')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '开启 Telegram 监听失败'
-      telegramWatching.value = false
-      telegramStatus.value = typeof msg === 'string' ? msg : '开启 Telegram 监听失败'
-      ElMessage.error(telegramStatus.value)
-    } finally {
-      telegramScanning.value = false
-    }
-  }
-
-  async function stopTelegramWatching() {
-    telegramScanning.value = true
-    try {
-      const res = await axios.post(`${API}/telegram-watcher/stop`, {}, { timeout: 10000 })
-      stopTelegramStatusPolling()
-      applyTelegramStatus(res.data)
-      ElMessage.success('Telegram 监听已停止')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '停止 Telegram 监听失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '停止 Telegram 监听失败')
-    } finally {
-      telegramScanning.value = false
-    }
-  }
-
-  function startTelegramStatusPolling() {
-    if (telegramTimer.value) return
-    telegramTimer.value = setInterval(loadTelegramStatus, 2200)
-  }
-
-  async function loadTelegramStatus() {
-    try {
-      const res = await axios.get(`${API}/telegram-watcher`, { timeout: 10000 })
-      const freshIds = applyTelegramStatus(res.data)
-      if (res.data.running) startTelegramStatusPolling()
-      if (freshIds.length) await pollBatchTasks()
-    } catch (e) {
-      if (telegramWatching.value) {
-        telegramStatus.value = e.message || '读取 Telegram 状态失败'
-      }
-    }
-  }
-
-  async function testTelegramConnection() {
-    const token = telegramBotToken.value.trim()
-    if (!token) {
-      ElMessage.warning('请先填写 Bot Token')
-      return
-    }
-    telegramScanning.value = true
-    try {
-      const res = await axios.post(`${API}/telegram-watcher/test`, { bot_token: token }, { timeout: 10000 })
-      await persistTelegramSettings()
-      ElMessage.success(res.data.username ? `已连接 @${res.data.username}` : 'Telegram Bot 可用')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || 'Telegram 连接失败'
-      ElMessage.error(typeof msg === 'string' ? msg : 'Telegram 连接失败')
-    } finally {
-      telegramScanning.value = false
-    }
-  }
-
-  function applyTelegramStatus(data) {
-    const wasRunning = telegramWatching.value
-    telegramWatching.value = Boolean(data.running)
-    telegramConfigured.value = Boolean(data.configured || telegramBotToken.value.trim())
-    telegramStatus.value = data.last_error
-      || (data.running ? 'Telegram 监听中' : telegramConfigured.value ? '未开启' : '未配置')
-    telegramCapturedLinks.value = (data.captured_links || [])
-      .map((item) => item.link || item)
-      .filter(Boolean)
-      .slice(0, 6)
-
-    const captured = data.captured_links || []
-    for (const item of captured) {
-      if (item?.task_id && !batchTaskNames.value[item.task_id]) {
-        batchTaskNames.value[item.task_id] = item.link || `任务 ${item.task_id}`
-      }
-    }
-    const ids = data.created_task_ids || []
-    const freshIds = ids.filter((id) => !batchTaskIds.value.includes(id))
-    if (freshIds.length) {
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, ...freshIds])]
-      activeView.value = 'library'
-    }
-
-    if (wasRunning && !data.running) {
-      stopTelegramStatusPolling()
-    }
-    return freshIds
-  }
-
-  function parseTelegramAllowedUserIds(value) {
-    return String(value || '')
-      .split(/[,\s，；;]+/u)
-      .map((item) => Number(item.trim()))
-      .filter((item) => Number.isSafeInteger(item) && item > 0)
-  }
-
-  async function persistTelegramSettings() {
-    const payload = {
-      allowed_user_ids: parseTelegramAllowedUserIds(telegramAllowedUserIds.value),
-      reply_enabled: telegramReplyEnabled.value
-    }
-    const token = telegramBotToken.value.trim()
-    if (token) payload.bot_token = token
-    try {
-      const res = await axios.post(`${API}/telegram-watcher/settings`, payload, { timeout: 10000 })
-      applyTelegramSettings(res.data)
-      if (token) telegramBotToken.value = ''
-      telegramStatus.value = telegramConfigured.value ? '未开启' : '未配置'
-      return true
-    } catch (e) {
-      telegramConfigured.value = Boolean(token)
-      throw e
-    }
-  }
-
-  async function saveTelegramSettingsFromForm() {
-    try {
-      await persistTelegramSettings()
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '保存 Telegram 设置失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '保存 Telegram 设置失败')
-    }
-  }
-
-  async function loadTelegramSettings() {
-    try {
-      const res = await axios.get(`${API}/telegram-watcher/settings`, { timeout: 10000 })
-      applyTelegramSettings(res.data)
-      return Boolean(res.data.configured)
-    } catch {
-      return false
-    }
-  }
-
-  function applyTelegramSettings(data) {
-    telegramAllowedUserIds.value = Array.isArray(data.allowed_user_ids)
-      ? data.allowed_user_ids.join(', ')
-      : telegramAllowedUserIds.value
-    telegramReplyEnabled.value = Boolean(data.reply_enabled ?? telegramReplyEnabled.value)
-    telegramConfigured.value = Boolean(data.configured)
-  }
-
-  function restoreTelegramSettings() {
-    try {
-      const raw = localStorage.getItem(LEGACY_TELEGRAM_SETTINGS_KEY)
-      if (!raw) return false
-      const data = JSON.parse(raw)
-      telegramBotToken.value = data.bot_token || ''
-      telegramAllowedUserIds.value = data.allowed_user_ids || ''
-      telegramReplyEnabled.value = Boolean(data.reply_enabled ?? true)
-      telegramConfigured.value = Boolean(telegramBotToken.value.trim())
-      telegramStatus.value = telegramConfigured.value ? '未开启' : '未配置'
-      localStorage.removeItem(LEGACY_TELEGRAM_SETTINGS_KEY)
-      return true
-    } catch {
-      return false
-    }
-  }
-
   function shortLink(link) {
     return link.replace(/^https?:\/\//, '').replace(/^www\./, '').slice(0, 42)
   }
@@ -2594,110 +2019,7 @@ export function useAppController() {
   }
 
   function resetQaState() {
-    const session = activeQaSessionId.value
-      ? qaSessionsByContentId[activeQaSessionId.value]
-      : null
-    if (!session) {
-      detachQaSession()
-      return
-    }
-    clearQaSession(activeQaSessionId.value, session)
-  }
-
-  function loadContentViewState() {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return normalizeContentReadState(null)
-    }
-    try {
-      const raw = window.localStorage.getItem(CONTENT_VIEW_STATE_KEY)
-      if (!raw) return normalizeContentReadState(null)
-      return normalizeContentReadState(JSON.parse(raw))
-    } catch {
-      return normalizeContentReadState(null)
-    }
-  }
-
-  function persistContentViewState() {
-    if (typeof window === 'undefined' || !window.localStorage) return
-    try {
-      window.localStorage.setItem(CONTENT_VIEW_STATE_KEY, JSON.stringify({
-        version: 2,
-        initialized: contentViewStateInitialized,
-        viewed_content_ids: viewedContentIds.value,
-        explicitly_unread_content_ids: explicitlyUnreadContentIds.value,
-        viewed_before: contentViewedBefore.value || null,
-      }))
-    } catch {
-      // Read state is convenience metadata; storage failures must not affect the library.
-    }
-  }
-
-  function reconcileContentViewState(items, { initialWindowComplete = false } = {}) {
-    const currentIds = new Set((items || []).map((item) => String(item?.id || '')).filter(Boolean))
-    if (!contentViewStateInitialized) {
-      // The normal tree intentionally omits archive documents. Once the
-      // initial recent window is complete, use a timestamp baseline instead
-      // of trying to enumerate every historical ID. Archive records that
-      // already existed are therefore read when a folder reveals them later.
-      if (!initialWindowComplete) return
-      viewedContentIds.value = [...currentIds]
-      contentViewStateInitialized = true
-      contentViewedBefore.value = new Date().toISOString()
-      persistContentViewState()
-      return
-    }
-    if (contentViewStateNeedsBaselineMigration && initialWindowComplete) {
-      // v1 stored only read IDs. Preserve the user's current unread recent
-      // documents as explicit overrides before giving unlisted archive items
-      // the same initial-read baseline as new installations.
-      const viewedIds = new Set(viewedContentIds.value)
-      explicitlyUnreadContentIds.value = uniqueIds([
-        ...explicitlyUnreadContentIds.value,
-        ...[...currentIds].filter((id) => !viewedIds.has(id)),
-      ])
-      contentViewedBefore.value = new Date().toISOString()
-      contentViewStateNeedsBaselineMigration = false
-      persistContentViewState()
-    }
-  }
-
-  function scheduleContentViewed(contentItemId) {
-    if (!contentItemId) return
-    if (contentViewTimer) window.clearTimeout(contentViewTimer)
-    const id = String(contentItemId)
-    contentViewTimer = window.setTimeout(() => {
-      contentViewTimer = null
-      if (String(selectedContentItem.value?.id || '') !== id) return
-      if (viewedContentIds.value.includes(id)) return
-      viewedContentIds.value = [...viewedContentIds.value, id]
-      explicitlyUnreadContentIds.value = explicitlyUnreadContentIds.value.filter((currentId) => currentId !== id)
-      persistContentViewState()
-    }, 800)
-  }
-
-  function setContentViewedState(contentItemIds, viewed) {
-    const ids = uniqueIds(contentItemIds)
-    if (!ids.length) return
-    if (contentViewTimer) {
-      window.clearTimeout(contentViewTimer)
-      contentViewTimer = null
-    }
-    const currentIds = new Set(viewedContentIds.value)
-    const unreadIds = new Set(explicitlyUnreadContentIds.value)
-    if (viewed) {
-      ids.forEach((id) => {
-        currentIds.add(id)
-        unreadIds.delete(id)
-      })
-    } else {
-      ids.forEach((id) => {
-        currentIds.delete(id)
-        unreadIds.add(id)
-      })
-    }
-    viewedContentIds.value = [...currentIds]
-    explicitlyUnreadContentIds.value = [...unreadIds]
-    persistContentViewState()
+    resetActiveQaSession()
   }
 
   async function loadContentQaHistory(contentItemId, session = ensureQaSession(contentItemId)) {
@@ -4020,90 +3342,6 @@ export function useAppController() {
     }
   }
 
-  async function loadArticlePreview(item, { force = false } = {}) {
-    if (!item?.id) return
-    const currentPreview = articlePreviews[item.id]
-    if (!force && currentPreview !== undefined) return
-    const cachedPreview = force ? null : readArticlePreviewCache(item.id, item.updated_at)
-    if (cachedPreview) {
-      // Render the durable local snapshot before revalidating it. This keeps a
-      // known article readable across app restarts instead of flashing a loader.
-      articlePreviews[item.id] = cachedPreview
-    } else {
-      articlePreviews[item.id] = pendingArticlePreview(currentPreview, item.text_readiness)
-      scheduleArticlePreviewLoader(item.id)
-    }
-    try {
-      const res = await axios.get(`${API}/content/${item.id}/article-preview`, {
-        timeout: 30000
-      })
-      articlePreviews[item.id] = res.data
-      cancelArticlePreviewLoader(item.id)
-      writeArticlePreviewCache(item, res.data)
-      scheduleArticlePreviewFormattingRefresh(item.id)
-      // Article preview can finish materializing the local body. Refresh the
-      // lightweight readiness separately so the assistant stops showing the
-      // startup placeholder without waiting for a manual library refresh.
-      void refreshContentTextReadiness(item.id)
-    } catch (error) {
-      cancelArticlePreviewLoader(item.id)
-      if (cachedPreview) return
-      articlePreviews[item.id] = {
-        error: error.response?.data?.detail || '文章版式预览暂不可用'
-      }
-      await refreshContentTextReadiness(item.id)
-    }
-  }
-
-  function updatePendingArticlePreviewReadiness(item) {
-    if (!item?.id || !articlePreviews[item.id]?.loading) return
-    // The list deliberately returns a cheap "pending" readiness marker.
-    // Replace it as soon as the exact item detail arrives, without restarting
-    // the in-flight preview request or flashing a second loader.
-    articlePreviews[item.id] = pendingArticlePreview(articlePreviews[item.id], item.text_readiness)
-  }
-
-  function scheduleArticlePreviewLoader(contentItemId) {
-    cancelArticlePreviewLoader(contentItemId)
-    const timer = window.setTimeout(() => {
-      articlePreviewLoadingTimers.delete(contentItemId)
-      const preview = articlePreviews[contentItemId]
-      if (preview?.loading) articlePreviews[contentItemId] = revealArticlePreviewLoader(preview)
-    }, 180)
-    articlePreviewLoadingTimers.set(contentItemId, timer)
-  }
-
-  function cancelArticlePreviewLoader(contentItemId) {
-    const timer = articlePreviewLoadingTimers.get(contentItemId)
-    if (timer !== undefined) window.clearTimeout(timer)
-    articlePreviewLoadingTimers.delete(contentItemId)
-  }
-
-  function scheduleArticlePreviewFormattingRefresh(contentItemId, attempt = 0) {
-    const preview = articlePreviews[contentItemId]
-    if (!['queued', 'running'].includes(preview?.formatting_status) || articlePreviewFormattingTimers.has(contentItemId)) return
-    const timer = window.setTimeout(async () => {
-      articlePreviewFormattingTimers.delete(contentItemId)
-      try {
-        const res = await axios.get(`${API}/content/${contentItemId}/article-preview`, {
-          timeout: 30000
-        })
-        articlePreviews[contentItemId] = res.data
-        if (attempt < 39) scheduleArticlePreviewFormattingRefresh(contentItemId, attempt + 1)
-      } catch {
-        // The OCR original remains readable. A later explicit reopen/retry can
-        // request the formatting state again without showing a transient error.
-      }
-    }, 1500)
-    articlePreviewFormattingTimers.set(contentItemId, timer)
-  }
-
-  function cancelArticlePreviewFormattingRefresh(contentItemId) {
-    const timer = articlePreviewFormattingTimers.get(contentItemId)
-    if (timer !== undefined) window.clearTimeout(timer)
-    articlePreviewFormattingTimers.delete(contentItemId)
-  }
-
   function mergeContentTextReadiness(contentItemId, readiness) {
     if (!contentItemId || !readiness) return
     allContentItems.value = allContentItems.value.map((item) => (
@@ -4132,10 +3370,7 @@ export function useAppController() {
     try {
       const res = await axios.post(`${API}/content/${item.id}/source-text/refresh`, {}, { timeout: 30000 })
       mergeContentTextReadiness(item.id, res.data)
-      cancelArticlePreviewFormattingRefresh(item.id)
-      cancelArticlePreviewLoader(item.id)
-      delete articlePreviews[item.id]
-      removeArticlePreviewCache(item.id)
+      resetArticlePreview(item.id)
       await loadArticlePreview({ ...item, text_readiness: res.data })
       ElMessage.success('正文已重新抓取')
     } catch (error) {
@@ -5917,30 +5152,16 @@ export function useAppController() {
   }
 
   return {
-    API,
-    WORKSPACE_TABS_KEY,
-    WORKSPACE_LAYOUT_KEY,
     activeView,
-    completionNotifications,
     workspaceTabs,
-    activeWorkspaceTabId,
     workspaceLayout,
-    openSections,
     shareText,
     parsedUrl,
     running,
-    cancelling,
-    activeStep,
-    currentStep,
     logs,
     processLogEntries,
-    logContainer,
-    backendLogCount,
-    pollTimer,
     taskStatus,
-    taskCancelRequested,
     selectedModel,
-    availableModels,
     selectedAsrBackend,
     availableAsrBackends,
     miniprogramForumCaptureEnabled,
@@ -5959,29 +5180,21 @@ export function useAppController() {
     searchQuery,
     librarySearchScope,
     searchResults,
-    searchingContent,
-    searchTimer,
     libraryFolders,
     libraryFolderHistoryStates,
     libraryFolderRevealIds,
     libraryTrashEntries,
     loadingLibraryTrash,
-    canUndoLibraryAction,
-    canRedoLibraryAction,
-    contentItems,
     allContentItems,
     contentPagesLoading,
     contentPageLoadStatus,
     selectedContentItem,
-    loadingContent,
     startupBlocking,
     startupCanRetry,
     startupStatus,
-    updatingContentId,
     retryingContentId,
     showMarkdownDialog,
     currentMarkdownItem,
-    loadingMarkdown,
     savingMarkdown,
     syncingMarkdown,
     exportingConversationMarkdown,
@@ -5995,19 +5208,8 @@ export function useAppController() {
     activatingPromptTemplate,
     promptEditorName,
     promptEditorText,
-    inboxItems,
-    loadingInbox,
-    processingInboxIds,
-    batchShareText,
-    creatingBatchLinks,
-    uploadFiles,
-    uploadingVideos,
-    subtitleFiles,
-    uploadingSubtitles,
     batchTasks,
     batchTaskIds,
-    batchTaskNames,
-    batchPollTimer,
     questionInput,
     activeSelectedTextContext,
     autoQaShortcutRecognition,
@@ -6025,30 +5227,17 @@ export function useAppController() {
     startingNewChat,
     lastQaSaved,
     clipboardWatching,
-    clipboardTimer,
     clipboardScanning,
-    clipboardStatus,
-    clipboardCapturedLinks,
     openclawRunning,
     openclawScanning,
     openclawConnectionItems,
     openclawStatusTone,
-    telegramWatching,
-    telegramTimer,
-    telegramScanning,
-    telegramStatus,
-    telegramCapturedLinks,
-    telegramBotToken,
-    telegramAllowedUserIds,
-    telegramReplyEnabled,
-    telegramConfigured,
     obsidianVaultPath,
     markdownExportPath,
     obsidianAutoWrite,
     cookieConfigured,
     cookieState,
     cookieStatusText,
-    cookieStatusDetail,
     cookieChecking,
     cookieInput,
     savingCookie,
@@ -6065,31 +5254,18 @@ export function useAppController() {
     selectedThemeOption,
     markdownState,
     result,
-    stages,
-    modelProfiles,
-    stepNames,
-    timingOrder,
-    terminalStatuses,
-    preferredModelOrder,
-    contentStatusOptions,
     promptTaskOptions,
     ribbonItems,
-    renderedSummary,
     selectedMarkdownPreview,
     selectedMarkdownSizeBytes,
     selectedReportSourceStats,
     mediaPreviewUrl,
-    sidebarContentItems,
     sidebarTreeItems,
     activeWorkspaceTab,
     activeWorkspaceContent,
-    activeWorkspaceResult,
     activeContentAiCalls,
     dailyAiTokenUsage,
     openClawTokenUsage,
-    activeWorkspaceStatus,
-    activeWorkspaceMediaUrl,
-    activeWorkspaceTranscript,
     currentInsightHtml,
     currentInsightTitle,
     isPipelineSummaryGenerating,
@@ -6098,12 +5274,6 @@ export function useAppController() {
     currentQaHint,
     canGenerateAiSummary,
     currentObsidianPath,
-    currentSummaryText,
-    contentStatusCounts,
-    timingRows,
-    textSourceRows,
-    aiCallRows,
-    errorInfoRows,
     totalElapsed,
     hasTaskProgress,
     activeBatchCount,
@@ -6111,16 +5281,8 @@ export function useAppController() {
     articlePreparationStatus,
     currentArticleOcrStatus,
     prioritizingArticleOcr,
-    batchLinkCount,
-    clipboardStatusText,
     openclawStatusText,
-    openclawTranscriptMirrorEnabled,
-    openclawTranscriptRetentionDays,
-    saveOpenClawConversationSettings,
-    telegramStatusText,
     modelProfileOptions,
-    selectedModelProfile,
-    activePromptTemplate,
     currentStageLabel,
     workspaceTabById,
     contentForTab,
@@ -6133,94 +5295,37 @@ export function useAppController() {
     prioritizeCurrentArticleOcr,
     addLog,
     clearLogs,
-    addBackendLogs,
     statusLabel,
     statusTagType,
     progressStatus,
     roundedProgress,
-    stageProgress,
-    cacheHitLabel,
-    textSourceKindLabel,
-    textSourceProviderLabel,
-    aiCallTypeLabel,
-    errorCategoryLabel,
-    retryScopeLabel,
     stepLabel,
     modelLabel,
     sourceProviderLabel,
     promptTaskLabel,
-    contentStatusCount,
     openContentFromSidebar,
-    loadCompletionNotifications,
-    openCompletionNotification,
-    openSearchResult,
-    tabIdForContent,
-    makeContentTab,
-    openContentTab,
     activateWorkspaceTab,
-    removeWorkspaceTabState,
     closeWorkspaceTab,
     closeWorkspaceTabs,
     revealWorkspaceTabLocation,
     deleteWorkspaceTabContent,
-    syncActiveWorkspaceTabSelection,
-    restoreWorkspaceState,
-    persistWorkspaceTabs,
-    persistWorkspaceLayout,
-    clampPaneWidth,
-    clampPanePercent,
     handleWorkspaceResize,
     markdownSyncLabel,
     formatSeconds,
-    formatTokenCount,
-    formatEstimatedCost,
     formatBytes,
     formatDuration,
     formatDateTime,
-    sanitizeHtml,
     renderMarkdown,
-    stopPolling,
-    stopBatchPolling,
-    startTaskQueuePolling,
-    stopTaskQueuePolling,
     setTaskQueuePollingInterval,
-    stopArticlePreparationStatusPolling,
-    stopClipboardStatusPolling,
-    stopOpenClawStatusPolling,
-    stopTelegramStatusPolling,
     toggleClipboardWatching,
-    startClipboardWatching,
-    stopClipboardWatching,
-    startClipboardStatusPolling,
-    loadClipboardStatus,
-    applyClipboardStatus,
     loadOpenClawStatus,
     startOpenClawGateway,
-    saveOpenClawConversationSettings,
-    toggleTelegramWatching,
-    startTelegramWatching,
-    stopTelegramWatching,
-    startTelegramStatusPolling,
-    loadTelegramStatus,
-    testTelegramConnection,
-    applyTelegramStatus,
-    loadObsidianSettings,
     saveObsidianSettingsFromForm,
-    parseTelegramAllowedUserIds,
-    persistTelegramSettings,
-    saveTelegramSettingsFromForm,
-    restoreTelegramSettings,
-    shortLink,
-    resetQaState,
     setContentViewedState,
-    resetRunState,
-    applyTaskData,
-    pollTask,
     saveCookie,
     saveBilibiliCookie,
     connectPlatformAuth,
     disconnectPlatformAuth,
-    loadArticlePreparationStatus,
     loadContentItems,
     revealContentItems,
     retryStartupHydration,
@@ -6230,10 +5335,6 @@ export function useAppController() {
     restoreLibraryTrashEntry,
     permanentlyDeleteLibraryTrashEntry,
     emptyLibraryTrash,
-    undoLibraryAction,
-    redoLibraryAction,
-    applyContentFilter,
-    updateContentStatus,
     createLibraryFolder,
     renameLibraryFolder,
     setLibraryFolderPinned,
@@ -6243,9 +5344,6 @@ export function useAppController() {
     moveLibraryNode,
     moveLibraryNodes,
     deleteLibraryNodes,
-    applyMarkdownState,
-    resetMarkdownState,
-    selectContentItem,
     retryContentSourceText,
     retryContentProcessing,
     reprocessLocalSource,
@@ -6271,27 +5369,13 @@ export function useAppController() {
     activatePromptTemplate,
     deletePromptTemplate,
     searchContent,
-    loadInboxItems,
-    loadTaskQueue,
-    processInboxItem,
-    mergeBatchTasks,
     batchTaskName,
-    batchTaskMeta,
-    extractBatchLinks,
-    startBatchLinkTasks,
-    createLinkTasks,
-    startUploadTasks,
-    startSubtitleUploadTasks,
     pollBatchTasks,
     monitorCreatorSyncTasks,
     cancelBatchTask,
     cancelActiveTasks,
     loadBatchTaskDetails,
-    pauseBatchTask,
-    resumeBatchTask,
-    prioritizeBatchTask,
     retryBatchTask,
-    showBatchTask,
     copyText,
     revealLibraryNodeLocation,
     revealLocalPath,
@@ -6299,7 +5383,6 @@ export function useAppController() {
     startNewChat,
     onInputChange,
     runFullPipeline,
-    cancelCurrentTask,
     insertQaShortcut,
     setSelectedTextContext,
     clearSelectedTextContext,

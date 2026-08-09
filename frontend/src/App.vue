@@ -178,7 +178,6 @@
             ]"
             v-model:search-query="searchQuery"
             v-model:share-text="shareText"
-            v-model:prompt-task-type="promptTaskType"
             :active-view="activeView"
             :library-mode="librarySidebarMode"
             :search-scope="librarySearchScope"
@@ -205,10 +204,6 @@
             :active-prompt-node-id="activePromptNodeId"
             :prompt-trash-entries="promptTrashEntries"
             :loading-prompt-trash="loadingPromptTrash"
-            :status-label="statusLabel"
-            :source-provider-label="sourceProviderLabel"
-            :prompt-task-label="promptTaskLabel"
-            :format-bytes="formatBytes"
             @search="searchContent"
             @update:search-scope="librarySearchScope = $event"
             @clear-search="searchQuery = ''"
@@ -233,7 +228,6 @@
             @restore-trash="restoreLibraryTrashEntry"
             @permanently-delete-trash="permanentlyDeleteLibraryTrashEntry"
             @empty-trash="emptyLibraryTrash"
-            @load-prompts="loadPromptTemplates"
             @open-prompt="openPromptWorkspaceFile"
             @open-system-prompt="openSystemPromptWorkspaceFile"
             @open-prompt-context="openPromptContextWorkspaceFile"
@@ -347,20 +341,15 @@
           <EditorHost
             v-else
             ref="editorHost"
-            v-model:selected-model="selectedModel"
-            v-model:use-cache="useCache"
-            v-model:prompt-task-type="promptTaskType"
+            :prompt-task-type="promptTaskType"
             v-model:prompt-editor-text="promptEditorText"
-            v-model:prompt-editor-name="promptEditorName"
+            :prompt-editor-name="promptEditorName"
             :active-view="activeView"
             :workspace-tabs="workspaceTabs"
             :active-workspace-tab="activeWorkspaceTab"
             :selected-content-item="selectedContentItem"
-            :model-profile-options="modelProfileOptions"
             :running="running"
             :result="result"
-            :parsed-url="parsedUrl"
-            :media-preview-url="mediaPreviewUrl"
             :selected-markdown-preview="selectedMarkdownPreview"
             :selected-markdown-size-bytes="selectedMarkdownSizeBytes"
             :selected-markdown-path="markdownState.markdown_draft_path"
@@ -372,7 +361,6 @@
             :loading-prompts="loadingPrompts"
             :saving-prompt-template="savingPromptTemplate"
             :activating-prompt-template="activatingPromptTemplate"
-            :wechat-report-groups="wechatReportGroups"
             :wechat-report-prompts="wechatReportPrompts"
             :selected-wechat-report-prompt-group-id="selectedWechatReportPromptGroupId"
             :selected-wechat-report-prompt-type="selectedWechatReportPromptType"
@@ -389,36 +377,16 @@
             :source-provider-label="sourceProviderLabel"
             :format-duration="formatDuration"
             :format-date-time="formatDateTime"
-            :prompt-task-label="promptTaskLabel"
             :format-bytes="formatBytes"
-            :rounded-progress="roundedProgress"
-            :status-label="statusLabel"
-            :step-label="stepLabel"
-            :batch-task-name="batchTaskName"
-            :format-seconds="formatSeconds"
             :format-token-count="formatTokenCount"
             :retrying-content-id="retryingContentId"
             :wechat-publishing-configured="wechatPublishingSettings.configured"
             :wechat-cover-generating-content-ids="wechatCoverGeneratingContentIds"
             :wechat-cover-switching-content-ids="wechatCoverSwitchingContentIds"
             :wechat-cover-history-for-content="wechatCoverHistoryForContent"
-            @activate-workspace-tab="activateWorkspaceTab"
-            @close-workspace-tab="closeWorkspaceTab"
-            @close-workspace-tabs="closeWorkspaceTabs"
-            @reveal-workspace-tab="revealWorkspaceTabLocation"
-            @delete-workspace-tab="deleteWorkspaceTabContent"
-            @load-prompts="loadPromptTemplates"
-            @select-prompt-template="selectPromptTemplate"
-            @new-prompt-template="createPromptTemplate"
             @save-prompt="savePromptWorkspaceCurrent"
             @reset-prompt="resetPromptWorkspaceCurrent"
             @activate-prompt-template="activatePromptWorkspaceTemplate"
-            @delete-prompt-template="deletePromptTemplate"
-            @activate-prompt-tab="activatePromptWorkspaceTab"
-            @close-prompt-tab="closePromptWorkspaceTab"
-            @close-prompt-tabs="closePromptWorkspaceTabs"
-            @update:selected-wechat-report-prompt-group-id="selectWechatReportPromptGroup"
-            @update:selected-wechat-report-prompt-type="selectWechatReportPromptType"
             @update:wechat-report-prompt-text="wechatReportPromptText = $event"
             @save-wechat-report-prompt="savePromptWorkspaceCurrent"
             @copy-text="copyText"
@@ -557,12 +525,14 @@
       </Transition>
 
       <CommandPalette
+        v-if="commandPaletteOpen"
         v-model="commandPaletteOpen"
         :items="commandPaletteItems"
         @select="handleCommandPaletteSelect"
       />
 
       <SettingsDialog
+        v-if="showSettings"
         v-model="showSettings"
         @library-changed="loadContentItems"
         @processing-started="handleCreatorProcessingStarted"
@@ -712,6 +682,7 @@
       />
 
       <SourceGroupEditorDialog
+        v-if="showSourceGroupEditor"
         v-model="showSourceGroupEditor"
         :group="sourceGroupEditor"
         :removing-source-key="removingSourceGroupKey"
@@ -720,12 +691,14 @@
       />
 
       <ReportGenerationDialog
+        v-if="reportGenerationDialog.visible"
         :state="reportGenerationDialog"
         @cancel="cancelReportGenerationDialog"
         @confirm="confirmReportGenerationDialog"
       />
 
       <WechatCoverPlanDialog
+        v-if="wechatCoverPlanDialogVisible"
         v-model:visible="wechatCoverPlanDialogVisible"
         :loading="planningWechatCover"
         :submitting="submittingWechatCoverPlan"
@@ -739,112 +712,27 @@
         @preview-prompt="previewWechatCoverPrompt"
       />
 
-      <el-dialog
-        v-model="wechatDraftDialogVisible"
-        class="wechat-draft-dialog"
-        width="min(560px, calc(100vw - 40px))"
-        align-center
-        :show-close="true"
-        :close-on-click-modal="true"
-        :close-on-press-escape="true"
-      >
-        <template #header>
-          <div class="wechat-draft-dialog-title">
-            <strong>存入公众号草稿</strong>
-            <span>仅保存到 {{ wechatPublishingSettings.display_name || '订阅号' }} 草稿箱，不会自动发表</span>
-          </div>
-        </template>
-        <div v-loading="loadingWechatDraftDefaults" class="wechat-draft-dialog-form">
-          <el-form label-position="top">
-            <el-form-item label="标题">
-              <el-input v-model="wechatDraftTitle" maxlength="64" show-word-limit />
-            </el-form-item>
-            <el-form-item label="摘要（选填）">
-              <el-input
-                :model-value="wechatDraftDigest"
-                type="textarea"
-                :rows="3"
-                resize="none"
-                @update:model-value="wechatDraftDigest = truncateWechatDigest($event)"
-              />
-              <small class="wechat-draft-dialog-hint">微信公众号按字节限制摘要；中文约可输入 40 个字。</small>
-            </el-form-item>
-            <el-form-item label="作者（选填）">
-              <el-input v-model="wechatDraftAuthor" maxlength="64" />
-            </el-form-item>
-            <el-form-item label="文章封面">
-              <div class="wechat-draft-cover">
-                <div class="wechat-draft-cover-frame">
-                  <img
-                    v-if="wechatDraftCoverUrl"
-                    :src="wechatDraftCoverUrl"
-                    :alt="`${wechatDraftTitle || '公众号文章'}封面`"
-                  />
-                  <span v-else>尚未生成封面</span>
-                </div>
-                <div class="wechat-draft-cover-action">
-                  <small v-if="wechatDraftCoverUrl">已保存到本机；存入草稿时将直接复用这张封面。</small>
-                  <small v-else-if="wechatDraftCoverAvailable">请先从报告右上角“三点”菜单生成并确认封面。</small>
-              <small v-else>请先在“AI 服务”设置中配置图像模型，再从报告右上角生成封面。</small>
-                </div>
-              </div>
-            </el-form-item>
-          </el-form>
-          <section
-            v-if="wechatDraftIpPreflight"
-            class="wechat-draft-ip-preflight"
-            :class="`is-${wechatDraftIpPreflight.status || 'unverified'}`"
-            aria-live="polite"
-          >
-            <div>
-              <strong>公众号 IP 预检</strong>
-              <span>{{ wechatDraftIpPreflight.current_ip ? `当前 ${wechatDraftIpPreflight.current_ip}` : '暂未获取 IP' }}</span>
-            </div>
-            <p>{{ wechatDraftIpPreflight.message }}</p>
-            <small v-if="wechatDraftIpPreflight.last_verified_ip">
-              上次公众号验证：{{ wechatDraftIpPreflight.last_verified_ip }}
-            </small>
-            <el-button
-              v-if="['changed', 'verification_failed'].includes(wechatDraftIpPreflight.status)"
-              size="small"
-              :loading="verifyingWechatDraftIp"
-              @click="verifyWechatDraftIp"
-            >
-              已加入白名单，重新验证
-            </el-button>
-          </section>
-          <details v-if="wechatDraftPreviewHtml" class="wechat-draft-preview">
-            <summary>查看固定版式预览</summary>
-            <p>存入草稿箱时将使用此版式；正文引用可跳转至文末来源和原始文章。</p>
-            <iframe title="公众号报告排版预览" :srcdoc="wechatDraftPreviewHtml" />
-          </details>
-          <section v-if="wechatDraftTask && ['queued', 'running'].includes(wechatDraftTask.status)" class="wechat-draft-task-state" aria-live="polite">
-            <div>
-              <strong>{{ wechatDraftTaskStageLabel(wechatDraftTask.stage) }}</strong>
-              <span>{{ Math.round(Number(wechatDraftTask.progress || 0)) }}%</span>
-            </div>
-            <el-progress :percentage="Math.round(Number(wechatDraftTask.progress || 0))" :show-text="false" :stroke-width="5" />
-            <small>可关闭此窗口，任务会继续在后台完成。</small>
-          </section>
-          <section v-else-if="wechatDraftTask?.status === 'failed'" class="wechat-draft-task-state is-failed" role="alert">
-            <strong>存入草稿箱未完成</strong>
-            <small>{{ wechatDraftTask.error || '任务执行失败，请检查网络后重试。' }}</small>
-          </section>
-          <div v-if="wechatDraftLatestPublication?.status === 'draft_created'" class="wechat-draft-publication-state">
-            <span>草稿已创建，等待公众号后台发表。</span>
-            <el-button size="small" @click="confirmWechatPublication">已发表，写入历史档案</el-button>
-          </div>
-          <div v-else-if="wechatDraftLatestPublication?.status === 'published'" class="wechat-draft-publication-state is-published">
-            <span>该报告已写入历史档案。</span>
-          </div>
-        </div>
-        <template #footer>
-          <el-button @click="wechatDraftDialogVisible = false">关闭</el-button>
-          <el-button type="primary" :loading="creatingWechatDraft" :disabled="loadingWechatDraftDefaults || !wechatDraftIpCanSubmit || wechatDraftTaskRunning || wechatDraftAlreadyCreated || !wechatDraftTitle.trim() || !wechatDraftCoverUrl" @click="createWechatReportDraft">
-            {{ wechatDraftAlreadyCreated ? '草稿已创建' : wechatDraftTask?.status === 'failed' ? '重新存入草稿箱' : '存入草稿箱' }}
-          </el-button>
-        </template>
-      </el-dialog>
+      <WechatDraftDialog
+        v-if="wechatDraftDialogVisible"
+        v-model:visible="wechatDraftDialogVisible"
+        v-model:title="wechatDraftTitle"
+        v-model:author="wechatDraftAuthor"
+        :digest="wechatDraftDigest"
+        :display-name="wechatPublishingSettings.display_name"
+        :loading-defaults="loadingWechatDraftDefaults"
+        :cover-url="wechatDraftCoverUrl"
+        :cover-available="wechatDraftCoverAvailable"
+        :ip-preflight="wechatDraftIpPreflight"
+        :verifying-ip="verifyingWechatDraftIp"
+        :preview-html="wechatDraftPreviewHtml"
+        :task="wechatDraftTask"
+        :latest-publication="wechatDraftLatestPublication"
+        :creating="creatingWechatDraft"
+        @update:digest="wechatDraftDigest = truncateWechatDigest($event)"
+        @verify-ip="verifyWechatDraftIp"
+        @confirm-publication="confirmWechatPublication"
+        @submit="createWechatReportDraft"
+      />
 
       <el-dialog v-model="showMarkdownDialog" title="Markdown 草稿" width="860px">
         <div class="markdown-dialog">
@@ -948,15 +836,13 @@ import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, onMounted
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SvgMaskIcon from './components/SvgMaskIcon.vue'
-import CommandPalette from './components/CommandPalette.vue'
 import PanelToggleIcon from './components/PanelToggleIcon.vue'
 import StatusBreadcrumb from './components/StatusBreadcrumb.vue'
-import SettingsDialog from './components/SettingsDialog.vue'
 import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
 import { formatTokenCount } from './utils/viewFormatters'
-import { localApiAuthHeaders, localApiRequestUrl } from './utils/localApiAuth.js'
+import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from './utils/localApiAuth.js'
 import WorkbenchShell from './workbench/WorkbenchShell.vue'
 import WorkspaceTabs from './workbench/WorkspaceTabs.vue'
 import WorkspaceChromeActions from './workbench/WorkspaceChromeActions.vue'
@@ -968,19 +854,16 @@ import {
   isSinglePaneWorkspaceView,
   preloadWorkspaceViewModules,
 } from './workbench/workspaceViewLoading.js'
-import ReportGenerationDialog from './features/reports/ReportGenerationDialog.vue'
 import { formatReportTaskWindow } from './features/reports/reportGenerationPresentation.js'
-import SourceGroupEditorDialog from './features/reports/SourceGroupEditorDialog.vue'
-import WechatCoverPlanDialog from './features/wechat/WechatCoverPlanDialog.vue'
 import SecondarySidebar from './features/assistant/SecondarySidebar.vue'
-import KnowledgeSidebar from './features/knowledge/KnowledgeSidebar.vue'
-import EvidencePreviewSidebar from './features/knowledge/EvidencePreviewSidebar.vue'
 import { useAppController } from './composables/useAppController'
 import { useCampusAccess } from './composables/useCampusAccess'
+import { useRuntimeSettingsController } from './features/settings/useRuntimeSettingsController.js'
 import { requestDestructiveConfirmation } from './composables/useDestructiveConfirm'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from './utils/sourceSyncTask'
 import { promptTaskContracts, promptTemplateDisplayName } from './config/promptInterface'
 import { WECHAT_COVER_STYLE_OPTIONS } from './config/wechatCoverStyles'
+import { useWechatDraftController } from './features/wechat/useWechatDraftController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -988,6 +871,8 @@ const loadCreatorWorkspace = () => import('./features/creator/CreatorWorkspace.v
 const loadRssWorkspace = () => import('./features/rss/RssWorkspace.vue')
 const loadReportsWorkspace = () => import('./features/reports/ReportsWorkspace.vue')
 const loadKnowledgeWorkspace = () => import('./features/knowledge/KnowledgeWorkspace.vue')
+const loadKnowledgeSidebar = () => import('./features/knowledge/KnowledgeSidebar.vue')
+const loadEvidencePreviewSidebar = () => import('./features/knowledge/EvidencePreviewSidebar.vue')
 const workspaceViewModuleLoaders = [
   loadWeChatManager,
   loadCampusManager,
@@ -995,6 +880,8 @@ const workspaceViewModuleLoaders = [
   loadRssWorkspace,
   loadReportsWorkspace,
   loadKnowledgeWorkspace,
+  loadKnowledgeSidebar,
+  loadEvidencePreviewSidebar,
 ]
 const WeChatManager = defineAsyncComponent(loadWeChatManager)
 const CampusManager = defineAsyncComponent(loadCampusManager)
@@ -1002,8 +889,14 @@ const CreatorWorkspace = defineAsyncComponent(loadCreatorWorkspace)
 const RssWorkspace = defineAsyncComponent(loadRssWorkspace)
 const ReportsWorkspace = defineAsyncComponent(loadReportsWorkspace)
 const KnowledgeWorkspace = defineAsyncComponent(loadKnowledgeWorkspace)
-const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
-
+const KnowledgeSidebar = defineAsyncComponent(loadKnowledgeSidebar)
+const EvidencePreviewSidebar = defineAsyncComponent(loadEvidencePreviewSidebar)
+const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
+const SettingsDialog = defineAsyncComponent(() => import('./components/SettingsDialog.vue'))
+const ReportGenerationDialog = defineAsyncComponent(() => import('./features/reports/ReportGenerationDialog.vue'))
+const SourceGroupEditorDialog = defineAsyncComponent(() => import('./features/reports/SourceGroupEditorDialog.vue'))
+const WechatCoverPlanDialog = defineAsyncComponent(() => import('./features/wechat/WechatCoverPlanDialog.vue'))
+const WechatDraftDialog = defineAsyncComponent(() => import('./features/wechat/WechatDraftDialog.vue'))
 const {
   activeView,
   workspaceTabs,
@@ -1371,6 +1264,54 @@ const {
   revealContentItems,
 })
 
+const {
+  mediaTools,
+  ffmpegPath,
+  ytDlpPath,
+  savingMediaTools,
+  runtimeComponents,
+  loadingRuntimeComponents,
+  deepseekApiKey,
+  deepseekBaseUrl,
+  deepseekPricing,
+  deepseekPeakPricingMultiplier,
+  deepseekConfigured,
+  savingDeepSeekSettings,
+  testingDeepSeekConnection,
+  embeddingApiKey,
+  embeddingBaseUrl,
+  embeddingModel,
+  embeddingConfigured,
+  savingEmbeddingSettings,
+  testingEmbeddingConnection,
+  paddleOcrAccessToken,
+  paddleOcrConfigured,
+  paddleOcrBaseUrl,
+  paddleOcrModel,
+  savingPaddleOcrSettings,
+  manualAutoSummarize,
+  loadManualCollectionSettings,
+  saveManualCollectionSettings,
+  loadDeepSeekSettings,
+  saveDeepSeekSettings,
+  testDeepSeekConnection,
+  saveEmbeddingSettings,
+  testEmbeddingConnection,
+  loadPaddleOcrSettings,
+  savePaddleOcrSettings,
+  loadMediaTools,
+  saveMediaTools,
+  chooseMediaTool,
+  loadRuntimeComponents,
+  installRuntimeBrowser,
+  downloadAsrModel,
+  deleteAsrModel
+} = useRuntimeSettingsController({
+  formatBytes,
+  loadAiTokenUsageSummary,
+  requestDestructiveConfirmation
+})
+
 const WORKSPACE_PANE_VISIBILITY_KEY = 'knowledgehub.workspace-pane-visibility.v1'
 
 function readWorkspacePaneVisibility() {
@@ -1406,7 +1347,7 @@ async function openKnowledgeEvidence(chunkId) {
     knowledgeEvidence.value = await response.json()
     contextSidebarOpen.value = true
   } catch (error) {
-    showToast(error.message || '无法打开引用原文', 'error')
+    ElMessage.error(error.message || '无法打开引用原文')
   }
 }
 
@@ -1511,18 +1452,16 @@ async function reconnectDouyinAndRetryTask(task) {
   if (connected) await retryBatchTask(task)
 }
 
-const WECHAT_SUBSCRIPTION_API = 'http://127.0.0.1:8000/api/wechat-subscriptions'
-const WECHAT_FILTER_API = 'http://127.0.0.1:8000/api/wechat-content-filters'
-const WECHAT_FEED_API = 'http://127.0.0.1:8000/api/wechat-feed'
-const WECHAT_REPORT_GROUP_API = 'http://127.0.0.1:8000/api/wechat-report-groups'
-const FOLDER_IMPORT_WATCHER_API = 'http://127.0.0.1:8000/api/folder-import-watcher'
-const WECHAT_REPORT_PROMPT_API = 'http://127.0.0.1:8000/api/wechat-report-prompts'
-const WECHAT_PUBLISHING_API = 'http://127.0.0.1:8000/api/wechat-publishing'
-const WECHAT_DIGEST_MAX_BYTES = 120
-const LIBRARY_SOURCE_GROUPS_API = 'http://127.0.0.1:8000/api/content/source-groups'
-const LIBRARY_LOCAL_FILE_IMPORT_API = 'http://127.0.0.1:8000/api/content/import-file'
-const PROMPT_WORKSPACE_API = 'http://127.0.0.1:8000/api'
-const MEDIA_TOOLS_API = 'http://127.0.0.1:8000/api/media-tools'
+const WECHAT_SUBSCRIPTION_API = `${API}/wechat-subscriptions`
+const WECHAT_FILTER_API = `${API}/wechat-content-filters`
+const WECHAT_FEED_API = `${API}/wechat-feed`
+const WECHAT_REPORT_GROUP_API = `${API}/wechat-report-groups`
+const FOLDER_IMPORT_WATCHER_API = `${API}/folder-import-watcher`
+const WECHAT_REPORT_PROMPT_API = `${API}/wechat-report-prompts`
+const WECHAT_PUBLISHING_API = `${API}/wechat-publishing`
+const LIBRARY_SOURCE_GROUPS_API = `${API}/content/source-groups`
+const LIBRARY_LOCAL_FILE_IMPORT_API = `${API}/content/import-file`
+const PROMPT_WORKSPACE_API = API
 
 async function openCampusAttachment(attachment) {
   if (!attachment?.url) return
@@ -1542,15 +1481,6 @@ async function openCampusAttachment(attachment) {
     ElMessage.error(error?.message || '附件下载失败，请重新连接 WebVPN 后重试')
   }
 }
-const RUNTIME_COMPONENTS_API = 'http://127.0.0.1:8000/api/runtime-components'
-const LLM_SETTINGS_API = 'http://127.0.0.1:8000/api/llm-settings'
-const DEEPSEEK_SETTINGS_API = `${LLM_SETTINGS_API}/deepseek`
-const DEEPSEEK_CONNECTION_TEST_API = `${DEEPSEEK_SETTINGS_API}/test`
-const CAMPUS_EMBEDDING_SETTINGS_API = `${LLM_SETTINGS_API}/campus-embedding`
-const CAMPUS_EMBEDDING_CONNECTION_TEST_API = `${CAMPUS_EMBEDDING_SETTINGS_API}/test`
-const PADDLE_OCR_SETTINGS_API = 'http://127.0.0.1:8000/api/paddle-ocr-settings'
-const MANUAL_COLLECTION_SETTINGS_API = 'http://127.0.0.1:8000/api/manual-collection/settings'
-const mediaTools = ref({})
 const wechatPublishingSettings = ref({ configured: false, display_name: '', app_id_masked: '', status: 'unconfigured', last_error: '' })
 const wechatPublishingDisplayName = ref('订阅号')
 const wechatPublishingAppId = ref('')
@@ -1563,28 +1493,40 @@ const wechatQwenCoverEndpoint = ref('https://dashscope.aliyuncs.com/api/v1/servi
 const wechatQwenCoverModel = ref('qwen-image-2.0')
 const savingWechatQwenCoverSettings = ref(false)
 const testingWechatQwenCoverConnection = ref(false)
-const wechatDraftDialogVisible = ref(false)
-const loadingWechatDraftDefaults = ref(false)
-const creatingWechatDraft = ref(false)
-const wechatDraftContentItemId = ref('')
-const wechatDraftTitle = ref('')
-const wechatDraftDigest = ref('')
-const wechatDraftAuthor = ref('')
-const wechatDraftPreviewHtml = ref('')
-const wechatDraftCoverUrl = ref('')
-const wechatDraftCoverStatus = ref('')
-const wechatDraftCoverAvailable = ref(false)
-const wechatDraftLatestPublication = ref(null)
-const wechatDraftTask = ref(null)
-const wechatDraftIpPreflight = ref(null)
-const verifyingWechatDraftIp = ref(false)
-const wechatDraftTaskRunning = computed(() => ['queued', 'running'].includes(wechatDraftTask.value?.status))
-const wechatDraftIpCanSubmit = computed(() => wechatDraftIpPreflight.value?.can_submit === true)
-const wechatDraftAlreadyCreated = computed(() => (
-  ['draft_created', 'published'].includes(wechatDraftLatestPublication.value?.status)
-  && wechatDraftLatestPublication.value?.is_current_source === true
-))
-let wechatDraftTaskPollTimer = null
+const {
+  confirmWechatPublication,
+  createWechatReportDraft,
+  creatingWechatDraft,
+  disposeWechatDraftController,
+  loadingWechatDraftDefaults,
+  openWechatDraftDialog,
+  truncateWechatDigest,
+  verifyWechatDraftIp,
+  verifyingWechatDraftIp,
+  wechatDraftAuthor,
+  wechatDraftCoverAvailable,
+  wechatDraftCoverStatus,
+  wechatDraftCoverUrl,
+  wechatDraftDialogVisible,
+  wechatDraftDigest,
+  wechatDraftContentItemId,
+  wechatDraftIpPreflight,
+  wechatDraftLatestPublication,
+  wechatDraftPreviewHtml,
+  wechatDraftTask,
+  wechatDraftTitle,
+} = useWechatDraftController({
+  apiBase: WECHAT_PUBLISHING_API,
+  ensurePublishingConfigured: async () => {
+    if (!wechatPublishingSettings.value.configured) await loadWechatPublishingSettings()
+    if (wechatPublishingSettings.value.configured) return true
+    settingsInitialSection.value = 'wechat'
+    showSettings.value = true
+    ElMessage.info('请先在“微信公众号”中配置订阅号发布账号')
+    return false
+  },
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
 const wechatCoverPlanDialogVisible = ref(false)
 const planningWechatCover = ref(false)
 const submittingWechatCoverPlan = ref(false)
@@ -1609,34 +1551,6 @@ watch(
   },
   { immediate: true },
 )
-const ffmpegPath = ref('')
-const ytDlpPath = ref('')
-const savingMediaTools = ref(false)
-const runtimeComponents = ref({ browser: {}, models: [] })
-const loadingRuntimeComponents = ref(false)
-let runtimeComponentsPollTimer = null
-const deepseekApiKey = ref('')
-const deepseekBaseUrl = ref('https://api.deepseek.com')
-const deepseekPricing = ref({
-  'deepseek-v4-flash': { input_cache_hit: 0.02, input_cache_miss: 1, output: 2 },
-  'deepseek-v4-pro': { input_cache_hit: 0.025, input_cache_miss: 3, output: 6 }
-})
-const deepseekPeakPricingMultiplier = ref(1)
-const deepseekConfigured = ref(false)
-const savingDeepSeekSettings = ref(false)
-const testingDeepSeekConnection = ref(false)
-const embeddingApiKey = ref('')
-const embeddingBaseUrl = ref('https://dashscope.aliyuncs.com/compatible-mode/v1')
-const embeddingModel = ref('qwen3.7-text-embedding')
-const embeddingConfigured = ref(false)
-const savingEmbeddingSettings = ref(false)
-const testingEmbeddingConnection = ref(false)
-const paddleOcrAccessToken = ref('')
-const paddleOcrConfigured = ref(false)
-const paddleOcrBaseUrl = ref('https://paddleocr.aistudio-app.com/api/v2/ocr/jobs')
-const paddleOcrModel = ref('PaddleOCR-VL-1.6')
-const savingPaddleOcrSettings = ref(false)
-const manualAutoSummarize = ref(true)
 const loadingWeChatSubscriptions = ref(false)
 let wechatSubscriptionsLoadVersion = 0
 const wechatAccounts = ref([])
@@ -1912,94 +1826,6 @@ async function testWechatQwenCoverConnection() {
   }
 }
 
-async function openWechatDraftDialog(contentItem) {
-  const contentItemId = contentItem?.id
-  if (!contentItemId) {
-    ElMessage.error('未找到报告内容')
-    return
-  }
-
-  if (!wechatPublishingSettings.value.configured) {
-    await loadWechatPublishingSettings()
-  }
-  if (!wechatPublishingSettings.value.configured) {
-    settingsInitialSection.value = 'wechat'
-    showSettings.value = true
-    ElMessage.info('请先在“微信公众号”中配置订阅号发布账号')
-    return
-  }
-
-  wechatDraftContentItemId.value = contentItemId
-  stopWechatDraftTaskPoll()
-  wechatDraftCoverUrl.value = ''
-  wechatDraftCoverStatus.value = ''
-  wechatDraftCoverAvailable.value = false
-  wechatDraftLatestPublication.value = null
-  wechatDraftTask.value = null
-  wechatDraftIpPreflight.value = null
-  verifyingWechatDraftIp.value = false
-  wechatDraftDialogVisible.value = true
-  loadingWechatDraftDefaults.value = true
-  try {
-    const response = await axios.get(`${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}`, { timeout: 15000 })
-    wechatDraftTitle.value = response.data?.title || contentItem?.title || ''
-    wechatDraftDigest.value = response.data?.digest || ''
-    wechatDraftAuthor.value = response.data?.author || ''
-    wechatDraftPreviewHtml.value = response.data?.preview_html || ''
-    wechatDraftLatestPublication.value = response.data?.latest_publication || null
-    wechatDraftCoverUrl.value = response.data?.cover_url || ''
-    wechatDraftCoverStatus.value = response.data?.cover_status || ''
-    wechatDraftCoverAvailable.value = Boolean(response.data?.cover_generation_available)
-    const ipPreflightResponse = await axios.get(
-      `${WECHAT_PUBLISHING_API}/ip-preflight`,
-      { timeout: 10000 },
-    )
-    wechatDraftIpPreflight.value = ipPreflightResponse.data || null
-    // A third-party IP lookup can be unavailable on some networks, especially
-    // when the desktop app deliberately bypasses VPN/proxy settings.  In that
-    // case verify against WeChat itself before the user starts any costly work.
-    if (['unavailable', 'unverified'].includes(wechatDraftIpPreflight.value?.status)) {
-      await verifyWechatDraftIp({ silent: true })
-    }
-    const taskResponse = await axios.get(
-      `${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}/draft-task`,
-      { timeout: 10000 },
-    )
-    wechatDraftTask.value = taskResponse.data || null
-    if (wechatDraftTaskRunning.value) scheduleWechatDraftTaskPoll()
-  } catch (error) {
-    wechatDraftDialogVisible.value = false
-    wechatDraftPreviewHtml.value = ''
-    wechatDraftCoverUrl.value = ''
-    wechatDraftCoverStatus.value = ''
-    wechatDraftCoverAvailable.value = false
-    ElMessage.error(wechatErrorMessage(error, '无法准备公众号草稿'))
-  } finally {
-    loadingWechatDraftDefaults.value = false
-  }
-}
-
-async function verifyWechatDraftIp({ silent = false } = {}) {
-  verifyingWechatDraftIp.value = true
-  try {
-    const response = await axios.post(
-      `${WECHAT_PUBLISHING_API}/ip-preflight/verify`,
-      {},
-      { timeout: 25000 },
-    )
-    wechatDraftIpPreflight.value = response.data || null
-    if (wechatDraftIpPreflight.value?.status === 'verified') {
-      if (!silent) ElMessage.success('公众号 IP 白名单验证通过')
-    } else {
-      if (!silent) ElMessage.error(wechatDraftIpPreflight.value?.message || '公众号 IP 白名单验证未通过')
-    }
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '无法验证公众号 IP 白名单'))
-  } finally {
-    verifyingWechatDraftIp.value = false
-  }
-}
-
 async function ensureWechatCoverConfigured() {
   if (!wechatQwenCoverSettings.value.configured) await loadWechatQwenCoverSettings()
   if (wechatQwenCoverSettings.value.configured) return true
@@ -2197,7 +2023,7 @@ function monitorWechatCoverTask(task, contentItemId) {
   const poll = async () => {
     try {
       const response = await axios.get(
-        `http://127.0.0.1:8000/api/tasks/${encodeURIComponent(taskId)}`,
+        `${API}/tasks/${encodeURIComponent(taskId)}`,
         { timeout: 10000 },
       )
       const state = response.data || {}
@@ -2237,258 +2063,6 @@ function monitorWechatCoverTask(task, contentItemId) {
   void poll()
 }
 
-async function createWechatReportDraft() {
-  const contentItemId = wechatDraftContentItemId.value
-  if (!contentItemId || !wechatDraftTitle.value.trim()) return
-  creatingWechatDraft.value = true
-  try {
-    const response = await axios.post(`${WECHAT_PUBLISHING_API}/reports/${encodeURIComponent(contentItemId)}/draft`, {
-      title: wechatDraftTitle.value.trim(),
-      digest: truncateWechatDigest(wechatDraftDigest.value),
-      author: wechatDraftAuthor.value.trim(),
-    }, { timeout: 10000 })
-    wechatDraftTask.value = response.data || null
-    if (wechatDraftTask.value?.status === 'succeeded' && wechatDraftTask.value?.publication) {
-      wechatDraftLatestPublication.value = { ...wechatDraftTask.value.publication, is_current_source: true }
-      ElMessage.success('草稿已创建，未重复提交。')
-    } else {
-      ElMessage.success('已转入后台处理，可关闭窗口后继续等待。')
-      scheduleWechatDraftTaskPoll()
-    }
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '存入公众号草稿箱失败'))
-  } finally {
-    creatingWechatDraft.value = false
-  }
-}
-
-function wechatDraftTaskStageLabel(stage) {
-  return {
-    queued: '正在排队',
-    starting: '正在准备草稿',
-    checking_wechat_ip: '正在检查公众号 IP 白名单',
-    preparing_report: '正在准备报告正文',
-    exporting_public_report: '正在导出公开阅读页',
-    deploying_public_site: '正在部署公开阅读页',
-    verifying_public_link: '正在校验阅读原文链接',
-    requesting_wechat_token: '正在连接微信公众号',
-    wechat_connection_verified: '公众号连接已验证',
-    uploading_cover: '正在上传文章封面',
-    creating_wechat_draft: '正在创建公众号草稿',
-    completed: '草稿已创建',
-    already_created: '草稿已创建',
-    interrupted: '任务已中断',
-    failed: '任务未完成',
-  }[stage] || '正在处理中'
-}
-
-function stopWechatDraftTaskPoll() {
-  if (wechatDraftTaskPollTimer) clearTimeout(wechatDraftTaskPollTimer)
-  wechatDraftTaskPollTimer = null
-}
-
-function scheduleWechatDraftTaskPoll() {
-  stopWechatDraftTaskPoll()
-  if (!wechatDraftTaskRunning.value || !wechatDraftTask.value?.task_id) return
-  wechatDraftTaskPollTimer = setTimeout(() => void loadWechatDraftTask(), 1200)
-}
-
-async function loadWechatDraftTask() {
-  const taskId = wechatDraftTask.value?.task_id
-  if (!taskId) return
-  try {
-    const response = await axios.get(
-      `${WECHAT_PUBLISHING_API}/draft-tasks/${encodeURIComponent(taskId)}`,
-      { timeout: 10000 },
-    )
-    const previousStatus = wechatDraftTask.value?.status
-    wechatDraftTask.value = response.data || null
-    if (wechatDraftTask.value?.status === 'succeeded') {
-      if (wechatDraftTask.value.publication) {
-        wechatDraftLatestPublication.value = { ...wechatDraftTask.value.publication, is_current_source: true }
-      }
-      if (previousStatus !== 'succeeded') ElMessage.success('已存入公众号草稿箱；发表后可在此写入历史档案。')
-      stopWechatDraftTaskPoll()
-      return
-    }
-    if (wechatDraftTask.value?.status === 'failed') {
-      if (previousStatus !== 'failed') ElMessage.error(wechatDraftTask.value.error || '存入公众号草稿箱失败')
-      stopWechatDraftTaskPoll()
-      return
-    }
-    scheduleWechatDraftTaskPoll()
-  } catch {
-    // The persisted task remains active.  Back off rather than treating a
-    // temporary local connection issue as a remote publishing failure.
-    wechatDraftTaskPollTimer = setTimeout(() => void loadWechatDraftTask(), 3000)
-  }
-}
-
-async function confirmWechatPublication() {
-  const publicationId = wechatDraftLatestPublication.value?.id
-  if (!publicationId) return
-  try {
-    const { value } = await ElMessageBox.prompt(
-      '可选：粘贴公众号文章的公开链接，历史档案会显示“查看原文”。',
-      '确认已在公众号发表',
-      {
-        inputPlaceholder: 'https://mp.weixin.qq.com/…',
-        inputValidator: (input) => !input?.trim() || input.trim().startsWith('https://') || '链接必须使用 HTTPS',
-        confirmButtonText: '写入历史档案',
-        cancelButtonText: '取消',
-      },
-    )
-    const response = await axios.post(
-      `${WECHAT_PUBLISHING_API}/publications/${encodeURIComponent(publicationId)}/confirm`,
-      { wechat_article_url: String(value || '').trim() },
-      { timeout: 15000 },
-    )
-    wechatDraftLatestPublication.value = response.data || null
-    ElMessage.success('已写入历史档案；重新构建并部署公开网站后即可生效')
-  } catch (error) {
-    if (error === 'cancel' || error?.action === 'cancel' || error?.action === 'close') return
-    ElMessage.error(wechatErrorMessage(error, '写入历史档案失败'))
-  }
-}
-
-function truncateWechatDigest(value) {
-  const text = String(value || '').trim()
-  const encoder = new TextEncoder()
-  let bytes = 0
-  let output = ''
-  for (const character of text) {
-    const size = encoder.encode(character).length
-    if (bytes + size > WECHAT_DIGEST_MAX_BYTES) break
-    output += character
-    bytes += size
-  }
-  return output
-}
-
-async function loadManualCollectionSettings() {
-  const response = await axios.get(MANUAL_COLLECTION_SETTINGS_API, { timeout: 10000 })
-  manualAutoSummarize.value = response.data?.auto_summarize !== false
-}
-
-async function saveManualCollectionSettings() {
-  try {
-    await axios.put(MANUAL_COLLECTION_SETTINGS_API, { auto_summarize: manualAutoSummarize.value }, { timeout: 10000 })
-    ElMessage.success(manualAutoSummarize.value ? '主动收藏将自动生成 AI 总结' : '主动收藏将仅抓取正文，不自动总结')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '主动收藏设置保存失败'))
-    await loadManualCollectionSettings().catch(() => null)
-  }
-}
-
-async function loadDeepSeekSettings() {
-  const response = await axios.get(LLM_SETTINGS_API, { timeout: 10000 })
-  deepseekConfigured.value = Boolean(response.data?.deepseek_configured)
-  deepseekBaseUrl.value = response.data?.deepseek_base_url || 'https://api.deepseek.com'
-  if (response.data?.deepseek_pricing && typeof response.data.deepseek_pricing === 'object') {
-    deepseekPricing.value = response.data.deepseek_pricing
-  }
-  deepseekPeakPricingMultiplier.value = Number(response.data?.deepseek_peak_pricing_multiplier ?? 1)
-  deepseekApiKey.value = ''
-  embeddingConfigured.value = Boolean(response.data?.campus_embedding_configured)
-  embeddingBaseUrl.value = response.data?.campus_embedding_api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-  embeddingModel.value = response.data?.campus_embedding_api_model || 'qwen3.7-text-embedding'
-  embeddingApiKey.value = ''
-}
-
-async function saveDeepSeekSettings() {
-  savingDeepSeekSettings.value = true
-  try {
-    const response = await axios.put(DEEPSEEK_SETTINGS_API, {
-      deepseek_api_key: deepseekApiKey.value.trim() || undefined,
-      deepseek_base_url: deepseekBaseUrl.value.trim(),
-      deepseek_pricing: deepseekPricing.value,
-      deepseek_peak_pricing_multiplier: deepseekPeakPricingMultiplier.value
-    }, { timeout: 10000 })
-    deepseekConfigured.value = Boolean(response.data?.deepseek_configured)
-    if (response.data?.deepseek_pricing && typeof response.data.deepseek_pricing === 'object') {
-      deepseekPricing.value = response.data.deepseek_pricing
-    }
-    deepseekPeakPricingMultiplier.value = Number(response.data?.deepseek_peak_pricing_multiplier ?? 1)
-    deepseekApiKey.value = ''
-    void loadAiTokenUsageSummary()
-    ElMessage.success('DeepSeek 配置已保存')
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, 'DeepSeek 配置保存失败')) } finally { savingDeepSeekSettings.value = false }
-}
-
-async function testDeepSeekConnection() {
-  testingDeepSeekConnection.value = true
-  try {
-    const response = await axios.post(DEEPSEEK_CONNECTION_TEST_API, {
-      deepseek_api_key: deepseekApiKey.value.trim() || undefined,
-      deepseek_base_url: deepseekBaseUrl.value.trim() || undefined
-    }, { timeout: 30000 })
-    const elapsed = Number(response.data?.elapsed_ms || 0)
-    ElMessage.success(`DeepSeek 连接成功${elapsed ? ` · ${elapsed} ms` : ''}`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, 'DeepSeek 连接失败'))
-  } finally {
-    testingDeepSeekConnection.value = false
-  }
-}
-
-async function saveEmbeddingSettings() {
-  savingEmbeddingSettings.value = true
-  try {
-    const response = await axios.put(CAMPUS_EMBEDDING_SETTINGS_API, {
-      campus_embedding_api_key: embeddingApiKey.value.trim() || undefined,
-      campus_embedding_api_base_url: embeddingBaseUrl.value.trim(),
-      campus_embedding_api_model: embeddingModel.value.trim()
-    }, { timeout: 10000 })
-    embeddingConfigured.value = Boolean(response.data?.campus_embedding_configured)
-    embeddingBaseUrl.value = response.data?.campus_embedding_api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-    embeddingModel.value = response.data?.campus_embedding_api_model || 'qwen3.7-text-embedding'
-    embeddingApiKey.value = ''
-    ElMessage.success('Embedding 配置已保存')
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, 'Embedding 配置保存失败')) } finally { savingEmbeddingSettings.value = false }
-}
-
-async function testEmbeddingConnection() {
-  testingEmbeddingConnection.value = true
-  try {
-    const response = await axios.post(CAMPUS_EMBEDDING_CONNECTION_TEST_API, {
-      campus_embedding_api_key: embeddingApiKey.value.trim() || undefined,
-      campus_embedding_api_base_url: embeddingBaseUrl.value.trim() || undefined,
-      campus_embedding_api_model: embeddingModel.value.trim() || undefined
-    }, { timeout: 30000 })
-    const elapsed = Number(response.data?.elapsed_ms || 0)
-    const dimensions = Number(response.data?.dimensions || 0)
-    ElMessage.success(`Embedding 连接成功${dimensions ? ` · ${dimensions} 维` : ''}${elapsed ? ` · ${elapsed} ms` : ''}`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, 'Embedding 连接失败'))
-  } finally {
-    testingEmbeddingConnection.value = false
-  }
-}
-
-async function loadPaddleOcrSettings() {
-  const response = await axios.get(PADDLE_OCR_SETTINGS_API, { timeout: 10000 })
-  paddleOcrConfigured.value = Boolean(response.data?.configured)
-  paddleOcrBaseUrl.value = response.data?.base_url || 'https://paddleocr.aistudio-app.com/api/v2/ocr/jobs'
-  paddleOcrModel.value = response.data?.model || 'PaddleOCR-VL-1.6'
-  paddleOcrAccessToken.value = ''
-}
-
-async function savePaddleOcrSettings() {
-  savingPaddleOcrSettings.value = true
-  try {
-    const response = await axios.put(PADDLE_OCR_SETTINGS_API, {
-      access_token: paddleOcrAccessToken.value.trim() || undefined,
-      base_url: paddleOcrBaseUrl.value.trim() || undefined,
-      model: paddleOcrModel.value.trim() || undefined
-    }, { timeout: 10000 })
-    paddleOcrConfigured.value = Boolean(response.data?.configured)
-    paddleOcrBaseUrl.value = response.data?.base_url || 'https://paddleocr.aistudio-app.com/api/v2/ocr/jobs'
-    paddleOcrModel.value = response.data?.model || 'PaddleOCR-VL-1.6'
-    paddleOcrAccessToken.value = ''
-    ElMessage.success('PaddleOCR 配置已保存')
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, 'PaddleOCR 配置保存失败')) } finally { savingPaddleOcrSettings.value = false }
-}
-
 async function chooseObsidianFolder() {
   const folder = await window.knowledgeHubDesktop?.chooseDirectory?.()
   if (!folder) return
@@ -2501,90 +2075,6 @@ async function chooseMarkdownExportFolder() {
   if (!folder) return
   markdownExportPath.value = folder
   await saveObsidianSettingsFromForm()
-}
-
-async function loadMediaTools() {
-  const response = await axios.get(MEDIA_TOOLS_API, { timeout: 10000 })
-  mediaTools.value = response.data || {}
-  ffmpegPath.value = mediaTools.value.ffmpeg_path?.configured_path || ''
-  ytDlpPath.value = mediaTools.value.yt_dlp_path?.configured_path || ''
-}
-
-async function saveMediaTools() {
-  savingMediaTools.value = true
-  try {
-    const response = await axios.put(MEDIA_TOOLS_API, { ffmpeg_path: ffmpegPath.value.trim(), yt_dlp_path: ytDlpPath.value.trim() }, { timeout: 10000 })
-    mediaTools.value = response.data || {}
-    ElMessage.success('媒体工具路径已保存并检测')
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, '媒体工具路径不可用')) } finally { savingMediaTools.value = false }
-}
-
-async function chooseMediaTool(toolName) {
-  const executable = await window.knowledgeHubDesktop?.chooseExecutable?.(toolName)
-  if (!executable) return
-  if (toolName === 'ffmpeg') ffmpegPath.value = executable
-  if (toolName === 'yt-dlp') ytDlpPath.value = executable
-}
-
-function scheduleRuntimeComponentsPoll() {
-  if (runtimeComponentsPollTimer) clearTimeout(runtimeComponentsPollTimer)
-  const browserDownloading = runtimeComponents.value.browser?.state === 'downloading'
-  const modelDownloading = (runtimeComponents.value.models || []).some((item) => item.state === 'downloading')
-  if (!browserDownloading && !modelDownloading) return
-  runtimeComponentsPollTimer = setTimeout(async () => {
-    await loadRuntimeComponents({ silent: true })
-  }, 1200)
-}
-
-async function loadRuntimeComponents({ silent = false } = {}) {
-  // The background poll keeps the model progress current. It must not borrow
-  // the manual-check button's loading state, otherwise the button appears to
-  // reload once per polling interval for the entire download.
-  if (!silent) loadingRuntimeComponents.value = true
-  try {
-    const response = await axios.get(RUNTIME_COMPONENTS_API, { timeout: 15000 })
-    runtimeComponents.value = response.data || { browser: {}, models: [] }
-    scheduleRuntimeComponentsPoll()
-  } catch (error) {
-    if (!silent) ElMessage.error(wechatErrorMessage(error, '无法检查设备准备情况'))
-  } finally {
-    if (!silent) loadingRuntimeComponents.value = false
-  }
-}
-
-async function installRuntimeBrowser() {
-  try {
-    const response = await axios.post(`${RUNTIME_COMPONENTS_API}/browser/install`, {}, { timeout: 15000 })
-    runtimeComponents.value = { ...runtimeComponents.value, browser: response.data || {} }
-    scheduleRuntimeComponentsPoll()
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, '浏览器组件下载未能启动')) }
-}
-
-async function downloadAsrModel(model) {
-  try {
-    await axios.post(`${RUNTIME_COMPONENTS_API}/models/download`, { model: model.model, backend: model.backend }, { timeout: 15000 })
-    await loadRuntimeComponents({ silent: true })
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, '语音识别模型下载未能启动')) }
-}
-
-async function deleteAsrModel(model) {
-  const label = `${model.model} · ${model.backend === 'mlx' ? 'MLX' : 'Faster-Whisper'}`
-  const confirmed = await requestDestructiveConfirmation({
-    title: '移除本机模型',
-    message: `将移除本机模型“${label}”（约 ${formatBytes(model.installed_bytes || model.estimated_bytes)}）。已保存的转写和总结不会受影响；以后可重新下载。`,
-    confirmLabel: '移除',
-  })
-  if (!confirmed) return
-  try {
-    await axios.delete(`${RUNTIME_COMPONENTS_API}/models`, {
-      data: { model: model.model, backend: model.backend },
-      timeout: 15000
-    })
-    await loadRuntimeComponents({ silent: true })
-    ElMessage.success('本机模型已移除')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '移除本机模型失败'))
-  }
 }
 
 function stopWeChatInitialSyncListPolling() {
@@ -4688,7 +4178,7 @@ function minimumSidebarPercent() {
 }
 
 watch(activeView, (view, previousView) => {
-  void axios.post('http://127.0.0.1:8000/api/telemetry/events', {
+  void axios.post(`${API}/telemetry/events`, {
     event_name: 'workspace_opened',
     properties: { view: String(view || 'unknown').slice(0, 40) },
   }, { timeout: 2000 }).catch(() => {})
@@ -4770,12 +4260,11 @@ onBeforeUnmount(() => {
   reportGenerationConfirmationResolver = null
   stopWeChatQrPolling()
   stopWeChatBulkSyncPolling()
-  stopWechatDraftTaskPoll()
+  disposeWechatDraftController()
   stopWeChatInitialSyncListPolling()
   for (const subscriptionId of wechatInitialSyncPollTimers.keys()) stopWeChatInitialSyncPolling(subscriptionId)
   for (const timer of wechatCoverPollTimers.values()) clearTimeout(timer)
   wechatCoverPollTimers.clear()
-  if (runtimeComponentsPollTimer) clearTimeout(runtimeComponentsPollTimer)
 })
 
 </script>

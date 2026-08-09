@@ -10,7 +10,10 @@ function installWindow(origin, desktop = false) {
 
 test('source checkout routes local API requests through its loopback proxy', async () => {
   installWindow('http://127.0.0.1:5173')
-  const { localApiRequestUrl } = await import('./localApiAuth.js')
+  const { API_BASE, apiUrl, localApiRequestUrl } = await import('./localApiAuth.js')
+  assert.equal(API_BASE, 'http://127.0.0.1:8000/api')
+  assert.equal(apiUrl('/tasks'), 'http://127.0.0.1:8000/api/tasks')
+  assert.equal(apiUrl(), API_BASE)
   assert.equal(localApiRequestUrl('http://127.0.0.1:8000/api/tasks?limit=1'), '/api/tasks?limit=1')
 })
 

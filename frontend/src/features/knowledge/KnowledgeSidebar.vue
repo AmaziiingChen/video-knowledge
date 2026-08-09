@@ -66,8 +66,8 @@
 import { computed, onMounted, ref } from 'vue'
 import SidebarTreeRow from '../../workbench/SidebarTreeRow.vue'
 import { libraryContentIcon } from '../../utils/contentIcons'
+import { API_BASE as API } from '../../utils/localApiAuth.js'
 
-const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
 const SIDEBAR_CACHE_MAX_AGE_MS = 30_000
 
 // The sidebar is intentionally re-created with the knowledge workspace today.

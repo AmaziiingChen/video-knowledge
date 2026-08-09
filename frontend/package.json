@@ -8,9 +8,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --test",
+    "lint": "eslint src electron scripts *.config.js",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "npm run test:unit && npm run test:components",
+    "test:unit": "node --test",
+    "test:components": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "check:reachability": "node scripts/check-source-reachability.mjs",
-    "build": "vite build",
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
+    "build": "vite build && npm run check:bundle",
     "build:public-report": "vite build --config vite.public-report.config.js && node scripts/finalize-public-report-site.mjs",
     "preview:public-report": "vite preview --config vite.public-report.config.js",
     "preview": "vite preview",
@@ -23,9 +29,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@tabler/icons-vue": "^3.44.0",
-    "@tanstack/vue-table": "^8.21.3",
     "artplayer": "^5.4.0",
-    "artplayer-plugin-thumbnail": "^1.0.3",
     "axios": "^1.18.1",
     "element-plus": "^2.14.3",
     "katex": "^0.16.47",
@@ -35,9 +39,18 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@vue/test-utils": "^2.4.11",
     "electron": "42.8.1",
     "electron-builder": "^26.15.3",
-    "vite": "^8.1.1"
+    "eslint": "^9.39.5",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^16.5.0",
+    "happy-dom": "^20.11.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.9"
   },
   "build": {
     "appId": "com.knowledgehub.desktop",

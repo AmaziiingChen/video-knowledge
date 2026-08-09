@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from routers.inbox import InboxItemResponse, _item_to_response
-from routers.tasks import TaskResponse, _to_response
+from presentation.inbox_responses import InboxItemResponse, to_inbox_item_response
+from presentation.task_responses import TaskResponse, to_task_response
 from services.inbox import capture_link_to_inbox, process_inbox_item
 from services.manual_collection_settings import manual_collection_settings
 from services.openclaw_conversations import bind_task
@@ -66,7 +66,7 @@ async def ingest_link(req: IngestLinkRequest):
     if capture.error or capture.item is None:
         raise HTTPException(status_code=400, detail=capture.error or "链接入库失败")
 
-    item_response = _item_to_response(capture.item)
+    item_response = to_inbox_item_response(capture.item)
     if req.mode == "capture":
         return IngestLinkResponse(
             platform=parsed.platform,
@@ -116,7 +116,7 @@ async def ingest_link(req: IngestLinkRequest):
         else:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    task_response = _to_response(task)
+    task_response = to_task_response(task)
     if req.conversation_key:
         try:
             bind_task(
@@ -131,7 +131,7 @@ async def ingest_link(req: IngestLinkRequest):
     return IngestLinkResponse(
         platform=parsed.platform,
         url=item.source_url,
-        item=_item_to_response(item),
+        item=to_inbox_item_response(item),
         created=capture.created,
         duplicate=capture.duplicate,
         task=task_response,

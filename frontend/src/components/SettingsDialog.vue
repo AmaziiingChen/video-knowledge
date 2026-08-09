@@ -506,6 +506,7 @@ import { ElMessage } from 'element-plus'
 import { IconX } from '@tabler/icons-vue'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
+import { API_BASE as API } from '../utils/localApiAuth.js'
 import SvgMaskIcon from './SvgMaskIcon.vue'
 const appleIntelligenceIcon = 'apple.intelligence'
 const keyIcon = 'key'
@@ -792,13 +793,13 @@ function ensureTextModelPricing() {
 }
 
 watch([selectedTextModelName, deepseekPricing], ensureTextModelPricing, { immediate: true })
-const FAVORITE_API = 'http://127.0.0.1:8000/api/favorite-sources'
-const XIAOHONGSHU_COOKIE_API = 'http://127.0.0.1:8000/api/xiaohongshu-cookie'
-const TELEMETRY_API = 'http://127.0.0.1:8000/api/telemetry'
-const DEEPSEEK_SECRET_REVEAL_API = 'http://127.0.0.1:8000/api/llm-settings/deepseek/reveal'
-const EMBEDDING_SECRET_REVEAL_API = 'http://127.0.0.1:8000/api/llm-settings/campus-embedding/reveal'
-const PADDLE_OCR_SECRET_REVEAL_API = 'http://127.0.0.1:8000/api/paddle-ocr-settings/reveal'
-const VISUAL_MODEL_SECRET_REVEAL_API = 'http://127.0.0.1:8000/api/wechat-publishing/cover-settings/reveal'
+const FAVORITE_API = `${API}/favorite-sources`
+const XIAOHONGSHU_COOKIE_API = `${API}/xiaohongshu-cookie`
+const TELEMETRY_API = `${API}/telemetry`
+const DEEPSEEK_SECRET_REVEAL_API = `${API}/llm-settings/deepseek/reveal`
+const EMBEDDING_SECRET_REVEAL_API = `${API}/llm-settings/campus-embedding/reveal`
+const PADDLE_OCR_SECRET_REVEAL_API = `${API}/paddle-ocr-settings/reveal`
+const VISUAL_MODEL_SECRET_REVEAL_API = `${API}/wechat-publishing/cover-settings/reveal`
 const telemetryEnabled = ref(false)
 const telemetryPendingEvents = ref(0)
 const telemetrySaving = ref(false)

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from routers.tasks import TaskResponse, _to_response
+from presentation.task_responses import TaskResponse, to_task_response
 from services.task_manager import task_manager
 
 
@@ -57,4 +57,4 @@ async def create_source_sync_task(req: SourceSyncTaskRequest):
         source_title=req.source_title,
         source_url=req.source_url,
     )
-    return _to_response(task)
+    return to_task_response(task)

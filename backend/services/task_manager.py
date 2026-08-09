@@ -203,11 +203,10 @@ class TaskManager:
         finally:
             with self._lock:
                 listeners = self._subscribers.get(task_id)
-                if listeners is None:
-                    return
-                listeners.discard(subscriber)
-                if not listeners:
-                    self._subscribers.pop(task_id, None)
+                if listeners is not None:
+                    listeners.discard(subscriber)
+                    if not listeners:
+                        self._subscribers.pop(task_id, None)
 
     def _broadcast_update(self, record: TaskRecord | None) -> None:
         if record is None:

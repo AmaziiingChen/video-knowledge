@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from config import settings
 from services.database import connect, initialize_database
-from routers.tasks import TaskResponse, _to_response
+from presentation.task_responses import TaskResponse, to_task_response
 from services.task_manager import task_manager
 from services.wechat_subscription import (
     WeChatAuthorizationError,
@@ -194,7 +194,7 @@ async def list_subscriptions(account_id: str | None = Query(default=None)):
 def sync_all_subscriptions():
     """Durably queue a serial catch-up check for all enabled subscriptions."""
     try:
-        return _to_response(task_manager.create_source_sync(
+        return to_task_response(task_manager.create_source_sync(
             {"kind": "wechat_bulk"},
             source_title="检查全部公众号",
         ))
@@ -219,7 +219,7 @@ async def create_subscription(req: CreateSubscriptionRequest):
         )
         response: dict[str, Any] = {"subscription": subscription}
         if req.initial_sync:
-            response["sync"] = _to_response(task_manager.create_source_sync(
+            response["sync"] = to_task_response(task_manager.create_source_sync(
                 {
                     "kind": "wechat_subscription",
                     "subscription_id": subscription["id"],
@@ -317,7 +317,7 @@ def sync_subscription(subscription_id: str, req: SyncSubscriptionRequest):
         if req.published_after and req.published_before and req.published_after > req.published_before:
             raise ValueError("开始日期不能晚于结束日期")
         subscription = wechat_subscription_service.get_subscription(subscription_id)
-        return _to_response(task_manager.create_source_sync(
+        return to_task_response(task_manager.create_source_sync(
             {
                 "kind": "wechat_subscription",
                 "subscription_id": subscription_id,

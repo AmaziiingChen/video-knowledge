@@ -102,57 +102,16 @@
                         </p>
                       </div>
                     </div>
-                    <figure
-                      v-if="isReportTab(activeContentTab.id) && contentForTab(activeContentTab.id)?.cover_url"
-                      class="report-cover-preview"
-                      :class="{
-                        'is-generating': isWechatCoverGenerating(activeContentTab.id),
-                        'is-switching': isWechatCoverSwitching(activeContentTab.id),
-                      }"
-                      :aria-busy="isWechatCoverSwitching(activeContentTab.id) ? 'true' : 'false'"
-                    >
-                      <img
-                        :src="reportCoverUrlForTab(activeContentTab.id)"
-                        :alt="`${reportDisplayTitle(activeContentTab.id)}封面`"
-                      />
-                      <template v-if="reportCoverVersionsForTab(activeContentTab.id).length > 1">
-                        <button
-                          type="button"
-                          class="report-cover-arrow is-previous"
-                          title="上一张封面"
-                          aria-label="上一张封面"
-                          :disabled="!canNavigateReportCover(activeContentTab.id, -1)"
-                          @click="selectAdjacentReportCover(activeContentTab.id, -1)"
-                        >
-                          <el-icon><ArrowLeft /></el-icon>
-                        </button>
-                        <button
-                          type="button"
-                          class="report-cover-arrow is-next"
-                          title="下一张封面"
-                          aria-label="下一张封面"
-                          :disabled="!canNavigateReportCover(activeContentTab.id, 1)"
-                          @click="selectAdjacentReportCover(activeContentTab.id, 1)"
-                        >
-                          <el-icon><ArrowRight /></el-icon>
-                        </button>
-                        <span class="report-cover-count" aria-live="polite">
-                          {{ reportCoverIndexForTab(activeContentTab.id) + 1 }}
-                          /
-                          {{ reportCoverVersionsForTab(activeContentTab.id).length }}
-                        </span>
-                      </template>
-                      <figcaption v-if="isWechatCoverGenerating(activeContentTab.id)">
-                        正在重新生成封面，当前图片会保留到新版本完成
-                      </figcaption>
-                    </figure>
-                    <div
-                      v-else-if="isReportTab(activeContentTab.id) && isWechatCoverGenerating(activeContentTab.id)"
-                      class="report-cover-preview is-empty is-generating"
-                      role="status"
-                    >
-                      正在生成公众号封面…
-                    </div>
+                    <ReportCoverPreview
+                      v-if="isReportTab(activeContentTab.id)"
+                      :content-item-id="String(contentForTab(activeContentTab.id)?.id || '')"
+                      :title="reportDisplayTitle(activeContentTab.id)"
+                      :cover-url="contentForTab(activeContentTab.id)?.cover_url || ''"
+                      :history="reportCoverHistoryForTab(activeContentTab.id)"
+                      :generating="isWechatCoverGenerating(activeContentTab.id)"
+                      :switching="isWechatCoverSwitching(activeContentTab.id)"
+                      @select="$emit('select-wechat-cover', $event)"
+                    />
                     <div
                       v-if="selectedMarkdownPreview"
                       ref="reportMarkdown"
@@ -441,143 +400,16 @@
                   >
                     <SvgMaskIcon :src="isAudioPlaying ? pauseFillIcon : playFillIcon" :size="15" />
                   </button>
-                  <el-popover
-                    v-model:visible="contentActionsOpen"
-                    placement="bottom-end"
-                    :width="320"
-                    trigger="hover"
-                    :show-after="90"
-                    :hide-after="180"
-                    :show-arrow="false"
-                    transition="content-action-pop"
-                    popper-class="content-action-popover"
+                  <ContentActionMenu
+                    :model="activeContentActionMenuModel"
+                    @select="handleContentActionMenuSelect"
                   >
                     <template #reference>
                       <button class="content-fact-button" type="button" aria-label="内容操作">
                         <SvgMaskIcon :src="ellipsisIcon" :size="15" />
                       </button>
                     </template>
-                    <div class="content-action-menu">
-                      <div class="content-action-menu-heading">内容操作</div>
-                      <button
-                        type="button"
-                        v-if="hasRemoteSource(activeContentTab.id)"
-                        @click="$emit('copy-text', sourceUrlForTab(activeContentTab.id), '链接已复制'); contentActionsOpen = false"
-                      >复制原链接</button>
-                      <button
-                        v-if="hasRemoteSource(activeContentTab.id)"
-                        type="button"
-                        @click="$emit('open-external-link', sourceUrlForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >在外部浏览器打开</button>
-                      <button
-                        v-if="canOpenWechatRemotePage"
-                        type="button"
-                        :disabled="activeWechatRemotePage?.status === 'loading'"
-                        @click="toggleWechatRemotePage(); contentActionsOpen = false"
-                      >{{ wechatRemoteActionLabel }}</button>
-                      <button
-                        v-if="isArticleTab(activeContentTab.id) && textReadinessForTab(activeContentTab.id)?.retryable"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('retry-source-text', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ textReadinessForTab(activeContentTab.id).status === 'needs_fetch' ? '获取正文' : '重试正文' }}</button>
-                      <button
-                        v-if="contentForTab(activeContentTab.id)?.status === 'failed'"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('retry-content-processing', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >重新处理</button>
-                      <button
-                        v-if="canReprocessLocalSource(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('reprocess-local-source', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ localReprocessLabel(activeContentTab.id) }}</button>
-                      <button
-                        v-if="contentForTab(activeContentTab.id)?.original_file_path"
-                        type="button"
-                        @click="$emit('open-original-file', contentForTab(activeContentTab.id).original_file_path); contentActionsOpen = false"
-                      >打开原始文件</button>
-                      <button
-                      v-if="canRetranscribeMedia(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('retranscribe-video', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ isAudioTab(activeContentTab.id) ? '重新转写音频' : '重新转写视频' }}</button>
-                      <button
-                        v-if="canFetchExternalSubtitle(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('fetch-external-subtitle', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >尝试获取外挂字幕</button>
-                      <button
-                        v-if="canRefreshSourceContext(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('refresh-source-context', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >补采互动与评论</button>
-                      <button
-                        v-if="canDownloadVideo(activeContentTab.id)"
-                        type="button"
-                        :disabled="retryingContentId === contentForTab(activeContentTab.id)?.id"
-                        @click="$emit('redownload-video', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ isVideoCacheExpired(activeContentTab.id) ? '重新下载视频' : '下载视频' }}</button>
-                      <button
-                      v-if="isTimedMediaTab(activeContentTab.id)"
-                      type="button"
-                      :disabled="!timelineSegmentsForTab(activeContentTab.id).length"
-                      @click="exportVideoSubtitles(activeContentTab.id); contentActionsOpen = false"
-                      >导出字幕 / 转写 (.txt)</button>
-                      <button
-                        v-if="isReportTab(activeContentTab.id)"
-                        type="button"
-                        :disabled="isWechatCoverGenerating(activeContentTab.id) || isWechatCoverSwitching(activeContentTab.id)"
-                        @click="requestWechatCoverGeneration(activeContentTab.id); contentActionsOpen = false"
-                      >{{ contentForTab(activeContentTab.id)?.cover_url ? '重新生成 AI 封面' : '生成 AI 封面' }}</button>
-                      <button
-                        v-if="isReportTab(activeContentTab.id) && contentForTab(activeContentTab.id)?.cover_url"
-                        type="button"
-                        :disabled="isWechatCoverGenerating(activeContentTab.id) || isWechatCoverSwitching(activeContentTab.id)"
-                        @click="$emit('replan-wechat-cover', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >重新策划封面主题</button>
-                      <button
-                        v-if="isReportTab(activeContentTab.id)"
-                        type="button"
-                        :disabled="isWechatCoverSwitching(activeContentTab.id)"
-                        @click="$emit('create-wechat-draft', contentForTab(activeContentTab.id)); contentActionsOpen = false"
-                      >{{ wechatPublishingConfigured ? '存入公众号草稿' : '配置公众号草稿发布' }}</button>
-                      <button
-                        v-if="contentForTab(activeContentTab.id)"
-                        class="is-danger"
-                        type="button"
-                        @click="contentActionsOpen = false; $emit('delete-content', contentForTab(activeContentTab.id))"
-                      >移入回收站</button>
-                      <div class="content-action-menu-details">
-                        <div
-                          v-for="detail in contentDetailRows(activeContentTab.id)"
-                          :key="detail.label"
-                          :class="{ 'is-url': detail.kind === 'url', 'is-path': detail.kind === 'path' }"
-                        >
-                          <span>{{ detail.label }}</span>
-                          <button
-                            v-if="detail.kind === 'path'"
-                            class="content-detail-path"
-                            type="button"
-                            :title="detail.title || detail.value"
-                            @click="$emit('reveal-path', detail.value)"
-                          >{{ detail.value }}</button>
-                          <button
-                            v-else-if="detail.kind === 'url'"
-                            class="content-detail-path content-detail-url"
-                            type="button"
-                            :title="detail.title || detail.value"
-                            @click="$emit('open-external-link', detail.value)"
-                          >{{ detail.value }}</button>
-                          <strong v-else :title="detail.title || detail.value">{{ detail.value }}</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </el-popover>
+                  </ContentActionMenu>
                   </div>
                 </div>
                 </div>
@@ -766,81 +598,31 @@
           </section>
     </div>
 
-  <section
+  <PromptEditorSurface
     v-else-if="activeView === 'prompts'"
-    class="editor-surface prompt-editor-surface"
-    @keydown.meta.s.prevent="saveCurrentPrompt"
-    @keydown.ctrl.s.prevent="saveCurrentPrompt"
-  >
-    <div v-if="activePromptTabId" v-loading="promptWorkspaceLoading" class="prompt-editor-main">
-      <div class="prompt-function-bar">
-        <div class="prompt-usage" aria-label="提示词使用说明">
-          <strong>使用说明</strong>
-          <span v-if="isSystemPromptEditor" class="prompt-system-readonly">系统角色 · 只读核验</span>
-          <span v-else-if="isPromptContextEditor" class="prompt-system-readonly">任务上下文 · 只读核验</span>
-          <span><b>入口</b>{{ activePromptContract.entry }}</span>
-          <span><b>输入</b>{{ activePromptContract.input }}</span>
-          <span><b>输出</b>{{ activePromptContract.output }}</span>
-          <span v-if="activePromptContract.variables.length" class="prompt-contract-variables">
-            <b>变量</b><code v-for="variable in activePromptContract.variables" :key="variable">{{ variable }}</code>
-            <em>删除变量后，运行时仍会附加必要输入</em>
-          </span>
-        </div>
-        <div class="prompt-editor-actions">
-          <span v-if="currentPromptDirty" class="prompt-editor-dirty">未保存</span>
-          <el-button
-            v-if="!isReadOnlyPromptEditor && !isReportPromptEditor && selectedPromptTemplateId && !selectedPromptTemplate?.is_active"
-            class="prompt-activate-button"
-            size="small"
-            :loading="activatingPromptTemplate"
-            @click="$emit('activate-prompt-template', selectedPromptTemplateId)"
-          >
-            设为启用
-          </el-button>
-          <el-button
-            v-if="!isReadOnlyPromptEditor && (selectedPromptTemplateId || selectedWechatReportPrompt)"
-            class="prompt-reset-button"
-            size="small"
-            :disabled="currentPromptSaving"
-            @click="requestPromptReset"
-          >
-            <el-icon><Refresh /></el-icon>
-            恢复默认
-          </el-button>
-          <el-button
-            v-if="!isReadOnlyPromptEditor"
-            class="prompt-save-button"
-            size="small"
-            type="primary"
-            aria-keyshortcuts="Meta+S Control+S"
-            :loading="currentPromptSaving"
-            :disabled="!canSaveCurrentPrompt"
-            @click="saveCurrentPrompt"
-          >
-            保存
-          </el-button>
-        </div>
-      </div>
-
-      <el-input
-        class="prompt-editor-text"
-        :model-value="isReportPromptEditor ? wechatReportPromptText : promptEditorText"
-        type="textarea"
-        resize="none"
-        :name="isReportPromptEditor ? 'wechat-report-prompt' : 'prompt-template-content'"
-        autocomplete="off"
-        :aria-label="isReportPromptEditor ? '报告提示词' : '提示词内容'"
-        :placeholder="isReportPromptEditor ? '编辑报告提示词…' : '编辑当前提示词…'"
-        :readonly="isReadOnlyPromptEditor"
-        @update:model-value="updateCurrentPromptText"
-      />
-    </div>
-    <div v-else class="prompt-editor-empty">
-      <SvgMaskIcon :src="appendPageIcon" :size="42" />
-      <strong>从左侧文件树打开提示词</strong>
-      <span>提示词会在标签页中打开，可同时编辑多个文件。</span>
-    </div>
-  </section>
+    :prompt-workspace-tabs="promptWorkspaceTabs"
+    :active-prompt-tab-id="activePromptTabId"
+    :prompt-task-type="promptTaskType"
+    :prompt-templates="promptTemplates"
+    :selected-prompt-template-id="selectedPromptTemplateId"
+    :loading-prompts="loadingPrompts"
+    :prompt-editor-text="promptEditorText"
+    :prompt-editor-name="promptEditorName"
+    :saving-prompt-template="savingPromptTemplate"
+    :activating-prompt-template="activatingPromptTemplate"
+    :wechat-report-prompts="wechatReportPrompts"
+    :selected-wechat-report-prompt-group-id="selectedWechatReportPromptGroupId"
+    :selected-wechat-report-prompt-type="selectedWechatReportPromptType"
+    :wechat-report-prompt-text="wechatReportPromptText"
+    :loading-wechat-report-prompts="loadingWechatReportPrompts"
+    :saving-wechat-report-prompt="savingWechatReportPrompt"
+    @update:prompt-editor-text="$emit('update:promptEditorText', $event)"
+    @update:wechat-report-prompt-text="$emit('update:wechat-report-prompt-text', $event)"
+    @activate-prompt-template="$emit('activate-prompt-template', $event)"
+    @save-prompt="$emit('save-prompt')"
+    @save-wechat-report-prompt="$emit('save-wechat-report-prompt')"
+    @reset-prompt="$emit('reset-prompt')"
+  />
 
   </section>
 </template>
@@ -853,14 +635,11 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Refresh,
 } from '@element-plus/icons-vue'
-import { promptTaskContracts, promptTemplateDisplayName } from '../config/promptInterface'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../components/AiSkeletonStream.vue'
 import { useMarkdownFootnoteNavigation } from '../composables/useMarkdownFootnoteNavigation'
 const movieClapperIcon = 'movieclapper'
-const appendPageIcon = 'append.page'
 const questionPageIcon = 'questionmark.text.page'
 const playFillIcon = 'play.fill'
 const pauseFillIcon = 'pause.fill'
@@ -893,11 +672,15 @@ import {
   remoteOutlineBridgeScript,
 } from './remoteOutlineBridge.js'
 import PreviewFindBar from './PreviewFindBar.vue'
+import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
+import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
+import { createContentActionMenuModel } from './contentActionMenuModel.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
 const ArtAudioPlayer = defineAsyncComponent(() => import('./ArtAudioPlayer.vue'))
+const ContentActionMenu = defineAsyncComponent(() => import('./ContentActionMenu.vue'))
 const props = defineProps({
   activeView: { type: String, required: true },
   workspaceTabs: { type: Array, default: () => [] },
@@ -905,13 +688,8 @@ const props = defineProps({
   promptWorkspaceTabs: { type: Array, default: () => [] },
   activePromptTabId: { type: String, default: '' },
   selectedContentItem: { type: Object, default: null },
-  selectedModel: { type: String, default: 'small' },
-  useCache: { type: Boolean, default: true },
-  modelProfileOptions: { type: Array, default: () => [] },
   running: { type: Boolean, default: false },
   result: { type: Object, required: true },
-  parsedUrl: { type: Object, default: null },
-  mediaPreviewUrl: { type: String, default: '' },
   selectedMarkdownPreview: { type: String, default: '' },
   selectedMarkdownSizeBytes: { type: Number, default: 0 },
   selectedMarkdownPath: { type: String, default: '' },
@@ -924,7 +702,6 @@ const props = defineProps({
   promptEditorName: { type: String, default: '' },
   savingPromptTemplate: { type: Boolean, default: false },
   activatingPromptTemplate: { type: Boolean, default: false },
-  wechatReportGroups: { type: Array, default: () => [] },
   wechatReportPrompts: { type: Array, default: () => [] },
   selectedWechatReportPromptGroupId: { type: String, default: '' },
   selectedWechatReportPromptType: { type: String, default: 'group_context' },
@@ -941,13 +718,7 @@ const props = defineProps({
   sourceProviderLabel: { type: Function, required: true },
   formatDuration: { type: Function, required: true },
   formatDateTime: { type: Function, required: true },
-  promptTaskLabel: { type: Function, required: true },
   formatBytes: { type: Function, required: true },
-  roundedProgress: { type: Function, required: true },
-  statusLabel: { type: Function, required: true },
-  stepLabel: { type: Function, required: true },
-  batchTaskName: { type: Function, required: true },
-  formatSeconds: { type: Function, required: true },
   retryingContentId: { type: String, default: null },
   wechatPublishingConfigured: { type: Boolean, default: false },
   wechatCoverGeneratingContentIds: { type: Array, default: () => [] },
@@ -956,20 +727,10 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'update:selectedModel',
-  'update:useCache',
   'update:promptEditorText',
-  'update:promptEditorName',
-  'update:promptTaskType',
-  'load-prompts',
-  'select-prompt-template',
-  'new-prompt-template',
   'activate-prompt-template',
-  'delete-prompt-template',
   'save-prompt',
   'reset-prompt',
-  'update:selectedWechatReportPromptGroupId',
-  'update:selectedWechatReportPromptType',
   'update:wechat-report-prompt-text',
   'save-wechat-report-prompt',
   'copy-text',
@@ -984,14 +745,6 @@ const emit = defineEmits([
   'fetch-external-subtitle',
   'refresh-source-context',
   'redownload-video',
-  'activate-workspace-tab',
-  'close-workspace-tab',
-  'close-workspace-tabs',
-  'reveal-workspace-tab',
-  'delete-workspace-tab',
-  'activate-prompt-tab',
-  'close-prompt-tab',
-  'close-prompt-tabs',
   'ask-about-selection',
   'generate-wechat-cover',
   'regenerate-wechat-cover',
@@ -1010,7 +763,6 @@ const activeArticlePreviewFrame = ref(null)
 const activeLocalHtmlRemoteWebview = ref(null)
 const xhsGalleryTrack = ref(null)
 const articleOutlineRoot = ref(null)
-const contentActionsOpen = ref(false)
 const previewFindOpen = ref(false)
 const previewFindQuery = ref('')
 const previewFindMatchCount = ref(0)
@@ -1086,73 +838,6 @@ const selectedTextActionStyle = computed(() => {
     '--reader-selection-tail-bottom': opensAbove ? '-4px' : 'auto',
   }
 })
-const activePromptWorkspaceTab = computed(() => (
-  props.promptWorkspaceTabs.find((tab) => tab.id === props.activePromptTabId) || null
-))
-const isSystemPromptEditor = computed(() => activePromptWorkspaceTab.value?.kind === 'system')
-const isPromptContextEditor = computed(() => activePromptWorkspaceTab.value?.kind === 'context')
-const isReadOnlyPromptEditor = computed(() => isSystemPromptEditor.value || isPromptContextEditor.value)
-const isReportPromptEditor = computed(() => props.promptTaskType === 'wechat_reports')
-const selectedPromptTemplate = computed(() => {
-  return props.promptTemplates.find((template) => template.id === props.selectedPromptTemplateId) || null
-})
-const selectedWechatReportPrompt = computed(() => {
-  return props.wechatReportPrompts.find((item) => (
-    item.group_id === props.selectedWechatReportPromptGroupId
-    && item.report_type === props.selectedWechatReportPromptType
-  )) || null
-})
-const activePromptContract = computed(() => promptTaskContracts[props.promptTaskType] || {
-  entry: '知识处理流程',
-  input: '当前任务材料',
-  output: 'AI 生成内容',
-  variables: []
-})
-const standardPromptDirty = computed(() => {
-  if (isReadOnlyPromptEditor.value) return false
-  if (isReportPromptEditor.value) return false
-  if (!selectedPromptTemplate.value) {
-    return Boolean(props.promptEditorName.trim() || props.promptEditorText.trim())
-  }
-  return props.promptEditorName !== promptTemplateDisplayName(selectedPromptTemplate.value)
-    || props.promptEditorText !== selectedPromptTemplate.value.template
-})
-const reportPromptDirty = computed(() => {
-  if (!isReportPromptEditor.value || !selectedWechatReportPrompt.value) return false
-  return props.wechatReportPromptText !== selectedWechatReportPrompt.value.template
-})
-const currentPromptDirty = computed(() => (
-  isReportPromptEditor.value ? reportPromptDirty.value : standardPromptDirty.value
-))
-const canSaveCurrentPrompt = computed(() => {
-  if (!currentPromptDirty.value) return false
-  if (isReportPromptEditor.value) {
-    return Boolean(selectedWechatReportPrompt.value && props.wechatReportPromptText.trim())
-  }
-  return Boolean(props.promptEditorName.trim() && props.promptEditorText.trim())
-})
-const promptWorkspaceLoading = computed(() => (
-  isReportPromptEditor.value ? props.loadingWechatReportPrompts : props.loadingPrompts
-))
-const currentPromptSaving = computed(() => (
-  isReportPromptEditor.value ? props.savingWechatReportPrompt : props.savingPromptTemplate
-))
-
-function updateCurrentPromptText(value) {
-  if (isReadOnlyPromptEditor.value) return
-  emit(isReportPromptEditor.value ? 'update:wechat-report-prompt-text' : 'update:promptEditorText', value)
-}
-
-function saveCurrentPrompt() {
-  if (!canSaveCurrentPrompt.value || currentPromptSaving.value) return
-  emit(isReportPromptEditor.value ? 'save-wechat-report-prompt' : 'save-prompt')
-}
-
-function requestPromptReset() {
-  if (currentPromptSaving.value) return
-  emit('reset-prompt')
-}
-
 const mediaTranscriptHeight = ref(readStoredVerticalSplit('knowledgehub.media-transcript-height.v1'))
 const mediaTranscriptResizing = ref(false)
 const xhsImageTextHeight = ref(readStoredVerticalSplit('knowledgehub.xhs-image-text-height.v1'))
@@ -1480,6 +1165,63 @@ function contentDetailRows(tabId) {
     ...(hasRemoteSource(tabId) ? [{ label: '原文链接', value: sourceUrl, title: sourceUrl, kind: 'url' }] : []),
   ]
   return rows
+}
+
+const activeContentActionMenuModel = computed(() => {
+  const tabId = activeContentTab.value?.id || ''
+  const content = tabId ? props.contentForTab(tabId) : null
+  const textReadiness = tabId ? textReadinessForTab(tabId) : null
+  return createContentActionMenuModel({
+    content,
+    retryingContentId: props.retryingContentId,
+    hasRemoteSource: tabId ? hasRemoteSource(tabId) : false,
+    remotePageAvailable: canOpenWechatRemotePage.value,
+    remotePageLoading: activeWechatRemotePage.value?.status === 'loading',
+    remotePageLabel: wechatRemoteActionLabel.value,
+    articleTextRetryable: Boolean(tabId && isArticleTab(tabId) && textReadiness?.retryable),
+    articleTextStatus: textReadiness?.status,
+    canReprocessLocalSource: tabId ? canReprocessLocalSource(tabId) : false,
+    localReprocessLabel: tabId ? localReprocessLabel(tabId) : '',
+    canRetranscribeMedia: tabId ? canRetranscribeMedia(tabId) : false,
+    isAudio: tabId ? isAudioTab(tabId) : false,
+    canFetchExternalSubtitle: tabId ? canFetchExternalSubtitle(tabId) : false,
+    canRefreshSourceContext: tabId ? canRefreshSourceContext(tabId) : false,
+    canDownloadVideo: tabId ? canDownloadVideo(tabId) : false,
+    videoCacheExpired: tabId ? isVideoCacheExpired(tabId) : false,
+    isTimedMedia: tabId ? isTimedMediaTab(tabId) : false,
+    hasTimelineSegments: Boolean(tabId && timelineSegmentsForTab(tabId).length),
+    isReport: tabId ? isReportTab(tabId) : false,
+    coverGenerating: tabId ? isWechatCoverGenerating(tabId) : false,
+    coverSwitching: tabId ? isWechatCoverSwitching(tabId) : false,
+    publishingConfigured: props.wechatPublishingConfigured,
+    details: tabId ? contentDetailRows(tabId) : [],
+  })
+})
+
+function handleContentActionMenuSelect({ id, payload } = {}) {
+  const tabId = activeContentTab.value?.id || ''
+  const content = tabId ? props.contentForTab(tabId) : null
+  const sourceUrl = tabId ? sourceUrlForTab(tabId) : ''
+  switch (id) {
+    case 'copy-source': emit('copy-text', sourceUrl, '链接已复制'); break
+    case 'open-source': emit('open-external-link', sourceUrl); break
+    case 'toggle-remote-page': toggleWechatRemotePage(); break
+    case 'retry-source-text': emit('retry-source-text', content); break
+    case 'retry-processing': emit('retry-content-processing', content); break
+    case 'reprocess-local-source': emit('reprocess-local-source', content); break
+    case 'open-original-file': emit('open-original-file', content?.original_file_path || ''); break
+    case 'retranscribe-media': emit('retranscribe-video', content); break
+    case 'fetch-external-subtitle': emit('fetch-external-subtitle', content); break
+    case 'refresh-source-context': emit('refresh-source-context', content); break
+    case 'download-video': emit('redownload-video', content); break
+    case 'export-transcript': exportVideoSubtitles(tabId); break
+    case 'generate-cover': requestWechatCoverGeneration(tabId); break
+    case 'replan-cover': emit('replan-wechat-cover', content); break
+    case 'create-wechat-draft': emit('create-wechat-draft', content); break
+    case 'delete-content': emit('delete-content', content); break
+    case 'reveal-detail-path': emit('reveal-path', payload); break
+    case 'open-detail-url': emit('open-external-link', payload); break
+  }
 }
 
 function canRetranscribeMedia(tabId) {
@@ -1968,45 +1710,6 @@ function reportCoverHistoryForTab(tabId) {
     active_cover_id: '',
     covers: [],
   }
-}
-
-function reportCoverVersionsForTab(tabId) {
-  const covers = reportCoverHistoryForTab(tabId).covers
-  return Array.isArray(covers) ? covers : []
-}
-
-function reportCoverIndexForTab(tabId) {
-  const history = reportCoverHistoryForTab(tabId)
-  const covers = reportCoverVersionsForTab(tabId)
-  const index = covers.findIndex((item) => item.id === history.active_cover_id)
-  return index >= 0 ? index : Math.max(0, covers.length - 1)
-}
-
-function reportCoverUrlForTab(tabId) {
-  const covers = reportCoverVersionsForTab(tabId)
-  const selected = covers[reportCoverIndexForTab(tabId)]
-  return selected?.url || props.contentForTab(tabId)?.cover_url || ''
-}
-
-function canNavigateReportCover(tabId, direction) {
-  if (
-    isWechatCoverGenerating(tabId)
-    || isWechatCoverSwitching(tabId)
-  ) return false
-  const nextIndex = reportCoverIndexForTab(tabId) + Number(direction || 0)
-  return nextIndex >= 0 && nextIndex < reportCoverVersionsForTab(tabId).length
-}
-
-function selectAdjacentReportCover(tabId, direction) {
-  if (!canNavigateReportCover(tabId, direction)) return
-  const contentItemId = String(props.contentForTab(tabId)?.id || '')
-  const nextIndex = reportCoverIndexForTab(tabId) + Number(direction || 0)
-  const cover = reportCoverVersionsForTab(tabId)[nextIndex]
-  if (!contentItemId || !cover?.id) return
-  emit('select-wechat-cover', {
-    contentItemId,
-    coverId: cover.id,
-  })
 }
 
 function requestWechatCoverGeneration(tabId) {
@@ -3533,124 +3236,6 @@ function exportVideoSubtitles(tabId) {
   background: var(--vk-bg-center);
 }
 
-.report-cover-preview {
-  position: relative;
-  display: grid;
-  width: 100%;
-  aspect-ratio: 900 / 383;
-  margin: 0 0 28px;
-  overflow: hidden;
-  border: 1px solid var(--vk-divider-subtle);
-  border-radius: var(--vk-radius-surface);
-  background: var(--vk-bg-center);
-}
-
-.report-cover-preview img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.report-cover-arrow,
-.report-cover-count {
-  position: absolute;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity var(--vk-motion-fast) var(--vk-ease-out);
-}
-
-.report-cover-arrow {
-  top: 50%;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--vk-action-fg) 36%, transparent);
-  border-radius: var(--vk-radius-pill);
-  background: color-mix(in srgb, var(--vk-text) 76%, transparent);
-  color: var(--vk-action-fg);
-  cursor: pointer;
-  transform: translateY(-50%);
-}
-
-.report-cover-arrow.is-previous {
-  left: var(--vk-space-cluster);
-}
-
-.report-cover-arrow.is-next {
-  right: var(--vk-space-cluster);
-}
-
-.report-cover-arrow:focus-visible {
-  opacity: 1;
-  outline: none;
-  box-shadow: var(--vk-focus-ring);
-}
-
-.report-cover-arrow:disabled {
-  cursor: default;
-}
-
-.report-cover-count {
-  right: var(--vk-space-cluster);
-  top: var(--vk-space-cluster);
-  padding: var(--vk-space-xs) var(--vk-space-control);
-  border-radius: var(--vk-radius-pill);
-  background: color-mix(in srgb, var(--vk-text) 72%, transparent);
-  color: var(--vk-action-fg);
-  font-size: var(--vk-type-meta-size);
-  line-height: var(--vk-leading-label);
-}
-
-.report-cover-preview:hover .report-cover-arrow,
-.report-cover-preview:hover .report-cover-count,
-.report-cover-preview:focus-within .report-cover-arrow,
-.report-cover-preview:focus-within .report-cover-count {
-  opacity: 1;
-}
-
-.report-cover-preview:hover .report-cover-arrow:disabled,
-.report-cover-preview:focus-within .report-cover-arrow:disabled {
-  opacity: 0.34;
-}
-
-.report-cover-preview.is-switching img {
-  opacity: 0.72;
-}
-
-.report-cover-preview.is-empty {
-  place-items: center;
-  color: var(--vk-muted);
-  font-size: var(--vk-type-label-size);
-}
-
-.report-cover-preview figcaption {
-  position: absolute;
-  right: var(--vk-space-cluster);
-  bottom: var(--vk-space-cluster);
-  left: var(--vk-space-cluster);
-  padding: var(--vk-space-control) var(--vk-space-cluster);
-  border-radius: var(--vk-radius-control);
-  background: color-mix(in srgb, var(--vk-text) 82%, transparent);
-  color: var(--vk-action-fg);
-  font-size: var(--vk-type-meta-size);
-  line-height: var(--vk-leading-label);
-  text-align: center;
-}
-
-@media (hover: none) {
-  .report-cover-arrow,
-  .report-cover-count {
-    opacity: 1;
-  }
-
-  .report-cover-arrow:disabled {
-    opacity: 0.34;
-  }
-}
-
 .capture-reader-inner {
   padding-top: 24px;
 }
@@ -4574,158 +4159,6 @@ function exportVideoSubtitles(tabId) {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--vk-accent-strong) 50%, transparent);
 }
 
-:global(.content-action-popover) {
-  z-index: 3000 !important;
-  padding: 7px !important;
-  border: 1px solid color-mix(in srgb, var(--vk-border) 72%, var(--vk-bg-panel)) !important;
-  border-radius: 10px !important;
-  /* A small action menu needs a denser material than the larger preview chrome:
-     its text must stay legible when it overlaps a dense article or report. */
-  background: var(--vk-surface-raised) !important;
-  background:
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--vk-bg-panel) 88%, var(--vk-bg-center)) 0%,
-      color-mix(in srgb, var(--vk-bg-panel) 94%, transparent) 100%
-    ) !important;
-  box-shadow:
-    0 18px 40px color-mix(in srgb, var(--vk-text) 18%, transparent),
-    0 3px 9px color-mix(in srgb, var(--vk-text) 8%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--vk-bg-panel) 68%, transparent) !important;
-  backdrop-filter: blur(28px) saturate(150%) brightness(1.04);
-  -webkit-backdrop-filter: blur(28px) saturate(150%) brightness(1.04);
-  transform-origin: right top;
-}
-
-:global(.content-action-pop-enter-active) {
-  transition:
-    opacity 150ms var(--vk-ease-out),
-    scale 150ms var(--vk-ease-out);
-}
-
-:global(.content-action-pop-leave-active) {
-  transition:
-    opacity 100ms var(--vk-ease-out),
-    scale 100ms var(--vk-ease-out);
-}
-
-:global(.content-action-pop-enter-from) {
-  opacity: 0;
-  scale: 0.96;
-}
-
-:global(.content-action-pop-leave-to) {
-  opacity: 0;
-  scale: 0.98;
-}
-
-:global(.content-action-popover .el-popper__arrow::before) {
-  background: color-mix(in srgb, var(--vk-bg-panel) 74%, transparent) !important;
-}
-
-.content-action-menu-heading {
-  padding: 3px 7px 5px;
-  color: var(--vk-muted);
-  font-size: 11px;
-}
-
-.content-action-menu > button {
-  width: 100%;
-  padding: 7px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--vk-text);
-  text-align: left;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.content-action-menu > button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--vk-accent) 10%, transparent);
-  color: var(--vk-accent-strong);
-}
-
-.content-action-menu > button.is-danger {
-  margin-top: 5px;
-  color: var(--vk-danger);
-}
-
-.content-action-menu > button.is-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--vk-danger) 10%, transparent);
-  color: var(--vk-danger);
-}
-
-.content-action-menu > button:disabled {
-  color: var(--vk-muted);
-  cursor: default;
-}
-
-.content-action-menu-details {
-  display: grid;
-  gap: 5px;
-  margin-top: 6px;
-  padding: 9px 7px 3px;
-  border-top: 1px solid color-mix(in srgb, var(--vk-border) 78%, transparent);
-}
-
-.content-action-menu-details > div {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  min-width: 0;
-  font-size: 11px;
-}
-
-.content-action-menu-details span {
-  color: var(--vk-muted);
-  line-height: 1.45;
-}
-
-.content-action-menu-details strong {
-  color: var(--vk-text);
-  font-weight: 500;
-  text-align: right;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.content-action-menu-details > div.is-url,
-.content-action-menu-details > div.is-path {
-  margin-top: 2px;
-}
-
-.content-action-menu-details > div.is-url strong,
-.content-action-menu-details > div.is-path .content-detail-path {
-  color: var(--vk-muted);
-  font-size: 10px;
-}
-
-.content-detail-path {
-  min-width: 0;
-  overflow: hidden;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--vk-muted);
-  cursor: pointer;
-  font: inherit;
-  line-height: 1.45;
-  text-align: right;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.content-detail-path:hover {
-  color: var(--vk-text);
-  text-decoration-color: currentColor;
-}
-
 .transcript-timeline {
   min-height: 0;
   height: 100%;
@@ -5077,531 +4510,6 @@ function exportVideoSubtitles(tabId) {
   line-height: 1.22;
 }
 
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  color: var(--vk-muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.editor-surface {
-  height: 100%;
-  min-height: 100%;
-  border: 0;
-  border-radius: var(--vk-radius-surface);
-  overflow: hidden;
-  background: var(--vk-bg-center);
-  color: var(--vk-text);
-}
-
-.prompt-editor-surface {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  min-height: 0;
-}
-
-.prompt-editor-breadcrumb {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--vk-space-xs);
-  padding: 0 var(--vk-space-panel);
-  overflow: hidden;
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-center);
-  color: var(--vk-muted);
-  font-size: var(--vk-type-label-size);
-  white-space: nowrap;
-}
-
-.prompt-editor-breadcrumb i {
-  color: color-mix(in srgb, var(--vk-muted) 54%, transparent);
-  font-style: normal;
-}
-
-.prompt-editor-breadcrumb strong {
-  color: var(--vk-text);
-  font-weight: 600;
-}
-
-.prompt-breadcrumb-leaf {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--vk-text);
-  text-overflow: ellipsis;
-}
-
-.prompt-editor-breadcrumb small {
-  flex: 0 0 auto;
-  color: var(--vk-muted);
-  font-size: var(--vk-type-micro-size);
-  font-variant-numeric: tabular-nums;
-}
-
-.editor-titlebar {
-  min-height: 35px;
-  align-items: center;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--vk-border);
-  color: var(--vk-text);
-  background: var(--vk-bg-hover);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.editor-titlebar-actions,
-.editor-row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.editor-empty {
-  min-height: 320px;
-  display: grid;
-  place-items: center;
-  color: var(--vk-muted);
-  font-size: 13px;
-}
-
-.editor-list {
-  display: grid;
-}
-
-.editor-row {
-  display: grid;
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--vk-border);
-}
-
-.editor-row:hover {
-  background: var(--vk-bg-hover);
-}
-
-.editor-row-head > div {
-  min-width: 0;
-}
-
-.editor-row-head strong {
-  display: block;
-  color: var(--vk-text);
-  font-size: 13px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.editor-row-head span {
-  display: block;
-  margin-top: 3px;
-  color: var(--vk-muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.prompt-editor-pane {
-  position: relative;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
-  padding: 0;
-}
-
-.template-rail-collapsed .prompt-editor-pane {
-  grid-template-columns: 42px minmax(0, 1fr);
-}
-
-.prompt-template-rail {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
-  overflow: hidden;
-  border-right: 1px solid var(--vk-border);
-  background: var(--vk-bg-quiet);
-}
-
-.prompt-template-rail-header {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--vk-space-xs);
-  padding: 0 var(--vk-space-sm) 0 var(--vk-space-control);
-  border-bottom: 1px solid var(--vk-border);
-}
-
-.template-rail-collapsed .prompt-template-rail-header {
-  justify-content: center;
-  padding: 0;
-}
-
-.prompt-template-rail-title,
-.prompt-template-rail-actions {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--vk-space-xs);
-}
-
-.prompt-template-rail-title strong {
-  color: var(--vk-text);
-  font-size: var(--vk-type-label-size);
-  font-weight: 600;
-}
-
-.prompt-template-rail-title small {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-micro-size);
-  font-variant-numeric: tabular-nums;
-}
-
-.prompt-rail-icon-button {
-  width: var(--vk-control-height-compact);
-  height: var(--vk-control-height-compact);
-  display: inline-grid;
-  flex: 0 0 auto;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--vk-radius-control);
-  background: transparent;
-  color: var(--vk-muted);
-  cursor: pointer;
-}
-
-.prompt-rail-icon-button:hover {
-  background: var(--vk-bg-hover);
-  color: var(--vk-text);
-}
-
-.prompt-rail-icon-button:focus-visible,
-.prompt-shortcut-item:focus-visible {
-  outline: none;
-  box-shadow: var(--vk-focus-ring);
-}
-
-.prompt-template-list {
-  min-height: 0;
-  display: grid;
-  align-content: start;
-  gap: 2px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: var(--vk-space-sm) var(--vk-space-xs);
-}
-
-.prompt-shortcut-item {
-  width: 100%;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--vk-space-xs);
-  padding: 0 var(--vk-space-sm);
-  border: 0;
-  border-radius: var(--vk-radius-compact);
-  background: transparent;
-  color: var(--vk-text);
-  font: inherit;
-  font-size: var(--vk-type-label-size);
-  text-align: left;
-  cursor: pointer;
-}
-
-.prompt-shortcut-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prompt-template-current {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  border-radius: var(--vk-radius-pill);
-  background: color-mix(in srgb, var(--vk-accent) 14%, transparent);
-  color: var(--vk-accent-strong);
-  font-size: var(--vk-type-micro-size);
-  font-weight: 600;
-  line-height: 18px;
-  padding: 0 var(--vk-space-xs);
-}
-
-.prompt-shortcut-item:hover,
-.prompt-shortcut-item.active {
-  background: var(--vk-selected-bg);
-  color: var(--vk-selected-fg);
-}
-
-.report-prompt-blank {
-  display: grid;
-  grid-row: 1 / -1;
-  min-height: 100%;
-  place-items: center;
-  padding: var(--vk-space-page);
-  color: var(--vk-muted);
-  font-size: var(--vk-type-body-size);
-  text-align: center;
-}
-
-.prompt-editor-main {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.prompt-function-bar {
-  min-width: 0;
-  min-height: 42px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--vk-space-sm);
-  padding: var(--vk-space-micro) var(--vk-space-control);
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-quiet);
-}
-
-.prompt-usage {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--vk-space-micro) var(--vk-space-cluster);
-  color: var(--vk-text);
-  font-size: var(--vk-type-meta-size);
-  line-height: 1.4;
-}
-
-.prompt-usage > strong {
-  color: var(--vk-text);
-  font-size: var(--vk-type-label-size);
-  font-weight: 600;
-}
-
-.prompt-usage span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--vk-space-micro);
-}
-
-.prompt-usage b {
-  color: var(--vk-muted);
-  font-weight: 500;
-}
-
-.prompt-usage code {
-  color: var(--vk-accent-strong);
-  font-family: var(--vk-font-mono);
-  font-size: inherit;
-}
-
-.prompt-usage em {
-  color: var(--vk-muted);
-  font-style: normal;
-}
-
-.prompt-editor-header {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--vk-space-control);
-  min-height: 56px;
-  padding: var(--vk-space-sm) var(--vk-space-control);
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-center);
-}
-
-.prompt-editor-name-field {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(120px, 420px);
-  align-items: center;
-  gap: var(--vk-space-sm);
-}
-
-.prompt-editor-name-field > span {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-  font-weight: 500;
-}
-
-.prompt-editor-static-name {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.prompt-editor-static-name strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--vk-text);
-  font-size: var(--vk-type-body-size);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prompt-editor-static-name span {
-  color: var(--vk-muted);
-  font-size: var(--vk-type-meta-size);
-}
-
-.prompt-editor-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--vk-space-xs);
-  min-width: 0;
-}
-
-.prompt-editor-actions :deep(.el-button + .el-button) {
-  margin-left: 0;
-}
-
-.prompt-editor-name {
-  width: 100%;
-  min-width: 0;
-}
-
-.prompt-editor-name :deep(.el-input__wrapper) {
-  min-height: var(--vk-control-height-default);
-  border-radius: var(--vk-radius-control);
-  background: var(--vk-bg-panel);
-  box-shadow: 0 0 0 1px var(--vk-border) inset;
-}
-
-.prompt-editor-name :deep(.el-input__inner) {
-  color: var(--vk-text);
-  font-size: var(--vk-type-body-size);
-  font-weight: 600;
-}
-
-.prompt-editor-dirty {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--vk-space-micro);
-  color: var(--vk-warning);
-  font-size: var(--vk-type-meta-size);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.prompt-editor-dirty::before {
-  width: 5px;
-  height: 5px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: currentColor;
-  content: '';
-}
-
-.prompt-save-button {
-  min-width: 58px;
-}
-
-.prompt-save-button:deep(.el-button),
-.prompt-save-button,
-.prompt-reset-button:deep(.el-button),
-.prompt-reset-button {
-  border-radius: var(--vk-radius-control);
-}
-
-.prompt-reset-button { min-width: 84px; }
-
-.prompt-activate-button {
-  border-radius: var(--vk-radius-control);
-}
-
-.prompt-editor-empty {
-  grid-row: 1 / -1;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: var(--vk-space-sm);
-  min-height: 0;
-  padding: var(--vk-space-page);
-  color: var(--vk-muted);
-  text-align: center;
-}
-
-.prompt-editor-empty :deep(.svg-mask-icon) { color: var(--vk-accent-strong); opacity: 0.72; }
-.prompt-editor-empty strong { color: var(--vk-text); font-size: var(--vk-type-body-size); font-weight: 600; }
-.prompt-editor-empty span { font-size: var(--vk-type-label-size); }
-
-.prompt-contract-strip {
-  min-width: 0;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--vk-space-xs) var(--vk-space-panel);
-  padding: var(--vk-space-xs) var(--vk-space-panel);
-  border-bottom: 1px solid var(--vk-border);
-  background: var(--vk-bg-quiet);
-  color: var(--vk-text);
-  font-size: var(--vk-type-meta-size);
-  line-height: 1.4;
-}
-
-.prompt-contract-strip span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--vk-space-micro);
-}
-
-.prompt-contract-strip b {
-  color: var(--vk-muted);
-  font-weight: 500;
-}
-
-.prompt-contract-strip code {
-  color: var(--vk-accent-strong);
-  font-family: var(--vk-font-mono);
-  font-size: inherit;
-}
-
-.prompt-contract-strip em {
-  color: var(--vk-muted);
-  font-style: normal;
-}
-
-.prompt-editor-text {
-  min-height: 0;
-  height: 100%;
-}
-
-.prompt-editor-text :deep(.el-textarea__inner) {
-  box-sizing: border-box;
-  height: 100%;
-  min-height: 0;
-  border-color: var(--vk-border);
-  border-radius: var(--vk-radius-surface);
-  border-width: 0;
-  background: var(--vk-bg-panel);
-  color: var(--vk-text);
-  font-family: var(--vk-font-mono);
-  font-size: var(--vk-type-body-size);
-  line-height: 1.7;
-  padding: var(--vk-space-panel) var(--vk-space-page) var(--vk-space-section);
-  box-shadow: none;
-}
-
-
 @media (prefers-reduced-motion: reduce) {
   .media-transcript-splitter::before,
   .transcript-follow-button,
@@ -5641,16 +4549,6 @@ function exportVideoSubtitles(tabId) {
     box-shadow: none;
   }
 
-  :global(.content-action-pop-enter-active),
-  :global(.content-action-pop-leave-active) {
-    transition: opacity var(--vk-motion-fast) ease;
-  }
-
-  :global(.content-action-pop-enter-from),
-  :global(.content-action-pop-leave-to) {
-    scale: 1;
-  }
-
   .reader-selection-ask {
     transition: border-color 100ms ease, background-color 100ms ease, box-shadow 100ms ease;
   }
@@ -5683,7 +4581,6 @@ function exportVideoSubtitles(tabId) {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  :global(.content-action-popover),
   .report-footnote-return,
   .transcript-follow-button,
   .reader-selection-ask {
@@ -5694,7 +4591,6 @@ function exportVideoSubtitles(tabId) {
 }
 
 @media (prefers-contrast: more) {
-  :global(.content-action-popover),
   .report-footnote-return,
   .transcript-follow-button,
   .reader-selection-ask {

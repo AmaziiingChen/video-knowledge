@@ -23,6 +23,7 @@ backend/vendor/Spider_XHS/
 frontend/node_modules/
 frontend/dist/
 frontend/dist-public-report/
+frontend/coverage/
 frontend/release/
 frontend/.pytest_cache/
 frontend/*.local
