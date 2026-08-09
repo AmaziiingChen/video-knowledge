@@ -30,7 +30,7 @@
     "@element-plus/icons-vue": "^2.3.2",
     "@tabler/icons-vue": "^3.44.0",
     "artplayer": "^5.4.0",
-    "axios": "^1.18.1",
+    "axios": "^1.19.0",
     "element-plus": "^2.14.3",
     "katex": "^0.16.47",
     "marked": "^18.0.6",
