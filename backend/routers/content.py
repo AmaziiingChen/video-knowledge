@@ -25,6 +25,7 @@ from services.content_presentation import (
 )
 from services.content_preview_models import (
     ArticlePreviewResponse,
+    is_legacy_document_markdown_preview,
     safe_article_attachments,
     xiaohongshu_description_from_html,
 )
@@ -330,7 +331,7 @@ def get_article_preview(
         formatting_detail = str(formatting.get("detail") or "")
         preview_markdown = str(formatting.get("formatted_markdown") or document_markdown)
         preview_html = render_document_markdown_html(preview_markdown)
-    elif _is_legacy_document_markdown_preview(article_info, body_html):
+    elif is_legacy_document_markdown_preview(article_info, body_html):
         # Older procurement captures escaped PaddleOCR's Markdown line by
         # line. Re-rendering their cached source text makes headings and
         # embedded HTML tables usable immediately, without another OCR call.
@@ -378,14 +379,6 @@ def get_article_preview(
         formatting_status=formatting_status,
         formatting_detail=formatting_detail,
     )
-
-
-def _is_legacy_document_markdown_preview(article_info: dict, body_html: str) -> bool:
-    """Identify OCR captures made before Markdown was rendered as HTML."""
-    document_ocr = article_info.get("document_ocr")
-    if not isinstance(document_ocr, dict) or not document_ocr:
-        return False
-    return bool(re.search(r"&lt;/?(?:table|thead|tbody|tr|td|th)\b", body_html, re.IGNORECASE))
 
 
 @router.get("/content/folders/{folder_id}/history", response_model=FolderHistoryPageResponse)

@@ -49,3 +49,10 @@ def xiaohongshu_description_from_html(body_html: str) -> str:
     paragraphs = re.sub(r"</(?:p|div|section)\s*>", "\n", str(body_html or ""), flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", paragraphs)
     return html.unescape(text).strip()
+
+
+def is_legacy_document_markdown_preview(article_info: dict, body_html: str) -> bool:
+    document_ocr = article_info.get("document_ocr")
+    if not isinstance(document_ocr, dict) or not document_ocr:
+        return False
+    return bool(re.search(r"&lt;/?(?:table|thead|tbody|tr|td|th)\b", body_html, re.IGNORECASE))
