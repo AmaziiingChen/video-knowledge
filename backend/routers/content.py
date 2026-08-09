@@ -26,6 +26,7 @@ from services.content_presentation import (
     ContentItemResponse,
     content_item_response,
 )
+from services.content_preview_models import ArticlePreviewResponse
 from services.content_source_text import (
     inspect_content_text_readiness,
     load_content_source_text,
@@ -67,21 +68,6 @@ class FolderHistoryPageResponse(BaseModel):
     offset: int
     has_more: bool
     history_before: str
-
-
-class ArticlePreviewResponse(BaseModel):
-    content_item_id: str
-    title: str
-    author: str = ""
-    published_at: str = ""
-    html: str
-    source_html: str = ""
-    gallery: list[dict[str, object]] = Field(default_factory=list)
-    stats: dict[str, int] = Field(default_factory=dict)
-    tags: list[str] = Field(default_factory=list)
-    attachments: list[dict[str, str]] = Field(default_factory=list)
-    formatting_status: str = "not_applicable"
-    formatting_detail: str = ""
 
 
 @router.get("/content", response_model=list[ContentItemResponse])
