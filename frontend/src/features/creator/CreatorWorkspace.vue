@@ -205,9 +205,9 @@ import { ElMessage } from 'element-plus'
 import { MoreFilled } from '@element-plus/icons-vue'
 import { requestDestructiveConfirmation } from '../../composables/useDestructiveConfirm'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../../utils/sourceSyncTask'
+import { API_BASE as API } from '../../utils/localApiAuth.js'
 
 const emit = defineEmits(['library-changed', 'processing-started'])
-const API = 'http://127.0.0.1:8000/api'
 const sourceUrl = ref('')
 const allowPersonalSources = ref(true)
 const sourceFrom = ref('')
@@ -365,7 +365,7 @@ async function sync() {
 
 async function loadQueuePressure() {
   try {
-    const response = await axios.get('http://127.0.0.1:8000/api/tasks', { timeout: 10000 })
+    const response = await axios.get(`${API}/tasks`, { timeout: 10000 })
     activeTaskCount.value = (response.data || []).filter((task) => ['queued', 'running'].includes(task.status)).length
   } catch {
     activeTaskCount.value = 0

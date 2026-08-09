@@ -1,0 +1,138 @@
+# KnowledgeHub Architecture
+
+KnowledgeHub is a macOS-first, local-data-first knowledge workbench. This document describes the runtime boundaries that contributors should preserve and the module ownership that the codebase is moving toward. Product scope lives in `docs/product-development-plan.md`; visual contracts live in `DESIGN.md`.
+
+## Runtime map
+
+```mermaid
+flowchart LR
+    User["macOS user"] --> Electron["Electron shell"]
+    Electron --> Renderer["Vue workbench"]
+    Electron --> Backend["bundled FastAPI process"]
+    Renderer -->|"loopback API + instance token"| Backend
+    Backend --> Queue["persistent task queue"]
+    Queue --> Pipelines["ingestion and analysis pipelines"]
+    Pipelines --> LocalData["SQLite + local files"]
+    Pipelines --> External["platforms and configured AI services"]
+    Backend --> LocalData
+```
+
+The renderer never receives raw desktop credentials. Electron owns privileged desktop operations and exposes a narrow preload bridge. Mutating local API calls are bound to the desktop instance token. Runtime data, downloaded media, caches, credentials, logs, and generated reports stay outside Git under `data/` or the user's application-data directory.
+
+## Source layout
+
+```text
+frontend/
+  electron/             desktop process, preload bridge, native session handling
+  src/
+    components/         shared dialogs and small reusable UI
+    composables/        application composition and cross-feature lifecycle
+    config/             stable presentation and workbench configuration
+    features/           product capabilities owned by feature
+    styles/             shared tokens and cross-workbench styles
+    utils/              pure formatting and narrow infrastructure helpers
+    workbench/          shell, panes, tabs, editor and navigation surfaces
+
+backend/
+  main.py               application composition, middleware and router registration
+  routers/              HTTP validation and response adaptation
+  services/             domain operations and infrastructure implementations
+  native/               macOS-specific helpers
+  evaluation/           offline quality evaluation
+
+desktop/                packaged backend and native release resources
+scripts/                developer, packaging and public-release checks
+tests/                  backend behavior and contract tests
+docs/                   product, release and integration documentation
+```
+
+The current `composables/`, `workbench/`, `routers/`, and `services/` directories still contain oversized modules. New work must follow the ownership rules below instead of adding another branch to the application entrypoints.
+
+## Frontend dependency direction
+
+```mermaid
+flowchart TD
+    App["App composition root"] --> Workbench["workbench shell"]
+    App --> Features["feature controllers and workspaces"]
+    Workbench --> Shared["shared components and utilities"]
+    Features --> Shared
+    Features --> Api["local API boundary"]
+    Api --> Backend["FastAPI"]
+```
+
+- `App.vue` chooses workspaces, composes feature controllers, and owns global error surfaces. It must not accumulate feature-specific API workflows.
+- `workbench/` owns layout, panes, tabs, editor dispatch, and shared reading interactions. Feature-specific collection, publishing, or synchronization logic belongs under `features/`.
+- A feature owns its state, API calls, polling, and presentation helpers. Cross-feature reuse is extracted only after repeated use is proven.
+- The canonical renderer API base is exported by `frontend/src/utils/localApiAuth.js`. Components must not hard-code loopback API origins.
+- Electron-only capabilities go through the preload bridge. Browser development fallbacks must remain explicit and must not weaken the packaged desktop boundary.
+
+## Backend dependency direction
+
+```mermaid
+flowchart TD
+    Main["application composition"] --> Router["routers"]
+    Router --> Schema["request and response schemas"]
+    Router --> Service["domain services"]
+    Service --> Repository["database and file repositories"]
+    Service --> Provider["external providers"]
+```
+
+- `main.py` owns middleware, lifespan, exception handlers, and router registration only.
+- Routers validate transport input and adapt domain results. A router must not import private helpers from another router.
+- Shared response models and adapters belong in a public schema or presentation module.
+- Services must not depend on routers. Long-running work must enter the existing persistent task queue and retain cancellation, retry, deduplication, and logging semantics.
+- Database changes preserve existing SQLite files. Migrations require forward-safe defaults and a documented rollback or compatibility path.
+
+## Core data flows
+
+### Content ingestion
+
+```text
+source link or local file
+  -> API validation
+  -> persistent task
+  -> metadata and trusted-text discovery
+  -> download / ASR fallback when required
+  -> AI analysis when requested
+  -> content database + local assets
+  -> renderer task state and completion notification
+```
+
+### Knowledge and reporting
+
+```text
+saved content
+  -> search or source-group selection
+  -> evidence retrieval
+  -> answer/report generation
+  -> Markdown and provenance records
+  -> optional Obsidian or configured publishing target
+```
+
+External text, comments, web pages, OCR output, and model responses remain untrusted at their boundaries. Rendering must continue to use the canonical sanitization helpers.
+
+## Packaging boundaries
+
+- Vite bundles renderer dependencies into `frontend/dist`; source `node_modules` is not a product asset.
+- Electron packages only the renderer build, Electron source, package metadata, the bundled backend, and declared native resources.
+- ASR models and optional semantic models are downloaded at runtime and are not part of the default DMG.
+- Generated `dist/`, `release/`, `desktop/backend/`, local data, caches, and credentials are ignored by Git.
+- Opaque native helpers committed for release must have corresponding source or an explicit provenance and rebuild note before external contributors are expected to modify them.
+
+## Refactoring guardrails
+
+1. Preserve HTTP paths, persisted data, local-storage keys, preload APIs, queue states, and user-visible behavior unless a change explicitly migrates them.
+2. Extract orchestration from business logic before splitting presentation files. Moving the same conditionals into another large module is not a successful refactor.
+3. Prefer vertical, reviewable slices. Keep the application runnable after each slice.
+4. Add behavior tests at the new boundary. Source-text assertions may protect exact design contracts, but should not be the only regression coverage for application behavior.
+5. Run the closest frontend or backend tests after each slice, then run the full test and build gates before release.
+
+## Architecture checks
+
+The repository currently enforces frontend source reachability with `npm run check:reachability`. The intended additional invariants are:
+
+- no hard-coded renderer loopback API origins outside the canonical API module and its tests;
+- no router-to-router imports of private symbols;
+- no new feature behavior in `App.vue` or the workbench shell;
+- no bundled model files in the default desktop release;
+- no tracked runtime data, secrets, caches, or generated package output.

@@ -245,10 +245,13 @@ B站和抖音内容会在常规处理时保存可用的作者、发布时间、�
 ## 项目结构
 
 ```text
-backend/                 FastAPI 路由、处理服务与 MCP 服务
-  routers/               内容、任务、搜索、上传、同步等 API
-  services/              下载、转写、总结、缓存、SQLite、索引等领域逻辑
-frontend/                Vue 工作台与 Electron 桌面外壳
+backend/                 FastAPI 应用、领域服务、任务与本地存储
+  routers/               HTTP 输入验证和响应适配
+  services/              内容、任务、同步、分析和基础设施实现
+frontend/                Vue 工作台、功能模块与 Electron 桌面外壳
+  src/features/          资料、知识库、报告、来源和集成功能
+  src/workbench/         活动栏、侧栏、标签页和编辑区外壳
+  electron/              桌面进程、预加载桥和本机能力
 data/                    本地数据库、缓存、上传文件、草稿与日志（运行产物）
 docs/                    产品规划、界面规范、OpenClaw 接入说明
 scripts/preflight.py     环境自检
@@ -257,6 +260,8 @@ tests/                   后端基础测试
 ```
 
 `data/app.db` 是本地内容与任务索引；媒体、草稿与缓存同样位于 `data/`。备份或迁移时请一并处理该目录，并注意其中可能含有视频、Cookie 和 Bot 配置等敏感数据。
+
+完整运行时数据流、前后端依赖方向、模块职责和重构约束见 [架构说明](ARCHITECTURE.md)。
 
 ## 开发与验证
 
@@ -293,6 +298,7 @@ python scripts/check_public_release_tree.py
 ## 相关文档
 
 - [开发协作约定](AGENTS.md)
+- [架构说明](ARCHITECTURE.md)
 - [隐私与数据处理](PRIVACY.md)
 - [安全策略](SECURITY.md)
 - [第三方声明](THIRD_PARTY_NOTICES.md)

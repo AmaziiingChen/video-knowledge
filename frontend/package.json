@@ -23,9 +23,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@tabler/icons-vue": "^3.44.0",
-    "@tanstack/vue-table": "^8.21.3",
     "artplayer": "^5.4.0",
-    "artplayer-plugin-thumbnail": "^1.0.3",
     "axios": "^1.18.1",
     "element-plus": "^2.14.3",
     "katex": "^0.16.47",

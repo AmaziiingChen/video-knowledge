@@ -108,11 +108,10 @@ const exportIcon = 'arrow.down.document'
 const sendIcon = 'custom.paperplane.fill'
 import { useMarkdownFootnoteNavigation } from '../../composables/useMarkdownFootnoteNavigation'
 import { renderMarkdown } from '../../utils/viewFormatters'
-import { localApiAuthHeaders, localApiRequestUrl } from '../../utils/localApiAuth.js'
+import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from '../../utils/localApiAuth.js'
 import { createQaStreamRenderer } from '../assistant/qaStreamRenderer'
 import { knowledgeAnswerMarkdown } from './knowledgeAnswerMarkdown'
 
-const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
 const emit = defineEmits(['conversation-activated', 'conversation-saved', 'conversation-usage-changed', 'navigation-changed', 'open-evidence', 'export-markdown'])
 const selectedSources = ref([])
 const scopeLabel = computed(() => selectedSources.value.length

@@ -79,9 +79,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { API_BASE } from '../../utils/localApiAuth.js'
 
 const emit = defineEmits(['library-changed'])
-const API = 'http://127.0.0.1:8000/api/miniprogram-forum'
+const API = `${API_BASE}/miniprogram-forum`
 const status = ref({ active: false, run: null, environment: {} })
 const starting = ref(false)
 const permissionLoading = ref(false)

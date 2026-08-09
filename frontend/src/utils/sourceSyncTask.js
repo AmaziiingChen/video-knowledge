@@ -1,6 +1,6 @@
 import axios from 'axios'
+import { API_BASE as API } from './localApiAuth.js'
 
-const API = 'http://127.0.0.1:8000/api'
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'paused'])
 
 export async function enqueueSourceSyncTask(payload) {

@@ -112,10 +112,11 @@ import CollectionState from '../../components/CollectionState.vue'
 const rssHubIcon = 'rsshub'
 import { requestDestructiveConfirmation } from '../../composables/useDestructiveConfirm'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../../utils/sourceSyncTask'
+import { API_BASE } from '../../utils/localApiAuth.js'
 
 const props = defineProps({ reportGroups: { type: Array, default: () => [] } })
 const emit = defineEmits(['library-changed'])
-const API = 'http://127.0.0.1:8000/api/rss-sources'
+const API = `${API_BASE}/rss-sources`
 const feedUrl = ref('')
 const syncIntervalMinutes = ref(180)
 const autoAnalyze = ref(false)

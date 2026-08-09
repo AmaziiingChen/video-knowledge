@@ -956,7 +956,7 @@ import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
 import { formatTokenCount } from './utils/viewFormatters'
-import { localApiAuthHeaders, localApiRequestUrl } from './utils/localApiAuth.js'
+import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from './utils/localApiAuth.js'
 import WorkbenchShell from './workbench/WorkbenchShell.vue'
 import WorkspaceTabs from './workbench/WorkspaceTabs.vue'
 import WorkspaceChromeActions from './workbench/WorkspaceChromeActions.vue'
@@ -1002,8 +1002,6 @@ const CreatorWorkspace = defineAsyncComponent(loadCreatorWorkspace)
 const RssWorkspace = defineAsyncComponent(loadRssWorkspace)
 const ReportsWorkspace = defineAsyncComponent(loadReportsWorkspace)
 const KnowledgeWorkspace = defineAsyncComponent(loadKnowledgeWorkspace)
-const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
-
 const {
   activeView,
   workspaceTabs,
@@ -1511,18 +1509,18 @@ async function reconnectDouyinAndRetryTask(task) {
   if (connected) await retryBatchTask(task)
 }
 
-const WECHAT_SUBSCRIPTION_API = 'http://127.0.0.1:8000/api/wechat-subscriptions'
-const WECHAT_FILTER_API = 'http://127.0.0.1:8000/api/wechat-content-filters'
-const WECHAT_FEED_API = 'http://127.0.0.1:8000/api/wechat-feed'
-const WECHAT_REPORT_GROUP_API = 'http://127.0.0.1:8000/api/wechat-report-groups'
-const FOLDER_IMPORT_WATCHER_API = 'http://127.0.0.1:8000/api/folder-import-watcher'
-const WECHAT_REPORT_PROMPT_API = 'http://127.0.0.1:8000/api/wechat-report-prompts'
-const WECHAT_PUBLISHING_API = 'http://127.0.0.1:8000/api/wechat-publishing'
+const WECHAT_SUBSCRIPTION_API = `${API}/wechat-subscriptions`
+const WECHAT_FILTER_API = `${API}/wechat-content-filters`
+const WECHAT_FEED_API = `${API}/wechat-feed`
+const WECHAT_REPORT_GROUP_API = `${API}/wechat-report-groups`
+const FOLDER_IMPORT_WATCHER_API = `${API}/folder-import-watcher`
+const WECHAT_REPORT_PROMPT_API = `${API}/wechat-report-prompts`
+const WECHAT_PUBLISHING_API = `${API}/wechat-publishing`
 const WECHAT_DIGEST_MAX_BYTES = 120
-const LIBRARY_SOURCE_GROUPS_API = 'http://127.0.0.1:8000/api/content/source-groups'
-const LIBRARY_LOCAL_FILE_IMPORT_API = 'http://127.0.0.1:8000/api/content/import-file'
-const PROMPT_WORKSPACE_API = 'http://127.0.0.1:8000/api'
-const MEDIA_TOOLS_API = 'http://127.0.0.1:8000/api/media-tools'
+const LIBRARY_SOURCE_GROUPS_API = `${API}/content/source-groups`
+const LIBRARY_LOCAL_FILE_IMPORT_API = `${API}/content/import-file`
+const PROMPT_WORKSPACE_API = API
+const MEDIA_TOOLS_API = `${API}/media-tools`
 
 async function openCampusAttachment(attachment) {
   if (!attachment?.url) return
@@ -1542,14 +1540,14 @@ async function openCampusAttachment(attachment) {
     ElMessage.error(error?.message || '附件下载失败，请重新连接 WebVPN 后重试')
   }
 }
-const RUNTIME_COMPONENTS_API = 'http://127.0.0.1:8000/api/runtime-components'
-const LLM_SETTINGS_API = 'http://127.0.0.1:8000/api/llm-settings'
+const RUNTIME_COMPONENTS_API = `${API}/runtime-components`
+const LLM_SETTINGS_API = `${API}/llm-settings`
 const DEEPSEEK_SETTINGS_API = `${LLM_SETTINGS_API}/deepseek`
 const DEEPSEEK_CONNECTION_TEST_API = `${DEEPSEEK_SETTINGS_API}/test`
 const CAMPUS_EMBEDDING_SETTINGS_API = `${LLM_SETTINGS_API}/campus-embedding`
 const CAMPUS_EMBEDDING_CONNECTION_TEST_API = `${CAMPUS_EMBEDDING_SETTINGS_API}/test`
-const PADDLE_OCR_SETTINGS_API = 'http://127.0.0.1:8000/api/paddle-ocr-settings'
-const MANUAL_COLLECTION_SETTINGS_API = 'http://127.0.0.1:8000/api/manual-collection/settings'
+const PADDLE_OCR_SETTINGS_API = `${API}/paddle-ocr-settings`
+const MANUAL_COLLECTION_SETTINGS_API = `${API}/manual-collection/settings`
 const mediaTools = ref({})
 const wechatPublishingSettings = ref({ configured: false, display_name: '', app_id_masked: '', status: 'unconfigured', last_error: '' })
 const wechatPublishingDisplayName = ref('订阅号')
@@ -2197,7 +2195,7 @@ function monitorWechatCoverTask(task, contentItemId) {
   const poll = async () => {
     try {
       const response = await axios.get(
-        `http://127.0.0.1:8000/api/tasks/${encodeURIComponent(taskId)}`,
+        `${API}/tasks/${encodeURIComponent(taskId)}`,
         { timeout: 10000 },
       )
       const state = response.data || {}
@@ -4688,7 +4686,7 @@ function minimumSidebarPercent() {
 }
 
 watch(activeView, (view, previousView) => {
-  void axios.post('http://127.0.0.1:8000/api/telemetry/events', {
+  void axios.post(`${API}/telemetry/events`, {
     event_name: 'workspace_opened',
     properties: { view: String(view || 'unknown').slice(0, 40) },
   }, { timeout: 2000 }).catch(() => {})

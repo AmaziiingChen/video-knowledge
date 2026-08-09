@@ -1,7 +1,18 @@
-const LOCAL_API_ORIGIN = 'http://127.0.0.1:8000'
+export const LOCAL_API_ORIGIN = 'http://127.0.0.1:8000'
+const configuredApiBase = typeof import.meta.env === 'object'
+  ? String(import.meta.env.VITE_API_BASE || '').trim()
+  : ''
+
+export const API_BASE = (configuredApiBase || `${LOCAL_API_ORIGIN}/api`).replace(/\/+$/, '')
 const MUTATING_METHODS = new Set(['post', 'put', 'patch', 'delete'])
 
 let accessTokenPromise = null
+
+export function apiUrl(path = '') {
+  const suffix = String(path || '').trim()
+  if (!suffix) return API_BASE
+  return `${API_BASE}/${suffix.replace(/^\/+/, '')}`
+}
 
 function isLocalApiUrl(value) {
   try {

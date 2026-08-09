@@ -39,7 +39,7 @@ import {
   taskContentSnapshot
 } from './contentRefreshState'
 import { waitForDesktopBackend } from './backendStartupGate.js'
-import { localApiAuthHeaders, localApiRequestUrl } from '../utils/localApiAuth.js'
+import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from '../utils/localApiAuth.js'
 import {
   aiCallTypeLabel,
   cacheHitLabel,
@@ -84,7 +84,6 @@ import {
 import { normalizeContentReadState, uniqueIds } from '../features/library/contentReadState.js'
 
 export function useAppController() {
-  const API = 'http://127.0.0.1:8000/api'
   const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
   const WORKSPACE_TABS_KEY = 'video-knowledge.workspace-tabs.v1'
   const WORKSPACE_LAYOUT_KEY = 'video-knowledge.workspace-layout.v1'
