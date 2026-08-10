@@ -8,11 +8,21 @@ lines.
 
 ## RC blockers
 
-- [ ] Restore the packaged MCP bridge without weakening the local API boundary.
+- [x] Restore the packaged MCP bridge without weakening the local API boundary.
   The bridge must receive a scoped capability without placing it in URLs or
   logs, the unsigned DMG must contain an executable MCP entry, status checks
   must prove the bridge is callable rather than only finding a config key, and
   an integration test must cover valid, missing and incorrect capabilities.
+  Commit `0295471` was validated from a clean worktree on 2026-08-11: the fresh
+  arm64 DMG contained the single-bundle `--mcp-stdio` entry, initialized over
+  stdio, listed 21 tools, executed an isolated read-only task-list call, accepted
+  the valid session capability and rejected missing and incorrect capabilities.
+- [ ] Restore an approved macOS application icon before freezing the candidate.
+  The current source tree contains browser favicons but no `.icns` application
+  asset, so the 2026-08-11 local package correctly reported that it used the
+  default Electron icon. Do not fabricate or substitute branding; add the
+  approved source artwork and verify the icon in the built `.app` and mounted
+  DMG.
 - [ ] Add a deterministic packaged-app core smoke using an isolated temporary
   user-data directory. It must start the unsigned `.app`, prove the renderer and
   bundled backend are ready, import and reopen a local fixture, restart once,
@@ -32,12 +42,14 @@ lines.
 - [ ] Record the macOS builder's Python, Node and resolved runtime dependencies
   for the exact candidate. This evidence does not claim that complete
   cross-platform runtime lock files exist.
-- [ ] Run MCP/OpenClaw contract tests and a packaged MCP tool smoke without real
+- [x] Run MCP/OpenClaw contract tests and a packaged MCP tool smoke without real
   accounts, external gateways or production credentials. Base desktop smoke
   remains independent of optional OpenClaw and WeChat integrations.
   `scripts/smoke_macos_mcp.py` must write JSON evidence for valid, missing and
   incorrect capabilities without placing a capability in a URL, log, command
-  argument or OpenClaw configuration.
+  argument or OpenClaw configuration. The 2026-08-11 validation of
+  `KnowledgeHub-0.1.0-arm64.dmg` passed with SHA-256
+  `954e894772f8e8c82150806cebc110352e8a2b61b7b77bdf9e82276a69ce54a9`.
 
 ## P0 — release safety and confirmed broken behavior
 
