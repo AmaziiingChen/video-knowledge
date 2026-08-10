@@ -316,6 +316,10 @@ lines.
   Authorized local subtitle/audio/video path validation, subtitle parsing,
   compact cache preparation and retained-media metadata now live in
   `services/pipeline_local_inputs.py`; stage reporting remains in the runner.
+  Persisted campus/RSS/Xiaohongshu article lookup, legacy type repair, XHS
+  capture and source-text validation now live in
+  `services/pipeline_stored_article.py`, keeping those documents out of media
+  parsing, download and ASR orchestration.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and

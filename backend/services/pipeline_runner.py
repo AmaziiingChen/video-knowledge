@@ -58,6 +58,7 @@ from services.pipeline_local_media_policy import is_under_data_dir as _is_under_
 from services.pipeline_media_download import download_media_with_live_logs
 from services.pipeline_run_reporter import PipelineRunReporter
 from services.pipeline_source_context import refresh_pipeline_source_context
+from services.pipeline_stored_article import StoredArticlePreparationError, prepare_stored_article
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.content_source_text import (
     _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
@@ -285,115 +286,80 @@ def run_pipeline_sync(
                 content_item_id = captured.item.id
                 response.content_item_id = content_item_id
 
-        # Campus and RSS entries are already persisted by their own stable
-        # ingestion pipelines, so they must not be sent through URL parsing
-        # (which only understands share links).  This task path reads the
-        # stored article source, optionally summarizes it, and retains the
-        # existing source folder.
-        if content_item_id:
-            with connect() as connection:
-                try:
-                    existing_item = ContentRepository(connection).get_content_item(content_item_id)
-                except LookupError:
-                    existing_item = None
-                # Early XHS versions stored image notes as videos.  Repair
-                # the durable type at the processing boundary too, so a
-                # retry of an existing sidebar row enters the image-note
-                # collector instead of the media downloader.
-                if (
-                    existing_item
-                    and existing_item.source_provider == "xiaohongshu"
-                    and existing_item.content_type != "article"
-                ):
-                    existing_item = ContentRepository(connection).update_content_type(existing_item.id, "article")
-                    connection.commit()
-                    add_log("parse", "已修复旧小红书图文类型，正在按图文采集…")
-            if existing_item and existing_item.content_type == "article" and existing_item.source_provider == "xiaohongshu":
-                add_log("parse", "正在读取小红书图文与图片…")
-                try:
-                    from services.xiaohongshu_ingest import capture_xiaohongshu_note
-
-                    captured_article_info = capture_xiaohongshu_note(existing_item.id)
-                    source_context = dict(captured_article_info.get("source_context") or {})
-                except Exception as exc:
-                    return fail("info", f"小红书图文采集失败：{exc}")
-                if source_context:
-                    try:
-                        save_source_context(existing_item, source_context)
-                    except Exception as exc:
-                        add_log("info", f"互动数据持久化失败，继续使用图文正文：{exc}", "warn")
-                with connect() as connection:
-                    existing_item = ContentRepository(connection).get_content_item(existing_item.id)
-                add_log("info", "图文素材已缓存，正在整理图片文字", "success")
-            if existing_item and existing_item.content_type == "article" and existing_item.source_provider in {"campus", "rss", "xiaohongshu"}:
-                response.url = existing_item.source_url
-                response.platform = existing_item.source_provider
-                provider_label = {"campus": "校园官网", "rss": "RSS", "xiaohongshu": "小红书"}[existing_item.source_provider]
-                add_log("parse", f"读取已入库的{provider_label}文章", "success")
-                try:
-                    source = load_content_source_text(existing_item.id)
-                except Exception as exc:
-                    return fail("info", f"读取文章正文失败：{exc}")
-                transcript = source.text.strip()
-                if not transcript:
-                    return fail("info", "文章正文为空")
-                response.transcript = transcript
-                response.text_source = TextSourceInfo(kind="article", source=existing_item.source_provider, detail="已入库文章正文")
-                set_many_complete(["parse", "info", "download", "extract_audio", "transcribe"])
-                add_log("info", f"正文已就绪（{len(transcript)} 字）", "success")
-                if processing_mode == "transcript":
-                    set_many_complete(["summarize", "save"])
-                    _set_content_status(existing_item.id, "to_read")
-                    response.display_title = existing_item.title
-                    response.success = True
-                    response.timings["total"] = _elapsed(total_start)
-                    add_log("save", "正文已保存，未调用 AI 总结", "success")
-                    response.step = None
-                    publish()
-                    return response
-                if not settings.deepseek_api_key:
-                    return fail("summarize", "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）")
-                summarize_start = time.perf_counter()
-                add_log("summarize", "调用 DeepSeek 生成文章总结...")
-                try:
-                    ai_title, summary = summarize(
-                        transcript,
-                        existing_item.title,
-                        model=ai_model,
-                        task_type="article_summary",
-                        task_id=response.task_id,
-                        content_item_id=existing_item.id,
-                        ai_call_callback=remember_ai_call("summary"),
-                        source_context=source_context,
-                    )
-                except Exception as exc:
-                    return fail("summarize", str(exc))
-                if not summary:
-                    return fail("summarize", "总结生成失败")
-                response.summary = summary
-                response.display_title = ai_title or existing_item.title
-                complete_stage("summarize")
-                _set_content_title(existing_item.id, response.display_title)
-                replace_content_summary_and_sync(existing_item.id, summary)
+        # Persisted campus/RSS/XHS articles have their own preparation path;
+        # they never enter link parsing, media download or ASR.
+        try:
+            stored_article = prepare_stored_article(
+                content_item_id,
+                add_log=add_log,
+                load_source=load_content_source_text,
+                persist_source_context=save_source_context,
+            )
+        except StoredArticlePreparationError as exc:
+            return fail(exc.step, str(exc))
+        if stored_article:
+            existing_item = stored_article.item
+            transcript = stored_article.transcript
+            source_context = stored_article.source_context
+            response.url = existing_item.source_url
+            response.platform = existing_item.source_provider
+            response.transcript = transcript
+            response.text_source = TextSourceInfo(kind="article", source=existing_item.source_provider, detail="已入库文章正文")
+            set_many_complete(["parse", "info", "download", "extract_audio", "transcribe"])
+            add_log("info", f"正文已就绪（{len(transcript)} 字）", "success")
+            if processing_mode == "transcript":
+                set_many_complete(["summarize", "save"])
                 _set_content_status(existing_item.id, "to_read")
-                try:
-                    upsert_search_document(
-                        content_key=existing_item.id,
-                        title=response.display_title,
-                        summary=summary,
-                        transcript=transcript,
-                        source_context=source_context,
-                    )
-                except Exception as exc:
-                    add_log("save", f"搜索索引更新失败：{exc}", "warn")
-                complete_stage("save")
-                response.timings["summarize"] = _elapsed(summarize_start)
-                response.timings["total"] = _elapsed(total_start)
+                response.display_title = existing_item.title
                 response.success = True
-                add_log("save", "文章总结已保存", "success")
+                response.timings["total"] = _elapsed(total_start)
+                add_log("save", "正文已保存，未调用 AI 总结", "success")
                 response.step = None
                 publish()
                 return response
+            if not settings.deepseek_api_key:
+                return fail("summarize", "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）")
+            summarize_start = time.perf_counter()
+            add_log("summarize", "调用 DeepSeek 生成文章总结...")
+            try:
+                ai_title, summary = summarize(
+                    transcript,
+                    existing_item.title,
+                    model=ai_model,
+                    task_type="article_summary",
+                    task_id=response.task_id,
+                    content_item_id=existing_item.id,
+                    ai_call_callback=remember_ai_call("summary"),
+                    source_context=source_context,
+                )
+            except Exception as exc:
+                return fail("summarize", str(exc))
+            if not summary:
+                return fail("summarize", "总结生成失败")
+            response.summary = summary
+            response.display_title = ai_title or existing_item.title
+            complete_stage("summarize")
+            _set_content_title(existing_item.id, response.display_title)
+            replace_content_summary_and_sync(existing_item.id, summary)
+            _set_content_status(existing_item.id, "to_read")
+            try:
+                upsert_search_document(
+                    content_key=existing_item.id,
+                    title=response.display_title,
+                    summary=summary,
+                    transcript=transcript,
+                    source_context=source_context,
+                )
+            except Exception as exc:
+                add_log("save", f"搜索索引更新失败：{exc}", "warn")
+            complete_stage("save")
+            response.timings["summarize"] = _elapsed(summarize_start)
+            response.timings["total"] = _elapsed(total_start)
+            response.success = True
+            add_log("save", "文章总结已保存", "success")
+            response.step = None
+            publish()
+            return response
 
         cached_video = None
         cached_subtitle_transcript = None
