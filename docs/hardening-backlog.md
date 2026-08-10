@@ -216,8 +216,13 @@ lines.
   jumps now live in `features/assistant/useConversationScrollController.js`
   with injected-scheduler behavior tests. Fifteen unused task/Markdown status
   props, three never-emitted events and their dead scoped styles have been
-  retired from the sidebar and root-controller facade contracts; menus and
-  composer focus/resize remain local UI behavior.
+  retired from the sidebar and root-controller facade contracts. Model and
+  shortcut menus, OCR/input presentation, autosize/focus behavior and the send
+  animation lifecycle now live in
+  `features/assistant/useAssistantComposerController.js` with injected DOM and
+  scheduler behavior tests; an unreachable completed-OCR decoration has also
+  been removed, while the completed OCR input hint remains intact. The composer
+  UI surface remains in the sidebar.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it

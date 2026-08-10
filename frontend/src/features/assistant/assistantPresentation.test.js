@@ -40,5 +40,8 @@ test('derives empty state, OCR controls, question hints, and selected text safel
   assert.equal(ocr.show, true)
   assert.equal(ocr.canPrioritize, true)
   assert.equal(assistantQuestionPlaceholder({ ocrInputHint: ocr.inputHint, selectedTextContext: null, currentQaHint: '', currentQaEnabled: true }), ocr.inputHint)
+  const completedOcr = ocrAssistantPresentation({ status: 'completed', image_count: 2 }, false)
+  assert.equal(completedOcr.show, false)
+  assert.equal(completedOcr.inputHint, '图片文字已解析；后续摘要和快捷命令将使用完整内容。')
   assert.equal(selectedTextPreview(` ${'字'.repeat(69)} `).length, 68)
 })

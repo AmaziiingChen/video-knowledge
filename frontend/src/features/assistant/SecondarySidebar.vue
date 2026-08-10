@@ -191,7 +191,7 @@
           <el-tooltip v-if="showOcrControl" :content="ocrControlTooltip" placement="top">
             <button
               class="assistant-command-menu-button assistant-ocr-button"
-              :class="{ active: articleOcrStatus.priority, complete: articleOcrStatus.status === 'completed' }"
+              :class="{ active: articleOcrStatus.priority }"
               type="button"
               :disabled="!canPrioritizeOcr"
               @click="$emit('prioritize-ocr')"
@@ -323,23 +323,16 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
+import { useAssistantComposerController } from './useAssistantComposerController.js'
 import { useConversationScrollController } from './useConversationScrollController.js'
 import {
-  assistantAiModelOptions,
-  assistantQuestionPlaceholder,
-  assistantSelectedModelLabel,
   conversationEmptyState,
-  customContentActionLabel,
   externalImportCitation as externalImportCitationForContent,
-  hasExportableConversation as hasExportableConversationForContent,
-  ocrAssistantPresentation,
-  qaShortcutButtons as buildQaShortcutButtons,
   selectedTextPreview,
-  shortcutSuggestions as findShortcutSuggestions,
   summaryTitleMarkdown,
 } from './assistantPresentation.js'
 const summaryIcon = 'apple.intelligence'
@@ -480,31 +473,7 @@ const emit = defineEmits([
   'return-to-source'
 ])
 
-const modelMenuOpen = ref(false)
-const shortcutMenuOpen = ref(false)
-const modelMenuRef = ref(null)
-const shortcutMenuRef = ref(null)
-const shortcutSuggestionsRef = ref(null)
-const questionInputRef = ref(null)
-const sendLaunchActive = ref(false)
-let sendLaunchTimer = null
-const aiModelOptions = computed(() => {
-  return assistantAiModelOptions(props.selectedAiModel, props.availableAiModels)
-})
-
-const selectedAiModelLabel = computed(() => {
-  return assistantSelectedModelLabel(props.selectedAiModel, aiModelOptions.value)
-})
-const customActionLabel = computed(() => {
-  return customContentActionLabel(props.contentAnalysisTemplates)
-})
-const customActionLoading = computed(() => props.askingQuestion && !props.generatingAiSummary)
 const externalImportCitation = computed(() => externalImportCitationForContent(props.contentContext))
-const qaShortcutButtons = computed(() => buildQaShortcutButtons(props.qaShortcutTemplates))
-const shortcutSuggestions = computed(() => {
-  return findShortcutSuggestions(props.questionInput, qaShortcutButtons.value)
-})
-const hasExportableConversation = computed(() => hasExportableConversationForContent(props.currentInsightHtml, props.qaHistory))
 const emptyState = computed(() => conversationEmptyState({
   conversationKey: props.conversationKey,
   currentQaEnabled: props.currentQaEnabled,
@@ -526,132 +495,51 @@ const emptyStateIcon = computed(() => emptyState.value.icon)
 const emptyStateHeading = computed(() => emptyState.value.heading)
 const emptyStateDetail = computed(() => emptyState.value.detail)
 const starterPrompts = computed(() => emptyState.value.starterPrompts)
-const ocrPresentation = computed(() => ocrAssistantPresentation(props.articleOcrStatus, props.prioritizingArticleOcr))
-const showOcrControl = computed(() => ocrPresentation.value.show)
-const canPrioritizeOcr = computed(() => ocrPresentation.value.canPrioritize)
-const ocrControlLabel = computed(() => ocrPresentation.value.label)
-const ocrControlTooltip = computed(() => ocrPresentation.value.tooltip)
-const ocrInputHint = computed(() => ocrPresentation.value.inputHint)
-const questionPlaceholder = computed(() => {
-  return assistantQuestionPlaceholder({
-    ocrInputHint: ocrInputHint.value,
-    selectedTextContext: props.selectedTextContext,
-    currentQaHint: props.currentQaHint,
-    currentQaEnabled: props.currentQaEnabled,
-  })
-})
 const {
   conversationRef,
   handleConversationScroll,
   handleConversationWheel,
   handleTimestampLinkClick,
 } = useConversationScrollController({ props, emit })
-
-function selectAiModel(model) {
-  emit('update:selectedAiModel', model)
-  modelMenuOpen.value = false
-}
-
-function closeAssistantMenus() {
-  modelMenuOpen.value = false
-  shortcutMenuOpen.value = false
-}
-
-function toggleModelMenu() {
-  const shouldOpen = !modelMenuOpen.value
-  closeAssistantMenus()
-  modelMenuOpen.value = shouldOpen
-}
-
-function toggleShortcutMenu() {
-  const shouldOpen = !shortcutMenuOpen.value
-  closeAssistantMenus()
-  shortcutMenuOpen.value = shouldOpen
-}
-
-function handleMenuFocusOut(menu, event) {
-  const container = menu === 'model' ? modelMenuRef.value : shortcutMenuRef.value
-  if (container?.contains(event.relatedTarget)) return
-  if (menu === 'shortcut' && shortcutSuggestionsRef.value?.contains(event.relatedTarget)) return
-  if (menu === 'model') modelMenuOpen.value = false
-  else shortcutMenuOpen.value = false
-}
-
-function handleOutsidePointerDown(event) {
-  if (modelMenuOpen.value && !modelMenuRef.value?.contains(event.target)) modelMenuOpen.value = false
-  if (
-    shortcutMenuOpen.value
-    && !shortcutMenuRef.value?.contains(event.target)
-    && !shortcutSuggestionsRef.value?.contains(event.target)
-  ) shortcutMenuOpen.value = false
-}
-
-function insertShortcut(name) {
-  shortcutMenuOpen.value = false
-  emit('insert-shortcut', name)
-}
+const {
+  modelMenuOpen,
+  shortcutMenuOpen,
+  modelMenuRef,
+  shortcutMenuRef,
+  shortcutSuggestionsRef,
+  questionInputRef,
+  sendLaunchActive,
+  aiModelOptions,
+  selectedAiModelLabel,
+  customActionLabel,
+  customActionLoading,
+  qaShortcutButtons,
+  shortcutSuggestions,
+  hasExportableConversation,
+  showOcrControl,
+  canPrioritizeOcr,
+  ocrControlLabel,
+  ocrControlTooltip,
+  questionPlaceholder,
+  selectAiModel,
+  closeAssistantMenus,
+  toggleModelMenu,
+  toggleShortcutMenu,
+  handleMenuFocusOut,
+  insertShortcut,
+  handleQuestionInput,
+  handleAskKeydown,
+  triggerQuestionSend,
+  mount: mountAssistantComposer,
+  dispose: disposeAssistantComposer,
+} = useAssistantComposerController({ props, emit })
 
 function askStarterPrompt(prompt) {
   if (!isConversationStarterReady.value) return
   emit('ask-question', prompt)
 }
-
-function handleAskKeydown(event) {
-  if (event.isComposing) return
-  triggerQuestionSend()
-}
-
-function resizeQuestionInput(input = questionInputRef.value) {
-  if (!input) return
-  input.style.height = 'auto'
-  const maxHeight = Number.parseFloat(window.getComputedStyle(input).maxHeight)
-  const nextHeight = Number.isFinite(maxHeight)
-    ? Math.min(input.scrollHeight, maxHeight)
-    : input.scrollHeight
-  input.style.height = `${nextHeight}px`
-  input.style.overflowY = Number.isFinite(maxHeight) && input.scrollHeight > maxHeight ? 'auto' : 'hidden'
-}
-
-function handleQuestionInput(event) {
-  emit('update:questionInput', event.target.value)
-  resizeQuestionInput(event.target)
-}
-
-function triggerQuestionSend() {
-  if (!props.questionInput.trim() || props.askingQuestion || !props.currentQaEnabled) return
-  sendLaunchActive.value = false
-  requestAnimationFrame(() => {
-    sendLaunchActive.value = true
-  })
-  if (sendLaunchTimer !== null) clearTimeout(sendLaunchTimer)
-  sendLaunchTimer = window.setTimeout(() => {
-    sendLaunchActive.value = false
-    sendLaunchTimer = null
-  }, 600)
-  emit('ask-question')
-}
-
-watch(() => props.selectedTextContext?.id || '', async (contextId) => {
-  if (!contextId) return
-  await nextTick()
-  questionInputRef.value?.focus({ preventScroll: true })
-})
-
-watch(() => props.questionInput, () => {
-  nextTick(() => resizeQuestionInput())
-})
-
-
-onMounted(() => {
-  document.addEventListener('pointerdown', handleOutsidePointerDown)
-  nextTick(() => resizeQuestionInput())
-  if (props.selectedTextContext?.id) nextTick(() => questionInputRef.value?.focus({ preventScroll: true }))
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', handleOutsidePointerDown)
-  if (sendLaunchTimer !== null) clearTimeout(sendLaunchTimer)
-})
+onMounted(mountAssistantComposer)
+onBeforeUnmount(disposeAssistantComposer)
 </script>
 
 <style scoped>
@@ -1218,10 +1106,6 @@ onBeforeUnmount(() => {
 .assistant-command-menu-button:disabled {
   opacity: 0.45;
   cursor: default;
-}
-
-.assistant-ocr-button.complete {
-  color: color-mix(in srgb, var(--vk-success) 82%, var(--vk-muted));
 }
 
 .assistant-command-menu {
