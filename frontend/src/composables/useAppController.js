@@ -1,4 +1,4 @@
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { requestDestructiveConfirmation } from './useDestructiveConfirm'
@@ -54,13 +54,7 @@ import {
 } from '../utils/viewFormatters'
 import { sourceProviderFromUrl } from '../utils/taskSource.js'
 import { extractReportSourceStats } from '../utils/reportSourceStats.js'
-import {
-  clearReportLogHistory,
-  isPersistableReportLog,
-  loadReportLogHistory,
-  markInterruptedReportLogs,
-  persistReportLogHistory,
-} from '../features/logs/processLogHistory.js'
+import { useProcessLogController } from '../features/logs/useProcessLogController.js'
 import { useArticlePreviewController } from '../features/library/useArticlePreviewController.js'
 import { useOpenClawController } from '../features/integrations/useOpenClawController.js'
 import { useQaSessionController } from '../features/assistant/useQaSessionController.js'
@@ -98,7 +92,6 @@ import { useTaskQueueController } from '../features/tasks/useTaskQueueController
 import { createTaskDisplayPresentation } from '../features/tasks/taskDisplayPresentation.js'
 
 export function useAppController() {
-  const PROCESS_LOG_CLEARED_AT_KEY = 'knowledgehub.process-log-cleared-at.v1'
   const {
     selectedAiModel,
     assistantAiModel,
@@ -215,15 +208,6 @@ export function useAppController() {
     askQuestion: (...args) => askQuestion(...args),
   })
   const openSections = ref(['source', 'timings'])
-  const restoredReportLogs = loadReportLogHistory()
-  const reconciledReportLogs = markInterruptedReportLogs(restoredReportLogs)
-  if (reconciledReportLogs.length !== restoredReportLogs.length) {
-    persistReportLogHistory(reconciledReportLogs)
-  }
-  const logs = ref(reconciledReportLogs)
-  const logContainer = ref(null)
-  const backendLogCount = ref(0)
-  const logClearedAt = ref(Number(localStorage.getItem(PROCESS_LOG_CLEARED_AT_KEY) || 0))
   const selectedModel = ref('small')
   const availableModels = ref(['tiny', 'base', 'small'])
   const selectedAsrBackend = ref('auto')
@@ -430,10 +414,27 @@ export function useAppController() {
   const batchTaskNames = ref({})
   const progressiveTaskSnapshots = new Map()
   const progressiveTaskHydratingIds = new Set()
-  const backendLogCountsByTaskId = new Map()
   const articleSnapshotPreviewedTaskIds = new Set()
   const mediaSnapshotPreviewedTaskIds = new Set()
   const transcriptSnapshotPreviewedTaskIds = new Set()
+  const {
+    logs,
+    logContainer,
+    backendLogCount,
+    logClearedAt,
+    addLog,
+    addBackendLogs,
+    clearBackendLogCounts,
+    clearLogs,
+  } = useProcessLogController({
+    batchTasks,
+    batchTaskIds,
+    getResult: () => result,
+    getTaskStatus: () => taskStatus.value,
+    isActiveTask: (task) => isActiveTask(task),
+    logTypeFromMessage: (message) => logTypeFromMessage(message),
+    resetTaskQueueCursor: (...args) => resetTaskQueueCursor(...args),
+  })
   const {
     running,
     cancelling,
@@ -449,7 +450,7 @@ export function useAppController() {
     backendLogCount,
     openSections,
     stopPolling: () => stopPolling(),
-    clearBackendLogCounts: () => backendLogCountsByTaskId.clear(),
+    clearBackendLogCounts,
     resetQaState,
     addBackendLogs: (...args) => addBackendLogs(...args),
     addLog: (...args) => addLog(...args),
@@ -1111,66 +1112,6 @@ export function useAppController() {
     if (taskStatus.value === 'cancelled') return '任务已取消'
     return currentStep.value ? `${stepLabel(currentStep.value)}中` : '处理中'
   })
-
-  function addLog(msg, type = 'info', step = null, elapsed_seconds = null, context = {}) {
-    const contextTimestamp = Number(context.timestamp)
-    const timestamp = Number.isFinite(contextTimestamp) ? contextTimestamp : Date.now()
-    const entry = {
-      ...context,
-      time: context.time || new Date(timestamp).toLocaleTimeString(),
-      msg,
-      type,
-      step,
-      elapsed_seconds,
-      timestamp
-    }
-    logs.value.push(entry)
-    if (isPersistableReportLog(entry)) persistReportLogHistory(logs.value)
-    nextTick(() => {
-      if (logContainer.value) {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight
-      }
-    })
-  }
-
-  function clearLogs() {
-    logs.value = []
-    backendLogCountsByTaskId.clear()
-    clearReportLogHistory()
-    logClearedAt.value = Date.now()
-    localStorage.setItem(PROCESS_LOG_CLEARED_AT_KEY, String(logClearedAt.value))
-    resetTaskQueueCursor(new Date(logClearedAt.value).toISOString())
-    batchTasks.value = batchTasks.value.filter((task) => isActiveTask(task))
-    batchTaskIds.value = batchTasks.value.map((task) => task.task_id)
-    backendLogCount.value = 0
-  }
-
-  function addBackendLogs(logList, task = {}) {
-    if (!Array.isArray(logList)) return
-    const taskId = String(task.task_id || result.task_id || '__current__')
-    const previousCount = backendLogCountsByTaskId.get(taskId) || 0
-    const newItems = logList.slice(previousCount)
-    backendLogCountsByTaskId.set(taskId, logList.length)
-    if (taskId === String(result.task_id || '__current__')) {
-      backendLogCount.value = logList.length
-    }
-    for (const item of newItems) {
-      const itemTimestamp = typeof item === 'object' ? Date.parse(item.created_at || '') : NaN
-      if (logClearedAt.value && Number.isFinite(itemTimestamp) && itemTimestamp <= logClearedAt.value) continue
-      if (typeof item === 'string') {
-        addLog(item, logTypeFromMessage(item))
-        continue
-      }
-
-      addLog(item.message, item.level || 'info', item.step || null, item.elapsed_seconds ?? null, {
-        timestamp: Date.parse(item.created_at || '') || undefined,
-        task_id: task.task_id || result.task_id || '',
-        task_name: task.display_title || task.source_title || '',
-        task_status: task.status || taskStatus.value,
-        task_progress: task.overall_progress ?? result.overall_progress ?? 0,
-      })
-    }
-  }
 
   function openContentFromSidebar(item) {
     openContentTab(item)

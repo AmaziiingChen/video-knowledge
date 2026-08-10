@@ -162,6 +162,10 @@ lines.
   `features/tasks/useActiveTaskStateController.js`. Single-task polling,
   progressive hydration, terminal feedback, bounded retry backoff and timer
   cleanup now live in `features/tasks/useActiveTaskPollingController.js`;
+  process-log collection, report-log persistence, incremental backend-log
+  ingestion and the clear-log transaction now live in
+  `features/logs/useProcessLogController.js`, while the UI projection remains
+  next to its task presentation dependencies;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,
