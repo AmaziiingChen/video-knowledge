@@ -252,15 +252,19 @@ lines.
   MathML rendering, external-link admission and in-frame find shortcuts for
   both ordinary articles and Xiaohongshu text. Remote Electron WebViews remain
   workspace siblings so open-page sessions survive tab switches.
+  Local PDF and image originals now render through mounted-tested
+  `workbench/LocalFileReaderSurface.vue`; resolved local API URLs and content
+  classification stay in the parent while the iframe/image DOM and its scoped
+  presentation own one focused reader boundary.
   Report title, date-window and generated-time presentation now live in
   `workbench/editorReportPresentation.js` with pure formatting tests. Article
   outline filtering and visual hierarchy now live in
-  `workbench/articleOutlineModel.js` with pure boundary tests. Report, article
-  and media readers still need their own mounted behavior boundaries. The
+  `workbench/articleOutlineModel.js` with pure boundary tests. Timed-media
+  preview still needs its own mounted behavior boundary. The
   former 1,907-line scoped style block now preserves its exact cascade through
-  four co-located domains: `editor-host-workspace.css`,
-  `editor-host-documents.css`, `editor-host-articles.css` and
-  `editor-host-transcript.css`.
+  three co-located EditorHost domains: `editor-host-workspace.css`,
+  `editor-host-articles.css` and `editor-host-transcript.css`; local-original
+  styles now live with `LocalFileReaderSurface.vue`.
 - [x] Extract report-generation SSE decoding from `App.vue`; preserve local
   capability headers, fragmented event handling and explicit server errors in
   `features/reports/reportEventStream.js` with protocol-level tests.

@@ -71,24 +71,12 @@
                   @scroll="handleReadingScroll"
                   @select-cover="$emit('select-wechat-cover', $event)"
                 />
-                <article v-else-if="isExternalPdfTab(activeContentTab.id)" class="pdf-reader" aria-label="PDF 原件预览">
-                  <iframe
-                    v-if="originalMediaUrlForTab(activeContentTab.id)"
-                    class="pdf-preview-frame"
-                    :src="originalMediaUrlForTab(activeContentTab.id)"
-                    :title="`${contentForTab(activeContentTab.id)?.title || '导入 PDF'}原件`"
-                  ></iframe>
-                  <div v-else class="article-preview-body">正在打开 PDF 原件…</div>
-                </article>
-                <article v-else-if="isExternalImageTab(activeContentTab.id)" class="image-reader" aria-label="原图预览">
-                  <figure class="image-reader-figure">
-                    <img
-                      v-if="originalMediaUrlForTab(activeContentTab.id)"
-                      :src="originalMediaUrlForTab(activeContentTab.id)"
-                      :alt="contentForTab(activeContentTab.id)?.title || '导入图片'"
-                    />
-                  </figure>
-                </article>
+                <LocalFileReaderSurface
+                  v-else-if="isExternalPdfTab(activeContentTab.id) || isExternalImageTab(activeContentTab.id)"
+                  :mode="isExternalPdfTab(activeContentTab.id) ? 'pdf' : 'image'"
+                  :content="contentForTab(activeContentTab.id)"
+                  :original-url="originalMediaUrlForTab(activeContentTab.id)"
+                />
                 <article
                   v-else-if="hasXhsImageTextLayout(activeContentTab.id)"
                   class="xhs-image-reader"
@@ -513,6 +501,7 @@ import { remainingReadingMinutes } from './readingProgress.js'
 import { shouldShowArticlePreviewLoader } from '../features/library/articlePreviewLoadState.js'
 import ArticlePreviewFrame from './ArticlePreviewFrame.vue'
 import ArticleReaderSurface from './ArticleReaderSurface.vue'
+import LocalFileReaderSurface from './LocalFileReaderSurface.vue'
 import PreviewFindBar from './PreviewFindBar.vue'
 import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
@@ -1150,6 +1139,5 @@ defineExpose({
 </script>
 
 <style scoped src="./editor-host-workspace.css"></style>
-<style scoped src="./editor-host-documents.css"></style>
 <style scoped src="./editor-host-articles.css"></style>
 <style scoped src="./editor-host-transcript.css"></style>

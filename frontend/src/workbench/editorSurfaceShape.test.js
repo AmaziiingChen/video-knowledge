@@ -13,7 +13,6 @@ const editorHostSource = await readFile(
 const editorHostStyles = (
   await Promise.all([
     'editor-host-workspace.css',
-    'editor-host-documents.css',
     'editor-host-articles.css',
     'editor-host-transcript.css',
   ].map((filename) => readFile(new URL(filename, import.meta.url), 'utf8')))
@@ -85,8 +84,18 @@ test('uses a native media spinner instead of skeleton text over a video cover', 
 test('keeps the EditorHost scoped style domains in their original cascade order', () => {
   assert.match(
     editorHostSource,
-    /<style scoped src="\.\/editor-host-workspace\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-documents\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-articles\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-transcript\.css"><\/style>/,
+    /<style scoped src="\.\/editor-host-workspace\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-articles\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-transcript\.css"><\/style>/,
   )
+})
+
+test('keeps local originals ahead of article and timed-media preview branches', () => {
+  const localReader = editorHostSource.indexOf('<LocalFileReaderSurface')
+  const articleReader = editorHostSource.indexOf('<ArticleReaderSurface')
+  const audioPlayer = editorHostSource.indexOf('isAudioTab(activeContentTab.id) && mediaUrlForTab')
+
+  assert.ok(localReader >= 0)
+  assert.ok(localReader < articleReader)
+  assert.ok(localReader < audioPlayer)
 })
 
 test('keeps capture metadata separators with the report reader surface', () => {
