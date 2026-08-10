@@ -4,12 +4,15 @@ import { ElMessage } from 'element-plus'
 
 import { API_BASE as API } from '../../utils/localApiAuth.js'
 import { savedQaHistoryItems } from './qaHistory.js'
+import { composeQaQuestion, insertQaShortcutToken } from './qaPromptComposer.js'
 import { clearQaSessionState, createQaSession, qaSessionKey } from './qaSessionState.js'
 
 export function useQaSessionController({
   request = axios,
   apiBase = API,
   getActiveContentId = () => null,
+  getQaShortcutTemplates = () => [],
+  isAutoQaShortcutRecognitionEnabled = () => true,
   notify = ElMessage,
   wait = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)),
 } = {}) {
@@ -98,6 +101,17 @@ export function useQaSessionController({
       return
     }
     clearQaSession(activeQaSessionId.value, session)
+  }
+
+  function insertQaShortcut(name) {
+    const nextValue = insertQaShortcutToken(questionInput.value, name)
+    if (nextValue !== null) questionInput.value = nextValue
+  }
+
+  function resolveQaQuestion(draftQuestion) {
+    return composeQaQuestion(draftQuestion, getQaShortcutTemplates(), {
+      autoRecognitionEnabled: isAutoQaShortcutRecognitionEnabled(),
+    })
   }
 
   async function startNewChat() {
@@ -243,6 +257,8 @@ export function useQaSessionController({
     refreshQaSessionHistory,
     clearQaSession,
     resetActiveQaSession,
+    insertQaShortcut,
+    resolveQaQuestion,
     startNewChat,
     loadContentQaHistory,
     loadMoreContentQaHistory,

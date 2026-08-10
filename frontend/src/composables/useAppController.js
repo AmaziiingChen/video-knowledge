@@ -14,7 +14,6 @@ import {
   timingOrder
 } from '../config/workbenchOptions'
 import { qaHistoryForPrompt } from '../features/assistant/qaHistory'
-import { matchQaShortcut } from '../features/assistant/qaShortcutMatcher'
 import {
   assistantSummaryFromMarkdown,
   documentMarkdownWithoutConversation,
@@ -145,12 +144,16 @@ export function useAppController() {
     refreshQaSessionHistory,
     clearQaSession,
     resetActiveQaSession: resetQaState,
+    insertQaShortcut,
+    resolveQaQuestion,
     startNewChat,
     loadContentQaHistory,
     loadMoreContentQaHistory,
     retryContentQaHistory,
   } = useQaSessionController({
     getActiveContentId: () => activeWorkspaceContent.value?.id || result.content_item_id || null,
+    getQaShortcutTemplates: () => qaShortcutTemplates.value,
+    isAutoQaShortcutRecognitionEnabled: () => autoQaShortcutRecognition.value,
   })
   const activeView = ref('library')
   const {
@@ -2598,62 +2601,6 @@ export function useAppController() {
       void recordTelemetry('export_completed', { export_kind: 'markdown', result: 'failed' })
     } finally {
       exportingConversationMarkdown.value = false
-    }
-  }
-
-  function insertQaShortcut(name) {
-    const shortcutName = String(name || '').trim()
-    if (!shortcutName) return
-    const token = `@${shortcutName}`
-    const current = questionInput.value || ''
-    questionInput.value = /(?:^|\s)@[^\s@]*$/u.test(current)
-      ? current.replace(/@[^\s@]*$/u, `${token} `)
-      : `${current}${current && !/\s$/u.test(current) ? ' ' : ''}${token} `
-  }
-
-  function resolveQaQuestion(draftQuestion) {
-    const byName = new Map(
-      qaShortcutTemplates.value
-        .filter((template) => template?.name?.trim() && template?.template?.trim())
-        .map((template) => [template.name.trim(), template.template.trim()])
-    )
-    const parts = []
-    const shortcutBodies = []
-    const remainingText = draftQuestion.replace(/@([^\s@]+)/gu, (token, name) => {
-      const template = byName.get(name)
-      if (!template) return token
-      shortcutBodies.push(`@${name}\n${template}`)
-      return ''
-    }).replace(/\s{2,}/gu, ' ').trim()
-
-    if (shortcutBodies.length) {
-      parts.push(`已选择的追问方式：\n${shortcutBodies.join('\n\n')}`)
-    }
-    if (remainingText) {
-      parts.push(`用户补充：\n${remainingText}`)
-    }
-    if (shortcutBodies.length) {
-      return {
-        prompt: parts.join('\n\n'),
-        autoShortcutName: ''
-      }
-    }
-
-    const autoShortcut = autoQaShortcutRecognition.value
-      ? matchQaShortcut(draftQuestion, qaShortcutTemplates.value)
-      : null
-    if (autoShortcut) {
-      return {
-        prompt: [
-          `已选择的追问方式：\n@${autoShortcut.name}\n${autoShortcut.template}`,
-          `用户补充：\n${draftQuestion}`
-        ].join('\n\n'),
-        autoShortcutName: autoShortcut.name
-      }
-    }
-    return {
-      prompt: parts.join('\n\n') || draftQuestion,
-      autoShortcutName: ''
     }
   }
 

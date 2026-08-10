@@ -108,6 +108,32 @@ test('a failed or busy new-conversation request preserves the current session', 
   assert.deepEqual(messages.error, ['无法归档当前对话'])
 })
 
+test('composes shortcuts from the current session dependencies', () => {
+  let autoRecognitionEnabled = true
+  const templates = [{ name: '总结', template: '提炼核心观点' }]
+  const controller = useQaSessionController({
+    getQaShortcutTemplates: () => templates,
+    isAutoQaShortcutRecognitionEnabled: () => autoRecognitionEnabled
+  })
+
+  controller.questionInput.value = '请处理'
+  controller.insertQaShortcut('总结')
+  assert.equal(controller.questionInput.value, '请处理 @总结 ')
+  assert.deepEqual(controller.resolveQaQuestion('帮我总结一下'), {
+    prompt: [
+      '已选择的追问方式：\n@总结\n提炼核心观点',
+      '用户补充：\n帮我总结一下'
+    ].join('\n\n'),
+    autoShortcutName: '总结'
+  })
+
+  autoRecognitionEnabled = false
+  assert.deepEqual(controller.resolveQaQuestion('帮我总结一下'), {
+    prompt: '用户补充：\n帮我总结一下',
+    autoShortcutName: ''
+  })
+})
+
 test('loads saved history without replacing a pending local turn', async () => {
   const response = deferred()
   const calls = []
