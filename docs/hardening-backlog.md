@@ -204,6 +204,10 @@ lines.
   remains unchanged. Optional backend capabilities, server-provided model
   choices and video-download defaults now hydrate through the independently
   tested `features/settings/useDesktopBootstrapSettingsController.js` boundary.
+  Content selection now has its own
+  `features/library/useContentSelectionController.js` transaction for stale
+  detail rejection, QA-session activation, read-state scheduling, article
+  preview restoration and Markdown hydration.
 - [ ] Split `SecondarySidebar.vue` into conversation, composer and task-status
   surfaces. Its model normalization, shortcut filtering, empty state, external
   citation, OCR hint and text-preview rules now live in
