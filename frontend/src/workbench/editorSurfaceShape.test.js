@@ -90,3 +90,24 @@ test('keeps capture metadata separators with the report reader surface', () => {
     /\.capture-reader-meta span \+ span::before\s*\{[\s\S]*?content:\s*"·";[\s\S]*?margin:\s*0 7px;/,
   )
 })
+
+test('keeps remote article sessions outside the keyed content transition', () => {
+  const transitionStart = editorHostSource.indexOf('<Transition name="content-detail"')
+  const transitionEnd = editorHostSource.indexOf('</Transition>', transitionStart)
+  const remotePages = editorHostSource.indexOf('v-for="page in openedWechatRemotePages"')
+
+  assert.ok(transitionStart >= 0)
+  assert.ok(transitionEnd > transitionStart)
+  assert.ok(remotePages > transitionEnd)
+})
+
+test('bridges ordinary and Xiaohongshu article frames through the same reader controllers', () => {
+  assert.match(
+    editorHostSource,
+    /articleReaderSurface\.value\?\.getPreviewFrame\?\.\(\)[\s\S]*?xhsArticlePreviewFrame\.value\?\.getFrame\?\.\(\)/,
+  )
+  assert.match(
+    editorHostSource,
+    /function handleArticlePreviewFrameReady\(frameDocument\)\s*\{[\s\S]*?attachReadingProgressFrame\(frameDocument\)[\s\S]*?attachArticlePreviewSelectionFrame\(frameDocument\)[\s\S]*?schedulePreviewFindRefresh\(\)[\s\S]*?scheduleReadingProgressRefresh\(\)/,
+  )
+})

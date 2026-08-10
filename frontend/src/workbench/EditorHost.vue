@@ -153,87 +153,28 @@
                     </template>
                   </template>
                 </article>
-                <template v-else-if="isArticleTab(activeContentTab.id)">
-                <article
-                  class="article-reader article-snapshot-reader"
-                  :class="{
-                    'remote-wechat-active': isWechatRemoteVisible,
-                    'local-html-source-active': isLocalHtmlArticleTab(activeContentTab.id),
-                  }"
-                >
-                  <div class="article-reader-inner article-reader-snapshot-inner">
-                    <div class="article-reader-head">
-                      <div class="article-reader-heading">
-                        <h2>{{ contentForTab(activeContentTab.id)?.title || activeContentTab.title }}</h2>
-                      </div>
-                    </div>
-                    <p class="article-preview-meta">
-                      <span>{{ contentForTab(activeContentTab.id)?.source_name || articlePreviewForTab(activeContentTab.id)?.author || sourceProviderLabel(contentForTab(activeContentTab.id)?.source_provider) }}</span>
-                      <span v-if="contentForTab(activeContentTab.id)?.source_section">{{ contentForTab(activeContentTab.id).source_section }}</span>
-                      <span v-if="articlePreviewForTab(activeContentTab.id)?.published_at || contentForTab(activeContentTab.id)?.published_at">{{ articlePreviewForTab(activeContentTab.id)?.published_at || contentForTab(activeContentTab.id)?.published_at }}</span>
-                      <span v-if="['queued', 'running'].includes(articlePreviewForTab(activeContentTab.id)?.formatting_status)">{{ articlePreviewForTab(activeContentTab.id)?.formatting_detail || '正在整理 OCR 文档版式…' }}</span>
-                      <span v-else-if="isWechatArticleTab(activeContentTab.id) && activeWechatRemotePage?.status === 'loading'">正在打开公众号原页面…</span>
-                      <span v-else-if="isWechatArticleTab(activeContentTab.id) && activeWechatRemotePage?.status === 'failed'">原页面未加载，正在显示缓存正文</span>
-                    </p>
-                    <template v-if="articlePreviewForTab(activeContentTab.id)?.html">
-                      <iframe
-                        ref="activeArticlePreviewFrame"
-                        class="article-preview-frame"
-                        :class="{
-                          'is-hidden': isWechatRemoteVisible || isLocalHtmlRemoteVisible,
-                          'local-html-original-frame': isLocalHtmlArticleTab(activeContentTab.id),
-                        }"
-                        :srcdoc="articlePreviewHtml(activeContentTab.id)"
-                        sandbox="allow-same-origin"
-                        referrerpolicy="no-referrer"
-                        :title="localHtmlOriginalPageUrl(activeContentTab.id) ? '原始网页预览' : (isLocalHtmlArticleTab(activeContentTab.id) ? '原始网页安全快照' : '文章正文快照')"
-                        @load="handleArticlePreviewFrameReady"
-                      ></iframe>
-                      <ReportOutlineRail
-                        v-if="articleOutlineRoot && !isWechatRemoteVisible && !isLocalHtmlArticleTab(activeContentTab.id)"
-                        :scroll-root="activeArticlePreviewFrame"
-                        :content-root="articleOutlineRoot"
-                        :content-version="articlePreviewHtml(activeContentTab.id)"
-                        :report-key="activeContentTab.id"
-                        :heading-selector="articleOutlineHeadingSelector"
-                        :entry-filter="isArticleOutlineHeading"
-                        :entry-level="articleOutlineHeadingLevel"
-                      />
-                    </template>
-                    <div
-                      v-else-if="shouldShowArticlePreviewLoader(articlePreviewForTab(activeContentTab.id))"
-                      class="campus-article-loading"
-                    >
-                      <span></span><span></span><span></span>
-                      <p>{{ articlePreviewForTab(activeContentTab.id)?.loading_label || '正在读取本地正文快照…' }}</p>
-                    </div>
-                    <div
-                      v-else-if="articlePreviewForTab(activeContentTab.id)?.loading"
-                      class="article-preview-silent-loading"
-                      aria-busy="true"
-                    ></div>
-                    <div v-else class="article-preview-body" :class="{ 'campus-article-placeholder': isCampusArticleTab(activeContentTab.id) && !articleTextForTab(activeContentTab.id) }">
-                      {{ articleTextForTab(activeContentTab.id) || articlePreviewForTab(activeContentTab.id)?.error || (isCampusArticleTab(activeContentTab.id) ? '文章元数据已保存。正文会在打开、分析或提问时读取；如未自动加载，可点击右上角“获取正文”。' : '正文已保存，选择右侧总结继续追问。') }}
-                    </div>
-                    <section v-if="articleAttachmentsForTab(activeContentTab.id).length" class="article-attachment-shelf" aria-label="文章附件">
-                      <div class="article-attachment-head">
-                        <strong>附件</strong>
-                        <span>{{ articleAttachmentsForTab(activeContentTab.id).length }} 个文件</span>
-                      </div>
-                      <button
-                        v-for="attachment in articleAttachmentsForTab(activeContentTab.id)"
-                        :key="attachment.url"
-                        class="article-attachment-row"
-                        type="button"
-                        @click="$emit('open-campus-attachment', attachment)"
-                      >
-                        <span class="article-attachment-name">{{ attachment.name }}</span>
-                        <span class="article-attachment-action">{{ attachment.download_type === 'direct' ? '下载' : '打开并验证' }}</span>
-                      </button>
-                    </section>
-                  </div>
-                </article>
-                </template>
+                <ArticleReaderSurface
+                  v-else-if="isArticleTab(activeContentTab.id)"
+                  ref="articleReaderSurface"
+                  :tab="activeContentTab"
+                  :content="contentForTab(activeContentTab.id)"
+                  :preview="articlePreviewForTab(activeContentTab.id)"
+                  :article-html="articlePreviewHtml(activeContentTab.id)"
+                  :article-text="articleTextForTab(activeContentTab.id)"
+                  :source-label="sourceProviderLabel(contentForTab(activeContentTab.id)?.source_provider)"
+                  :attachments="articleAttachmentsForTab(activeContentTab.id)"
+                  :is-campus="isCampusArticleTab(activeContentTab.id)"
+                  :wechat-article="isWechatArticleTab(activeContentTab.id)"
+                  :remote-status="activeWechatRemotePage?.status || ''"
+                  :remote-visible="isWechatRemoteVisible"
+                  :local-html="isLocalHtmlArticleTab(activeContentTab.id)"
+                  :local-html-remote-visible="isLocalHtmlRemoteVisible"
+                  :original-page-url="localHtmlOriginalPageUrl(activeContentTab.id)"
+                  @preview-frame-ready="handleArticlePreviewFrameReady"
+                  @open-find="openPreviewFind"
+                  @open-external-link="$emit('open-external-link', $event)"
+                  @open-campus-attachment="$emit('open-campus-attachment', $event)"
+                />
                 <template v-else-if="isAudioTab(activeContentTab.id) && mediaUrlForTab(activeContentTab.id)">
                   <ArtAudioPlayer
                     ref="activePlayer"
@@ -363,16 +304,16 @@
                     />
                     <template v-else>
                       <h2>{{ articlePreviewForTab(activeContentTab.id)?.title || contentForTab(activeContentTab.id)?.title || activeContentTab.title }}</h2>
-                      <iframe
+                      <ArticlePreviewFrame
                         v-if="articlePreviewForTab(activeContentTab.id)?.html"
-                        ref="activeArticlePreviewFrame"
+                        ref="xhsArticlePreviewFrame"
                         class="article-preview-frame xhs-article-preview-frame"
                         :srcdoc="articlePreviewHtml(activeContentTab.id)"
-                        sandbox="allow-same-origin"
-                        referrerpolicy="no-referrer"
                         title="小红书笔记正文"
-                        @load="handleArticlePreviewFrameReady"
-                      ></iframe>
+                        @ready="handleArticlePreviewFrameReady"
+                        @open-find="openPreviewFind"
+                        @open-external-link="$emit('open-external-link', $event)"
+                      />
                       <div
                         v-else-if="shouldShowArticlePreviewLoader(articlePreviewForTab(activeContentTab.id))"
                         class="campus-article-loading"
@@ -556,7 +497,6 @@
 
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import katex from 'katex'
 import {
   Aim,
   ArrowLeft,
@@ -571,6 +511,8 @@ const pauseFillIcon = 'pause.fill'
 const ellipsisIcon = 'ellipsis'
 import { remainingReadingMinutes } from './readingProgress.js'
 import { shouldShowArticlePreviewLoader } from '../features/library/articlePreviewLoadState.js'
+import ArticlePreviewFrame from './ArticlePreviewFrame.vue'
+import ArticleReaderSurface from './ArticleReaderSurface.vue'
 import PreviewFindBar from './PreviewFindBar.vue'
 import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
@@ -583,13 +525,13 @@ import { useReadingProgressController } from './useReadingProgressController.js'
 import { useReaderSelectionController } from './useReaderSelectionController.js'
 import { useRemoteArticlePreviewController } from './useRemoteArticlePreviewController.js'
 import { useEditorContentActionMenuController } from './useEditorContentActionMenuController.js'
-import { articleOutlineHeadingSelector, createArticleOutlineModel } from './articleOutlineModel.js'
 import { createEditorContentKind } from './editorContentKind.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 import {
   readerMetadataText,
 } from './editorReaderMetadata.js'
 import { createEditorReportPresentation } from './editorReportPresentation.js'
+import { isPreviewFindShortcut } from './previewFindShortcut.js'
 
 const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
 const ArtAudioPlayer = defineAsyncComponent(() => import('./ArtAudioPlayer.vue'))
@@ -670,8 +612,13 @@ const contentHero = ref(null)
 const reportReaderSurface = ref(null)
 const reportReader = computed(() => reportReaderSurface.value?.getScrollRoot?.() || null)
 const reportMarkdown = computed(() => reportReaderSurface.value?.getContentRoot?.() || null)
-const activeArticlePreviewFrame = ref(null)
-const articleOutlineRoot = ref(null)
+const articleReaderSurface = ref(null)
+const xhsArticlePreviewFrame = ref(null)
+const activeArticlePreviewFrame = computed(() => (
+  articleReaderSurface.value?.getPreviewFrame?.()
+  || xhsArticlePreviewFrame.value?.getFrame?.()
+  || null
+))
 let removeDesktopPreviewFindListener = null
 const activeContentTab = computed(() => {
   if (props.activeWorkspaceTab) return props.activeWorkspaceTab
@@ -712,13 +659,6 @@ const {
   contentForTab: props.contentForTab,
   workspaceTabById: props.workspaceTabById,
 })
-const {
-  articleOutlineHeadingLevel,
-  isArticleOutlineHeading,
-} = createArticleOutlineModel({
-  activeArticleTitle: () => props.contentForTab(activeContentTab.value?.id)?.title,
-})
-
 const {
   xhsGalleryTrack,
   xhsGalleryIndex,
@@ -1132,81 +1072,12 @@ function seekMediaToPreviewFindMatch(match) {
   handleTimelineSegmentClick(tab.id, startSeconds)
 }
 
-function handleArticlePreviewFrameReady(event) {
-  const frameDocument = event?.target?.contentDocument
+function handleArticlePreviewFrameReady(frameDocument) {
   if (!frameDocument) return
   attachReadingProgressFrame(frameDocument)
   attachArticlePreviewSelectionFrame(frameDocument)
-  articleOutlineRoot.value = isArticleTab(activeContentTab.value?.id) ? frameDocument.body : null
-  renderArticlePreviewMath(frameDocument)
-  frameDocument.removeEventListener('keydown', handleArticlePreviewFrameKeydown)
-  frameDocument.addEventListener('keydown', handleArticlePreviewFrameKeydown)
-  frameDocument.removeEventListener('click', handleArticlePreviewLinkClick)
-  frameDocument.addEventListener('click', handleArticlePreviewLinkClick)
-  frameDocument.removeEventListener('auxclick', handleArticlePreviewLinkClick)
-  frameDocument.addEventListener('auxclick', handleArticlePreviewLinkClick)
-  if (!frameDocument.getElementById('knowledgehub-preview-find-styles')) {
-    const rootStyle = getComputedStyle(document.documentElement)
-    const highlight = rootStyle.getPropertyValue('--vk-highlight').trim()
-    const accent = rootStyle.getPropertyValue('--vk-accent').trim()
-    const accentStrong = rootStyle.getPropertyValue('--vk-accent-strong').trim()
-    const style = frameDocument.createElement('style')
-    style.id = 'knowledgehub-preview-find-styles'
-    style.textContent = `
-      mark.preview-find-highlight { background: color-mix(in srgb, ${highlight} 42%, transparent); color: inherit; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
-      mark.preview-find-highlight.preview-find-active { background: color-mix(in srgb, ${accent} 48%, transparent); outline: 1px solid color-mix(in srgb, ${accentStrong} 52%, transparent); }
-    `
-    frameDocument.head?.append(style)
-  }
   schedulePreviewFindRefresh()
   scheduleReadingProgressRefresh()
-}
-
-function renderArticlePreviewMath(frameDocument) {
-  const nodes = frameDocument.querySelectorAll('.article-math[data-latex]')
-  for (const node of nodes) {
-    const expression = String(node.dataset.latex || '').trim()
-    if (!expression || expression.length > 4000 || node.dataset.rendered === 'true') continue
-    try {
-      // MathML is rendered natively inside the sandboxed srcdoc iframe. It
-      // keeps the same KaTeX parser used elsewhere without allowing scripts,
-      // stylesheets or model-supplied HTML into the document.
-      node.innerHTML = katex.renderToString(expression, {
-        displayMode: node.dataset.display === 'block',
-        throwOnError: false,
-        strict: 'warn',
-        trust: false,
-        maxExpand: 1000,
-        maxSize: 20,
-        output: 'mathml'
-      })
-      node.dataset.rendered = 'true'
-    } catch {
-      // Keep the sanitized LaTeX text as a readable fallback.
-    }
-  }
-}
-
-function handleArticlePreviewLinkClick(event) {
-  if (event.type === 'click' && event.button !== 0) return
-  if (event.type === 'auxclick' && event.button !== 1) return
-  const target = event?.target
-  const anchor = target?.closest?.('a[href]') || target?.parentElement?.closest?.('a[href]')
-  if (!anchor) return
-  let url
-  try {
-    url = new URL(anchor.href)
-  } catch {
-    return
-  }
-  if (!['http:', 'https:'].includes(url.protocol)) return
-  event.preventDefault()
-  event.stopPropagation()
-  emit('open-external-link', url.toString())
-}
-
-function isFindShortcut(event) {
-  return Boolean((event.metaKey || event.ctrlKey) && !event.altKey && String(event.key || '').toLocaleLowerCase() === 'f')
 }
 
 function focusLibrarySearch() {
@@ -1221,7 +1092,7 @@ function isPreviewFocusTarget(target) {
 }
 
 function handlePreviewFindShortcut(event) {
-  if (!isFindShortcut(event)) return
+  if (!isPreviewFindShortcut(event)) return
   const target = event.target instanceof Element ? event.target : document.activeElement
   if (target instanceof Element && target.closest('.file-sidebar')) {
     event.preventDefault()
@@ -1241,12 +1112,6 @@ function handleDesktopPreviewFindShortcut() {
     return
   }
   if (props.activeView === 'library' && isPreviewFocusTarget(target)) openPreviewFind()
-}
-
-function handleArticlePreviewFrameKeydown(event) {
-  if (!isFindShortcut(event)) return
-  event.preventDefault()
-  openPreviewFind()
 }
 
 function readerTextForMetadata(tabId) {

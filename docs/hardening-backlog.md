@@ -246,6 +246,12 @@ lines.
   `workbench/ReportReaderSurface.vue`; mounted behavior tests cover its cover
   and outline wiring, footnote navigation, reader DOM refs and scoped styles while
   `EditorHost.vue` retains only reading-progress, search and focus bridges.
+  Cached article snapshots now render through mounted-tested
+  `workbench/ArticleReaderSurface.vue`; the reusable
+  `workbench/ArticlePreviewFrame.vue` owns sandbox/referrer policy, bounded
+  MathML rendering, external-link admission and in-frame find shortcuts for
+  both ordinary articles and Xiaohongshu text. Remote Electron WebViews remain
+  workspace siblings so open-page sessions survive tab switches.
   Report title, date-window and generated-time presentation now live in
   `workbench/editorReportPresentation.js` with pure formatting tests. Article
   outline filtering and visual hierarchy now live in
