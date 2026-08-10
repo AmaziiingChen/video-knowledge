@@ -171,7 +171,10 @@ lines.
   `features/library/useMarkdownDocumentController.js`. Clipboard fallback,
   trusted external-link dispatch, Finder reveal, best-effort telemetry and the
   optional update prompt now live in
-  `features/desktop/useDesktopActionController.js`;
+  `features/desktop/useDesktopActionController.js`. Progressive task-detail
+  hydration, active-reader milestone refresh and bounded article/media/text
+  preview deduplication now live in
+  `features/tasks/useProgressiveTaskHydrationController.js`;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,

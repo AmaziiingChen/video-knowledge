@@ -22,8 +22,6 @@ import {
 import { createQaResponseStreamController } from '../features/assistant/createQaResponseStreamController.js'
 import {
   mergeUniqueContentItems,
-  progressiveTaskSnapshot,
-  shouldHydrateProgressiveTask,
   shouldRefreshContentForTask,
   taskContentSnapshot
 } from './contentRefreshState'
@@ -88,6 +86,7 @@ import { useAiSummaryGenerationController } from '../features/assistant/useAiSum
 import { useQaRequestController } from '../features/assistant/useQaRequestController.js'
 import { usePromptTemplateController } from '../features/prompts/usePromptTemplateController.js'
 import { useActiveTaskPollingController } from '../features/tasks/useActiveTaskPollingController.js'
+import { useProgressiveTaskHydrationController } from '../features/tasks/useProgressiveTaskHydrationController.js'
 import { useActiveTaskStateController } from '../features/tasks/useActiveTaskStateController.js'
 import { useActiveTaskEventStreamController } from '../features/tasks/useActiveTaskEventStreamController.js'
 import { useTaskQueueController } from '../features/tasks/useTaskQueueController.js'
@@ -440,10 +439,6 @@ export function useAppController() {
   const batchTaskIds = ref([])
   const batchTaskNames = ref({})
   const progressiveTaskSnapshots = new Map()
-  const progressiveTaskHydratingIds = new Set()
-  const articleSnapshotPreviewedTaskIds = new Set()
-  const mediaSnapshotPreviewedTaskIds = new Set()
-  const transcriptSnapshotPreviewedTaskIds = new Set()
   const {
     logs,
     logContainer,
@@ -560,7 +555,7 @@ export function useAppController() {
     isActiveTask,
     shouldRefreshContentForTask,
     taskContentSnapshot,
-    hydrateProgressiveTask,
+    hydrateProgressiveTask: (...args) => hydrateProgressiveTask(...args),
     loadContentItems,
     isActiveContentTask: (task) => activeWorkspaceTab.value?.content_item_id === task.content_item_id,
     shouldContinueBatchPolling: () => activeBatchCount.value > 0,
@@ -570,6 +565,30 @@ export function useAppController() {
     initialUpdatedAfter: logClearedAt.value
       ? new Date(logClearedAt.value).toISOString()
       : '',
+  })
+  const {
+    hydrateProgressiveTask,
+    revealWechatArticleSnapshot,
+    revealVideoSnapshot,
+    revealTranscriptSnapshot,
+  } = useProgressiveTaskHydrationController({
+    progressiveTaskSnapshots,
+    getContentItemDetail,
+    syncTaskTabMetadata,
+    getActiveContentItemId: () => activeWorkspaceTab.value?.content_item_id || null,
+    setSelectedContentItem: (content) => {
+      selectedContentItem.value = content
+    },
+    setCurrentMarkdownItem: (content) => {
+      currentMarkdownItem.value = content
+    },
+    updatePendingArticlePreviewReadiness,
+    articlePreviews,
+    loadArticlePreview,
+    mergeBatchTasks,
+    addBackendLogs,
+    getActiveResultContentItemId: () => result.content_item_id || null,
+    applyTaskData,
   })
   const {
     startTaskEventStream,
@@ -1131,126 +1150,6 @@ export function useAppController() {
 
   function openContentFromSidebar(item) {
     openContentTab(item)
-  }
-
-  async function syncVisibleProgressiveContent(task) {
-    if (!task?.content_item_id) return null
-    const content = await getContentItemDetail(task.content_item_id)
-    if (!content) return null
-    syncTaskTabMetadata(content)
-
-    // Do not steal focus or open a new tab whenever a background task makes
-    // progress. If the reader intentionally opened this item, however, keep
-    // its hydrated record current and retry a previously unavailable article
-    // preview as soon as the cache becomes readable.
-    if (activeWorkspaceTab.value?.content_item_id === content.id) {
-      selectedContentItem.value = content
-      currentMarkdownItem.value = content
-      updatePendingArticlePreviewReadiness(content)
-      const preview = articlePreviews[content.id]
-      const isReadableArticle = ['article', 'forum_post'].includes(content.content_type)
-        && ['wechat', 'campus', 'rss', 'wechat_miniprogram', 'xiaohongshu'].includes(content.source_provider)
-      if (isReadableArticle && (!preview || preview.error)) {
-        void loadArticlePreview(content, { force: Boolean(preview?.error) })
-      }
-    }
-    return content
-  }
-
-  async function hydrateProgressiveTask(task, previousSnapshot) {
-    if (!shouldHydrateProgressiveTask(task, previousSnapshot)) return
-    const taskId = String(task.task_id || '')
-    if (!taskId || progressiveTaskHydratingIds.has(taskId)) return
-    progressiveTaskHydratingIds.add(taskId)
-    try {
-      const previousParts = String(previousSnapshot || '').split('|')
-      const transcriptBecameReady = !previousParts.includes('transcript-ready')
-        && Number(task?.progress?.transcribe || 0) >= 100
-      const contentChanged = !previousSnapshot || previousParts[0] !== String(task.content_item_id || '')
-      // Summary growth does not alter the content row. Fetching it repeatedly
-      // caused a full detail read to contend with media rendering and made the
-      // active view feel frozen. Only hydrate the tree/source at durable
-      // content and subtitle milestones; task detail is still refreshed below.
-      const shouldSyncContent = contentChanged || transcriptBecameReady
-      const [detailResult, hydratedContent] = await Promise.all([
-        task.details_included === false
-          ? axios.get(`${API}/tasks/${taskId}`, { timeout: 10000 }).then((response) => response.data).catch(() => null)
-          : Promise.resolve(task),
-        shouldSyncContent ? syncVisibleProgressiveContent(task) : Promise.resolve(true),
-      ])
-      // Do not acknowledge the milestone before the item enters the local
-      // tree cache. A short backend/database race used to mark this as done
-      // after a failed detail request, leaving a newly queued video absent
-      // from “未读” until a later download milestone happened to change.
-      if (!hydratedContent) return
-
-      const resolvedTask = detailResult || task
-      if (detailResult) {
-        mergeBatchTasks([detailResult])
-        addBackendLogs(detailResult.logs || [], detailResult)
-        if (shouldSyncContent) await syncVisibleProgressiveContent(detailResult)
-        if (result.content_item_id === detailResult.content_item_id) applyTaskData(detailResult)
-      }
-      progressiveTaskSnapshots.set(taskId, progressiveTaskSnapshot(resolvedTask))
-    } finally {
-      progressiveTaskHydratingIds.delete(taskId)
-    }
-  }
-
-  async function revealWechatArticleSnapshot(task) {
-    if (
-      task?.platform !== 'wechat'
-      || task?.text_source?.kind !== 'article'
-      || !task?.transcript?.trim()
-      || !task?.content_item_id
-      || articleSnapshotPreviewedTaskIds.has(task.task_id)
-    ) return
-
-    // The article cache is persisted before the DeepSeek summary begins.
-    // Hydrate only that entry so an active tree keeps its expansion state.
-    await syncVisibleProgressiveContent(task)
-
-    if (articleSnapshotPreviewedTaskIds.size >= 200) {
-      articleSnapshotPreviewedTaskIds.clear()
-    }
-    articleSnapshotPreviewedTaskIds.add(task.task_id)
-  }
-
-  async function revealVideoSnapshot(task) {
-    if (
-      !task?.video_path
-      || !task?.content_item_id
-      || mediaSnapshotPreviewedTaskIds.has(task.task_id)
-    ) return
-
-    // The backend creates this item at the video-ready milestone. Hydrate
-    // only it; a whole-library refresh here made the left tree rebuild while
-    // FFmpeg was preparing the preview.
-    const content = await syncVisibleProgressiveContent(task)
-    if (!content) return
-
-    if (mediaSnapshotPreviewedTaskIds.size >= 200) {
-      mediaSnapshotPreviewedTaskIds.clear()
-    }
-    mediaSnapshotPreviewedTaskIds.add(task.task_id)
-  }
-
-  async function revealTranscriptSnapshot(task) {
-    if (
-      !task?.transcript?.trim()
-      || !task?.content_item_id
-      || transcriptSnapshotPreviewedTaskIds.has(task.task_id)
-    ) return
-
-    // Segment timings are written beside the transcript before this task
-    // update is published. Hydrate only this item (rather than reload the
-    // library) so the open video gains its timed subtitle panel immediately.
-    const detail = await syncVisibleProgressiveContent(task)
-    if (!detail) return
-    if (transcriptSnapshotPreviewedTaskIds.size >= 200) {
-      transcriptSnapshotPreviewedTaskIds.clear()
-    }
-    transcriptSnapshotPreviewedTaskIds.add(task.task_id)
   }
 
   const {
