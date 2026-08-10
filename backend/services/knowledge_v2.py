@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Iterator
@@ -22,7 +21,6 @@ from services.knowledge_chunking import (
     CHILD_MAX_TOKENS,  # noqa: F401 - compatibility re-export
     CHILD_TARGET_TOKENS,  # noqa: F401 - compatibility re-export
     PARENT_MAX_TOKENS,  # noqa: F401 - compatibility re-export
-    ChildChunk,
     ParentChunk,  # noqa: F401 - compatibility re-export
     SourceBlock,  # noqa: F401 - compatibility re-export
     clean_source_markdown,
@@ -47,7 +45,12 @@ from services.knowledge_retrieval_store import (
     lexical_ranks as _lexical_ranks,
     scoped_child_rows as _scoped_child_rows,
     source_scope_clause as _source_scope_clause,
-    tokenize_searchable as _tokens,
+)
+from services.knowledge_index_storage import (
+    CHUNKER_VERSION,
+    insert_chunk as _insert_chunk,
+    searchable as _searchable,
+    source_hash as _source_hash,
 )
 from services.knowledge_vector_index import (
     dense_ranks as _dense_ranks,
@@ -79,7 +82,6 @@ from services.prompt_templates import (
 )
 from services.repository import new_id
 
-CHUNKER_VERSION = "knowledge-structural-v2"
 EMBEDDING_BATCH_SIZE = 10
 EMBEDDING_REQUEST_TIMEOUT_SECONDS = 45.0
 # Flash Thinking spends part of the completion budget on reasoning. Keep enough
@@ -921,31 +923,6 @@ def embed_pending(
         budgeted_input_tokens += budgeted_batch_tokens
     invalidate_vector_cache()
     return EmbeddingProgress(embedded, estimated_input_tokens, budgeted_input_tokens, len(rows) - embedded)
-
-
-def _insert_chunk(db, chunk_id: str, document: dict[str, object], parent_chunk_id: str | None, chunk_kind: str, ordinal: int, heading_path: str, text: str, token_count: int, source_hash: str, now: str) -> None:
-    db.execute(
-        """INSERT INTO knowledge_v2_chunks
-           (id,content_item_id,parent_chunk_id,chunk_kind,ordinal,heading_path,text,token_count,source_hash,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (chunk_id, document["content_item_id"], parent_chunk_id, chunk_kind, ordinal, heading_path, text, token_count, source_hash, now, now),
-    )
-
-
-def _source_hash(document: dict[str, object]) -> str:
-    fields = [
-        CHUNKER_VERSION,
-        str(document.get("title") or ""),
-        str(document.get("source_provider") or ""),
-        str(document.get("source_name") or ""),
-        str(document.get("source_url") or ""),
-        clean_source_markdown(str(document.get("markdown") or "")),
-    ]
-    return sha256("\n".join(fields).encode("utf-8")).hexdigest()
-
-
-def _searchable(document: dict[str, object], chunk: ChildChunk) -> str:
-    return _tokens(" ".join((str(document.get("title") or ""), str(document.get("source_name") or ""), chunk.heading_path, chunk.text)))
 
 
 def _embedding_text(row) -> str:
