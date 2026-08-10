@@ -201,7 +201,9 @@ lines.
   preference persistence now lives in
   `features/settings/useAppSettingsController.js`; the unconsumed legacy ASR
   form facade has been retired while the fixed desktop ASR request policy
-  remains unchanged.
+  remains unchanged. Optional backend capabilities, server-provided model
+  choices and video-download defaults now hydrate through the independently
+  tested `features/settings/useDesktopBootstrapSettingsController.js` boundary.
 - [ ] Split `SecondarySidebar.vue` into conversation, composer and task-status
   surfaces. Its model normalization, shortcut filtering, empty state, external
   citation, OCR hint and text-preview rules now live in

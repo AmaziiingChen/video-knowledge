@@ -1,5 +1,4 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import axios from 'axios'
 import { ElMessage, ElNotification } from 'element-plus'
 import { requestDestructiveConfirmation } from './useDestructiveConfirm'
 import {
@@ -74,6 +73,7 @@ import { usePlatformCredentialController } from '../features/integrations/usePla
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
 import { useDesktopActionController } from '../features/desktop/useDesktopActionController.js'
 import { useAppSettingsController } from '../features/settings/useAppSettingsController.js'
+import { useDesktopBootstrapSettingsController } from '../features/settings/useDesktopBootstrapSettingsController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
 import { useConversationMarkdownExportController } from '../features/assistant/useConversationMarkdownExportController.js'
@@ -236,15 +236,19 @@ export function useAppController() {
     askQuestion: (...args) => askQuestion(...args),
   })
   const openSections = ref(['source', 'timings'])
-  const availableModels = ref(['tiny', 'base', 'small'])
-  const miniprogramForumCaptureEnabled = ref(false)
-  const availableAiModels = ref([
-    { value: 'deepseek-v4-flash:enabled', label: 'deepseek-v4-flash' },
-    { value: 'deepseek-v4-pro:enabled', label: 'deepseek-v4-pro' }
-  ])
   const useCache = ref(true)
-  const autoDownloadBilibiliVideo = ref(false)
-  const douyinVideoQuality = ref('standard')
+  const {
+    availableModels,
+    miniprogramForumCaptureEnabled,
+    availableAiModels,
+    autoDownloadBilibiliVideo,
+    douyinVideoQuality,
+    loadDesktopBootstrapSettings,
+  } = useDesktopBootstrapSettingsController({
+    selectedAiModel,
+    normalizeAiModelValue,
+    checkManualUpdate,
+  })
   const libraryFolders = ref([])
   const selectedContentItem = ref(null)
   const {
@@ -940,31 +944,7 @@ export function useAppController() {
     startCookieStatusPolling()
     loadBilibiliCookieStatus(true)
 
-    try {
-      const res = await axios.get(`${API}/config`)
-      miniprogramForumCaptureEnabled.value = Boolean(res.data.miniprogram_forum_capture_enabled)
-      if (Array.isArray(res.data.available_whisper_models)) {
-        availableModels.value = res.data.available_whisper_models
-      }
-      if (!hasLocalAiSettings && res.data.deepseek_model_option) {
-        selectedAiModel.value = res.data.deepseek_model_option
-      } else if (!hasLocalAiSettings && res.data.deepseek_model) {
-        selectedAiModel.value = normalizeAiModelValue(res.data.deepseek_model)
-      }
-      if (Array.isArray(res.data.available_ai_models)) {
-        availableAiModels.value = res.data.available_ai_models
-      } else if (res.data.deepseek_model) {
-        availableAiModels.value = [normalizeAiModelValue(res.data.deepseek_model)]
-      }
-      void checkManualUpdate()
-      const videoSettings = await axios.get(`${API}/video-download-settings`)
-      autoDownloadBilibiliVideo.value = Boolean(videoSettings.data?.auto_download_bilibili_video)
-      douyinVideoQuality.value = ['low', 'standard', 'high'].includes(videoSettings.data?.douyin_video_quality)
-        ? videoSettings.data.douyin_video_quality
-        : 'standard'
-    } catch {
-      // 配置读取失败不影响手动处理，保留前端默认值。
-    }
+    await loadDesktopBootstrapSettings({ hasLocalAiSettings })
 
     await loadObsidianSettings()
 
