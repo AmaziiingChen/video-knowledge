@@ -16,7 +16,7 @@ import {
   assistantSummaryFromMarkdown,
   documentMarkdownWithoutConversation,
   reportMarkdownForCenter,
-  sourceMarkdownForCenter
+  sourceMarkdownForCenter,
 } from '../features/assistant/assistantMarkdown'
 import { createQaResponseStreamController } from '../features/assistant/createQaResponseStreamController.js'
 import {
@@ -38,12 +38,10 @@ import {
   roundedProgress,
   sanitizeHtml,
   sourceProviderLabel,
-  stripMarkdownMetadata,
   statusLabel,
   statusTagType,
 } from '../utils/viewFormatters'
 import { sourceProviderFromUrl } from '../utils/taskSource.js'
-import { extractReportSourceStats } from '../utils/reportSourceStats.js'
 import { useProcessLogController } from '../features/logs/useProcessLogController.js'
 import { useArticlePreviewController } from '../features/library/useArticlePreviewController.js'
 import { useOpenClawController } from '../features/integrations/useOpenClawController.js'
@@ -66,6 +64,10 @@ import { useLinkIngestController } from '../features/imports/useLinkIngestContro
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
 import { useMarkdownOutputSettingsController } from '../features/library/useMarkdownOutputSettingsController.js'
 import { useMarkdownDocumentController } from '../features/library/useMarkdownDocumentController.js'
+import {
+  isGeneratedReportDocument,
+  useMarkdownReaderController,
+} from '../features/library/useMarkdownReaderController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { usePlatformCredentialController } from '../features/integrations/usePlatformCredentialController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
@@ -684,52 +686,19 @@ export function useAppController() {
     return renderMarkdown(result.summary)
   })
 
-  const selectedMarkdownPreview = computed(() => {
-    if (!selectedContentItem.value || !markdownState.markdown) return ''
-    const isReport = isGeneratedReportDocument(selectedContentItem.value)
-    const isForumCapture = isForumCaptureDocument(selectedContentItem.value)
-    const isExternalMarkdown = isExternalMarkdownDocument(selectedContentItem.value)
-    // A report body is a center document.  Ordinary source documents strip
-    // assistant sections; both document kinds always strip Q&A from the
-    // center reader.
-    const markdown = isReport
-      ? reportMarkdownForCenter(markdownState.markdown)
-      : isExternalMarkdown
-        ? sourceMarkdownForCenter(markdownState.markdown)
-        : stripAssistantMarkdown(markdownState.markdown)
-    return renderMarkdown(
-      isReport
-        ? stripReportMarkdownHeader(markdown)
-        : isForumCapture
-          ? stripForumCaptureMarkdownHeader(markdown)
-          : markdown
-    )
-  })
-
-  const selectedMarkdownSizeBytes = computed(() => {
-    const persistedSize = Number(markdownState.markdown_size_bytes || 0)
-    if (persistedSize > 0) return persistedSize
-    const markdown = String(markdownState.markdown || '')
-    return markdown ? new TextEncoder().encode(markdown).length : 0
-  })
-
-  const selectedReportSourceStats = computed(() => {
-    if (!selectedContentItem.value || !markdownState.markdown) return { analyzed: 0, referenced: 0 }
-    const isReport = isGeneratedReportDocument(selectedContentItem.value)
-    return isReport
-      ? extractReportSourceStats(markdownState.markdown)
-      : { analyzed: 0, referenced: 0 }
-  })
-
-  const selectedMarkdownSourceText = computed(() => {
-    if (!selectedContentItem.value || !markdownState.markdown) return ''
-    if (isForumCaptureDocument(selectedContentItem.value)) {
-      return stripAssistantMarkdown(markdownState.markdown)
-    }
-    if (isExternalMarkdownDocument(selectedContentItem.value)) {
-      return sourceMarkdownForCenter(markdownState.markdown)
-    }
-    return extractSourceTextFromMarkdown(markdownState.markdown)
+  const {
+    selectedMarkdownPreview,
+    selectedMarkdownSizeBytes,
+    selectedReportSourceStats,
+    selectedMarkdownSourceText,
+  } = useMarkdownReaderController({
+    selectedContentItem,
+    markdownState,
+    render: renderMarkdown,
+    stripReportHeader: stripReportMarkdownHeader,
+    documentWithoutConversation: documentMarkdownWithoutConversation,
+    reportForCenter: reportMarkdownForCenter,
+    sourceForCenter: sourceMarkdownForCenter,
   })
 
   const mediaPreviewUrl = computed(() => {
@@ -1230,46 +1199,6 @@ export function useAppController() {
 
   function shortLink(link) {
     return link.replace(/^https?:\/\//, '').replace(/^www\./, '').slice(0, 42)
-  }
-
-  function stripAssistantMarkdown(markdown) {
-    return documentMarkdownWithoutConversation(markdown)
-      .replace(/\n## AI 摘要[\s\S]*$/u, '')
-      .replace(/\n<details>[\s\S]*?<\/details>\s*$/iu, '')
-      .trim()
-  }
-
-  function isGeneratedReportDocument(item) {
-    return Boolean(item && !isForumCaptureDocument(item) && (
-      item.content_type === 'report' || item.source_provider === 'wechat_report'
-    ))
-  }
-
-  function isForumCaptureDocument(item) {
-    return Boolean(item && item.source_provider === 'wechat_miniprogram' && (
-      item.content_type === 'forum_capture' || item.content_type === 'report'
-    ))
-  }
-
-  function isExternalMarkdownDocument(item) {
-    if (!item) return false
-    if (item.source_provider === 'local_markdown') return item.content_type === 'document'
-    // Every retained local import writes its source into the canonical
-    // Markdown document.  Image OCR and audio/video transcripts must use the
-    // same durable source when a finished task is no longer in memory.
-    return item.source_provider === 'local_file'
-      && ['document', 'image', 'audio', 'video'].includes(item.content_type)
-  }
-
-  function stripForumCaptureMarkdownHeader(markdown) {
-    return String(markdown || '').replace(/^\s*#\s+[^\n]+\r?\n+/u, '')
-  }
-
-  function extractSourceTextFromMarkdown(markdown) {
-    const text = stripMarkdownMetadata(markdown || '')
-    const detailsMatch = text.match(/<details>\s*<summary>(?:原文正文|原始转写文本)<\/summary>\s*([\s\S]*?)\s*<\/details>/iu)
-    if (detailsMatch) return detailsMatch[1].trim()
-    return ''
   }
 
   function appendAsrFormData(formData) {

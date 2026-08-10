@@ -176,7 +176,10 @@ lines.
   preview deduplication now live in
   `features/tasks/useProgressiveTaskHydrationController.js`. Unreturned legacy
   task-detail row projections and the unconsumed selected-model projection have
-  been removed instead of being carried into another abstraction;
+  been removed instead of being carried into another abstraction. Markdown
+  reader projection, durable source-text recovery, report classification,
+  source statistics and UTF-8 size fallback now live in
+  `features/library/useMarkdownReaderController.js`;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,
