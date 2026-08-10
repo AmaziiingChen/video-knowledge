@@ -25,6 +25,10 @@ from services.campus_digest_payloads import (
     split_text_in_order as _split_text_in_order,
     string_list as _string_list,
 )
+from services.campus_digest_fact_cache import (
+    load_cached_facts as _load_cached_fact_cards,
+    save_fact_cards as _save_cached_fact_cards,
+)
 from services.campus_digest_editorial import (
     CITATION_RE as _CITATION_RE,
     assemble_report as _assemble_report,
@@ -37,7 +41,7 @@ from services.campus_digest_identity import canonical_url as _canonical_url
 from services.campus_digest_identity import normalize_identity as _normalize_identity
 from services.campus_digest_identity import source_hash as _source_hash
 from services.campus_digest_identity import text_shingle_similarity as _text_shingle_similarity
-from services.database import connect, initialize_database, utc_now_iso
+from services.database import connect, utc_now_iso
 from services.llm_provider import LLMMessage, LLMProvider, default_llm_provider
 from services.prompt_file_store import managed_prompt_text
 
@@ -703,65 +707,20 @@ def _load_cached_facts(
     hashes: dict[str, str],
     model: str,
 ) -> dict[str, dict[str, Any]]:
-    ids = [source.content_item_id for source in sources]
-    if not ids:
-        return {}
-    initialize_database()
-    placeholders = ",".join("?" for _ in ids)
-    with connect() as connection:
-        rows = connection.execute(
-            f"""SELECT content_item_id, source_hash, fact_json
-                FROM campus_report_facts
-                WHERE content_item_id IN ({placeholders}) AND prompt_version=? AND model=?""",
-            (*ids, FACT_PROMPT_VERSION, model),
-        ).fetchall()
-    cached: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        content_id = str(row["content_item_id"])
-        if str(row["source_hash"]) != hashes.get(content_id):
-            continue
-        try:
-            cached[content_id] = _parse_fact_card(json.loads(str(row["fact_json"])))
-        except (ValueError, TypeError, json.JSONDecodeError):
-            continue
-    return cached
+    return _load_cached_fact_cards(
+        sources,
+        hashes,
+        model,
+        prompt_version=FACT_PROMPT_VERSION,
+        parse_card=_parse_fact_card,
+    )
 
 
 def _save_fact_cards(
     records: list[tuple[CampusDigestSource, dict[str, Any], str]],
     hashes: dict[str, str],
 ) -> None:
-    now = utc_now_iso()
-    with connect() as connection:
-        connection.executemany(
-            """INSERT INTO campus_report_facts
-               (content_item_id, source_hash, prompt_version, model, fact_json,
-                filter_status, filter_reason, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(content_item_id) DO UPDATE SET
-                 source_hash=excluded.source_hash,
-                 prompt_version=excluded.prompt_version,
-                 model=excluded.model,
-                 fact_json=excluded.fact_json,
-                 filter_status=excluded.filter_status,
-                 filter_reason=excluded.filter_reason,
-                 embedding_model='', embedding_json='[]', updated_at=excluded.updated_at""",
-            [
-                (
-                    source.content_item_id,
-                    hashes[source.content_item_id],
-                    FACT_PROMPT_VERSION,
-                    model,
-                    json.dumps(card, ensure_ascii=False, separators=(",", ":")),
-                    card["content_decision"],
-                    card["decision_reason"],
-                    now,
-                    now,
-                )
-                for source, card, model in records
-            ],
-        )
-        connection.commit()
+    _save_cached_fact_cards(records, hashes, prompt_version=FACT_PROMPT_VERSION)
 
 
 def _prepare_embeddings(
