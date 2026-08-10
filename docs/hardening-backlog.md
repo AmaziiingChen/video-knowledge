@@ -242,7 +242,7 @@ lines.
   `features/reports/reportEventStream.js` with protocol-level tests.
 - [x] Extract WeChat RSS copying and credential-free subscription export from
   `App.vue` into `features/wechat/useWechatFeedExportController.js`.
-- [ ] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
+- [x] Separate library and prompt sidebars from `PrimarySidebar.vue` and test
   tree, drag, search and trash behavior at their owners.
   Local tree-preference persistence plus pure tree-node construction, unread
   ancestry and folder paths now live in
@@ -268,6 +268,12 @@ lines.
   range selection, context-selection preservation, and read-state projection
   now share `workbench/useLibraryTreeInteractionController.js`; box selection,
   drag policy, context menus and folder persistence remain separate owners.
+  `PrimarySidebar.vue` is now a 193-line view router that preserves the existing
+  cross-view library lifecycle and focus facade; the 1,134-line library owner
+  lives in `LibrarySidebar.vue`, while `PromptFileTree.vue` remains the prompt
+  owner. Component tests cover view routing, facade/event forwarding, all four
+  prompt-open payloads, lazy trash loading, confirmed deletion and last-prompt
+  protection.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
   backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network

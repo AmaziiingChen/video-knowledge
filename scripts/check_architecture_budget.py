@@ -17,7 +17,7 @@ KNOWN_DEBT_BUDGETS = {
     "backend/services/database.py": 167,
     "backend/services/group_report_pipeline.py": 1_403,
     "frontend/src/styles/app.css": 2_410,
-    "frontend/src/workbench/PrimarySidebar.vue": 1_216,
+    "frontend/src/workbench/LibrarySidebar.vue": 1_134,
     "backend/services/wechat_publishing.py": 1_415,
     "backend/routers/content.py": 201,
     "backend/services/creator_sync.py": 985,

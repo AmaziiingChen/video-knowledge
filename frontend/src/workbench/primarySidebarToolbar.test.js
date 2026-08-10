@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const source = await readFile(new URL('./PrimarySidebar.vue', import.meta.url), 'utf8')
+const source = await readFile(new URL('./LibrarySidebar.vue', import.meta.url), 'utf8')
 const linkDockSource = await readFile(new URL('./SidebarLinkDock.vue', import.meta.url), 'utf8')
 
 test('centres and enlarges file-tree toolbar actions without a top divider', () => {

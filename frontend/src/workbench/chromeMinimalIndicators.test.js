@@ -5,7 +5,7 @@ import test from 'node:test'
 const appSource = await readFile(new URL('../App.vue', import.meta.url), 'utf8')
 const chromeSource = await readFile(new URL('./WorkspaceChromeActions.vue', import.meta.url), 'utf8')
 const treeRowSource = await readFile(new URL('./SidebarTreeRow.vue', import.meta.url), 'utf8')
-const sidebarSource = await readFile(new URL('./PrimarySidebar.vue', import.meta.url), 'utf8')
+const sidebarSource = await readFile(new URL('./LibrarySidebar.vue', import.meta.url), 'utf8')
 const contextMenuSource = await readFile(new URL('./LibraryContextMenu.vue', import.meta.url), 'utf8')
 
 test('keeps quick open keyboard-accessible without a permanent topbar trigger', () => {
