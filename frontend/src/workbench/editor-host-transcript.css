@@ -408,19 +408,9 @@
     transform: none;
   }
 
-  .report-footnote-return-enter-active,
-  .report-footnote-return-leave-active {
-    transition: opacity 120ms ease;
-  }
-
-  .report-footnote-return-enter-from,
-  .report-footnote-return-leave-to {
-    transform: none;
-  }
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .report-footnote-return,
   .transcript-follow-button,
   .reader-selection-ask {
     background: var(--vk-bg-panel) !important;
@@ -430,7 +420,6 @@
 }
 
 @media (prefers-contrast: more) {
-  .report-footnote-return,
   .transcript-follow-button,
   .reader-selection-ask {
     border-color: color-mix(in srgb, var(--vk-text) 48%, var(--vk-border)) !important;

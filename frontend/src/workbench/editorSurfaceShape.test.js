@@ -18,6 +18,10 @@ const editorHostStyles = (
     'editor-host-transcript.css',
   ].map((filename) => readFile(new URL(filename, import.meta.url), 'utf8')))
 ).join('\n')
+const reportReaderStyles = await readFile(
+  new URL('./report-reader-surface.css', import.meta.url),
+  'utf8',
+)
 const workbenchShellSource = await readFile(
   new URL('./WorkbenchShell.vue', import.meta.url),
   'utf8',
@@ -77,5 +81,12 @@ test('keeps the EditorHost scoped style domains in their original cascade order'
   assert.match(
     editorHostSource,
     /<style scoped src="\.\/editor-host-workspace\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-documents\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-articles\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-transcript\.css"><\/style>/,
+  )
+})
+
+test('keeps capture metadata separators with the report reader surface', () => {
+  assert.match(
+    reportReaderStyles,
+    /\.capture-reader-meta span \+ span::before\s*\{[\s\S]*?content:\s*"·";[\s\S]*?margin:\s*0 7px;/,
   )
 })

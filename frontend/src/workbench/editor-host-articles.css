@@ -593,7 +593,6 @@
   display: none;
 }
 
-.report-markdown :deep(mark.preview-find-highlight),
 .article-preview-body :deep(mark.preview-find-highlight),
 .transcript-timeline :deep(mark.preview-find-highlight) {
   padding: 0 1px;
@@ -604,7 +603,6 @@
   -webkit-box-decoration-break: clone;
 }
 
-.report-markdown :deep(mark.preview-find-highlight.preview-find-active),
 .article-preview-body :deep(mark.preview-find-highlight.preview-find-active),
 .transcript-timeline :deep(mark.preview-find-highlight.preview-find-active) {
   background: color-mix(in srgb, var(--vk-accent) 54%, var(--vk-bg-panel));

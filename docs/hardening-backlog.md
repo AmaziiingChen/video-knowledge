@@ -241,7 +241,11 @@ lines.
   their active-tab eligibility, detail assembly and transcript-export browser
   effects now compose in `workbench/useEditorContentActionMenuController.js`
   with behavior tests. Two unused root props, one undeclared fallthrough prop
-  and the dead image-tab helper have been retired.
+  and the dead image-tab helper have been retired. Generated reports, imported
+  Markdown and mini-program capture documents now render through
+  `workbench/ReportReaderSurface.vue`; mounted behavior tests cover its cover
+  and outline wiring, footnote navigation, reader DOM refs and scoped styles while
+  `EditorHost.vue` retains only reading-progress, search and focus bridges.
   Report title, date-window and generated-time presentation now live in
   `workbench/editorReportPresentation.js` with pure formatting tests. Article
   outline filtering and visual hierarchy now live in

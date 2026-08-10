@@ -42,94 +42,35 @@
                   'capture-frame': isMiniProgramCaptureTab(activeContentTab.id),
                 }"
               >
-                <article
+                <ReportReaderSurface
                   v-if="isMiniProgramCaptureTab(activeContentTab.id)"
-                  ref="reportReader"
-                  class="article-reader capture-reader"
-                  @scroll.passive="handleReadingScroll"
-                >
-                  <div class="article-reader-inner report-reader-inner capture-reader-inner">
-                    <div class="article-reader-head capture-reader-head">
-                      <div class="article-reader-heading">
-                        <span class="capture-reader-kicker">小程序采集</span>
-                        <h2>{{ contentForTab(activeContentTab.id)?.title || activeContentTab.title }}</h2>
-                        <p class="capture-reader-meta">
-                          <span>{{ contentForTab(activeContentTab.id)?.source_name || '校园论坛' }}</span>
-                          <span v-if="contentForTab(activeContentTab.id)?.source_section">{{ contentForTab(activeContentTab.id).source_section }}</span>
-                          <span v-if="contentForTab(activeContentTab.id)?.published_at">采集于 {{ formatDateTime(contentForTab(activeContentTab.id).published_at) }}</span>
-                        </p>
-                      </div>
-                    </div>
-                    <div
-                      v-if="selectedMarkdownPreview"
-                      ref="reportMarkdown"
-                      class="report-markdown vk-prose capture-markdown"
-                      v-html="selectedMarkdownPreview"
-                    ></div>
-                    <div v-else class="article-preview-body">正在载入采集记录…</div>
-                  </div>
-                  <ReportOutlineRail
-                    :scroll-root="reportReader"
-                    :content-root="reportMarkdown"
-                    :content-version="selectedMarkdownPreview"
-                    :report-key="activeContentTab.id"
-                  />
-                </article>
-                <article
+                  ref="reportReaderSurface"
+                  mode="capture"
+                  :tab="activeContentTab"
+                  :content="contentForTab(activeContentTab.id)"
+                  :markdown-html="selectedMarkdownPreview"
+                  :format-date-time="formatDateTime"
+                  @scroll="handleReadingScroll"
+                />
+                <ReportReaderSurface
                   v-else-if="isReportTab(activeContentTab.id) || isExternalMarkdownTab(activeContentTab.id)"
-                  ref="reportReader"
-                  class="article-reader report-reader"
-                  @scroll.passive="handleReadingScroll"
-                >
-                  <div class="article-reader-inner report-reader-inner">
-                    <div class="article-reader-head report-reader-head">
-                      <div class="report-reader-heading">
-                        <h2>{{ isExternalMarkdownTab(activeContentTab.id) ? contentForTab(activeContentTab.id)?.title || activeContentTab.title : reportDisplayTitle(activeContentTab.id) }}</h2>
-                        <p class="report-reader-meta">
-                          <template v-if="isExternalMarkdownTab(activeContentTab.id)">
-                            <span>外部导入</span>
-                            <span>{{ externalImportKindLabel(activeContentTab.id) }}</span>
-                            <span v-if="contentForTab(activeContentTab.id)?.created_at">导入于 {{ formatDateTime(contentForTab(activeContentTab.id).created_at) }}</span>
-                          </template>
-                          <template v-else>
-                            <span>{{ reportDateLabel(activeContentTab.id) }}</span>
-                            <span v-if="reportGeneratedLabel(activeContentTab.id)">{{ reportGeneratedLabel(activeContentTab.id) }}</span>
-                            <span v-if="selectedReportSourceStats.analyzed">分析 {{ selectedReportSourceStats.analyzed }} 篇文章</span>
-                            <span v-if="selectedReportSourceStats.analyzed || selectedReportSourceStats.referenced">
-                              正文引用 {{ selectedReportSourceStats.referenced }} 篇文章
-                            </span>
-                          </template>
-                        </p>
-                      </div>
-                    </div>
-                    <ReportCoverPreview
-                      v-if="isReportTab(activeContentTab.id)"
-                      :content-item-id="String(contentForTab(activeContentTab.id)?.id || '')"
-                      :title="reportDisplayTitle(activeContentTab.id)"
-                      :cover-url="contentForTab(activeContentTab.id)?.cover_url || ''"
-                      :history="reportCoverHistoryForTab(activeContentTab.id)"
-                      :generating="isWechatCoverGenerating(activeContentTab.id)"
-                      :switching="isWechatCoverSwitching(activeContentTab.id)"
-                      @select="$emit('select-wechat-cover', $event)"
-                    />
-                    <div
-                      v-if="selectedMarkdownPreview"
-                      ref="reportMarkdown"
-                      class="report-markdown vk-prose"
-                      v-html="selectedMarkdownPreview"
-                      @click="handleReportFootnoteClick"
-                      @pointerover="positionFootnotePreview"
-                      @focusin="positionFootnotePreview"
-                    ></div>
-                    <div v-else class="article-preview-body">{{ isExternalMarkdownTab(activeContentTab.id) ? '正在载入 Markdown 内容…' : '正在载入报告内容…' }}</div>
-                  </div>
-                  <ReportOutlineRail
-                    :scroll-root="reportReader"
-                    :content-root="reportMarkdown"
-                    :content-version="selectedMarkdownPreview"
-                    :report-key="activeContentTab.id"
-                  />
-                </article>
+                  ref="reportReaderSurface"
+                  :mode="isExternalMarkdownTab(activeContentTab.id) ? 'markdown' : 'report'"
+                  :tab="activeContentTab"
+                  :content="contentForTab(activeContentTab.id)"
+                  :markdown-html="selectedMarkdownPreview"
+                  :source-stats="selectedReportSourceStats"
+                  :report-display-title="reportDisplayTitle(activeContentTab.id)"
+                  :report-date-label="reportDateLabel(activeContentTab.id)"
+                  :report-generated-label="reportGeneratedLabel(activeContentTab.id)"
+                  :external-import-kind-label="externalImportKindLabel(activeContentTab.id)"
+                  :cover-history="reportCoverHistoryForTab(activeContentTab.id)"
+                  :cover-generating="isWechatCoverGenerating(activeContentTab.id)"
+                  :cover-switching="isWechatCoverSwitching(activeContentTab.id)"
+                  :format-date-time="formatDateTime"
+                  @scroll="handleReadingScroll"
+                  @select-cover="$emit('select-wechat-cover', $event)"
+                />
                 <article v-else-if="isExternalPdfTab(activeContentTab.id)" class="pdf-reader" aria-label="PDF 原件预览">
                   <iframe
                     v-if="originalMediaUrlForTab(activeContentTab.id)"
@@ -345,20 +286,6 @@
                     {{ isVideoCacheExpired(activeContentTab.id) ? '本地视频预览已过期，可从右上角“内容操作”重新下载' : '视频文件尚未缓存，可从右上角“内容操作”重新处理' }}
                   </span>
                 </div>
-
-                <Transition name="report-footnote-return">
-                  <button
-                    v-if="hasFootnoteReturn"
-                    class="report-footnote-return"
-                    type="button"
-                    aria-label="返回引用位置"
-                    title="返回引用位置"
-                    @click="returnToFootnoteReference"
-                  >
-                    <el-icon><ArrowUp /></el-icon>
-                    <span>返回引用处</span>
-                  </button>
-                </Transition>
 
                 <div
                   class="content-overlay-actions"
@@ -634,11 +561,9 @@ import {
   Aim,
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
 } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../components/AiSkeletonStream.vue'
-import { useMarkdownFootnoteNavigation } from '../composables/useMarkdownFootnoteNavigation'
 const movieClapperIcon = 'movieclapper'
 const questionPageIcon = 'questionmark.text.page'
 const playFillIcon = 'play.fill'
@@ -649,8 +574,8 @@ import { shouldShowArticlePreviewLoader } from '../features/library/articlePrevi
 import PreviewFindBar from './PreviewFindBar.vue'
 import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
-import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
+import ReportReaderSurface from './ReportReaderSurface.vue'
 import { usePreviewFindController } from './usePreviewFindController.js'
 import { useMediaTranscriptWorkspaceController } from './useMediaTranscriptWorkspaceController.js'
 import { useXhsGalleryController } from './useXhsGalleryController.js'
@@ -742,22 +667,12 @@ const emit = defineEmits([
 
 const activePlayer = ref(null)
 const contentHero = ref(null)
-const reportReader = ref(null)
-const reportMarkdown = ref(null)
+const reportReaderSurface = ref(null)
+const reportReader = computed(() => reportReaderSurface.value?.getScrollRoot?.() || null)
+const reportMarkdown = computed(() => reportReaderSurface.value?.getContentRoot?.() || null)
 const activeArticlePreviewFrame = ref(null)
 const articleOutlineRoot = ref(null)
 let removeDesktopPreviewFindListener = null
-
-const {
-  clearFootnoteReturn,
-  handleFootnoteClick: handleReportFootnoteClick,
-  hasFootnoteReturn,
-  positionFootnotePreview,
-  returnToFootnoteReference,
-} = useMarkdownFootnoteNavigation({
-  scrollRoot: reportReader,
-  scopeKey: () => activeContentTab.value?.id || '',
-})
 const activeContentTab = computed(() => {
   if (props.activeWorkspaceTab) return props.activeWorkspaceTab
   if (!props.selectedContentItem?.id) return null
@@ -1025,7 +940,6 @@ watch(
 )
 
 watch(() => activeContentTab.value?.id, () => {
-  clearFootnoteReturn()
   resetXhsGallery()
 })
 
@@ -1204,7 +1118,7 @@ function previewFindRoot() {
     return activeArticlePreviewFrame.value?.contentDocument?.body || null
   }
   if (isReportTab(tab.id) || isExternalMarkdownTab(tab.id) || isMiniProgramCaptureTab(tab.id)) {
-    return contentHero.value?.querySelector('.report-markdown') || null
+    return reportMarkdown.value
   }
   if (hasTranscriptTimeline(tab.id)) return contentHero.value?.querySelector('.transcript-timeline') || null
   return contentHero.value?.querySelector('.article-preview-body') || null
@@ -1358,7 +1272,8 @@ function plainTextFromHtml(html) {
 }
 
 function focusSourceReader() {
-  const reader = reportReader.value || contentHero.value?.querySelector('.article-reader')
+  if (reportReaderSurface.value?.focusReader?.()) return true
+  const reader = contentHero.value?.querySelector('.article-reader')
   if (!(reader instanceof HTMLElement)) return false
   reader.focus?.({ preventScroll: true })
   reader.scrollTo?.({ top: 0, behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
