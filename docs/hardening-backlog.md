@@ -189,7 +189,9 @@ lines.
   creator-sync content reveal, queue registration and first-task activation now
   live in `features/creator/useCreatorSyncTaskMonitorController.js`; three
   unreturned form/link helpers with no repository caller were removed instead
-  of being moved;
+  of being moved. Total elapsed time, active queue count, status-bar transfer,
+  ASR model options and stage labels now live in the pure
+  `features/tasks/useTaskRuntimeProjectionController.js` boundary;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,
