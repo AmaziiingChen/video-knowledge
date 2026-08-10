@@ -13,7 +13,6 @@ import {
   terminalStatuses
 } from '../config/workbenchOptions'
 import {
-  assistantSummaryFromMarkdown,
   documentMarkdownWithoutConversation,
   reportMarkdownForCenter,
   sourceMarkdownForCenter,
@@ -77,6 +76,7 @@ import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
 import { useConversationMarkdownExportController } from '../features/assistant/useConversationMarkdownExportController.js'
 import { useAiSummaryGenerationController } from '../features/assistant/useAiSummaryGenerationController.js'
+import { useAssistantWorkspaceProjectionController } from '../features/assistant/useAssistantWorkspaceProjectionController.js'
 import { useQaRequestController } from '../features/assistant/useQaRequestController.js'
 import { usePromptTemplateController } from '../features/prompts/usePromptTemplateController.js'
 import { useActiveTaskPollingController } from '../features/tasks/useActiveTaskPollingController.js'
@@ -682,10 +682,6 @@ export function useAppController() {
     notify: ElMessage,
     confirmDisconnect: requestDestructiveConfirmation,
   })
-  const renderedSummary = computed(() => {
-    return renderMarkdown(result.summary)
-  })
-
   const {
     selectedMarkdownPreview,
     selectedMarkdownSizeBytes,
@@ -750,14 +746,6 @@ export function useAppController() {
     apiBase: API,
   })
 
-  const activeContentAiCalls = computed(() => {
-    const contentItemId = activeWorkspaceContent.value?.id || result.content_item_id
-    if (contentItemId && Array.isArray(aiCallsByContentId[contentItemId])) {
-      return aiCallsByContentId[contentItemId]
-    }
-    return activeWorkspaceResult.value?.ai_calls || result.ai_calls || []
-  })
-
   const {
     activeSelectedTextContext,
     clearSelectedTextContext,
@@ -770,101 +758,29 @@ export function useAppController() {
     getFallbackContentTitle: () => result.source_title,
   })
 
-  const currentInsightHtml = computed(() => {
-    // Pipeline text is rendered in the same flowing bubble as a manual
-    // summary while it is still arriving. Avoid showing a second, static
-    // copy above it before the pipeline finishes.
-    if (isPipelineSummaryGenerating.value) return ''
-    if (activeWorkspaceTab.value) {
-      const summary = currentSummaryText.value
-      return summary ? renderMarkdown(summary) : ''
-    }
-    if (result.summary) return renderedSummary.value
-    return ''
-  })
-
-  const currentInsightTitle = computed(() => String(
-    activeWorkspaceResult.value?.display_title
-      || result.display_title
-      || activeWorkspaceContent.value?.title
-      || activeWorkspaceTab.value?.title
-      || selectedContentItem.value?.title
-      || result.source_title
-      || ''
-  ).replace(/\s+/gu, ' ').trim())
-
-  // A background pipeline owns its own AI request.  Mirror that real task
-  // state into the assistant instead of pretending the sidebar is idle until
-  // the final summary is written.  This is intentionally separate from the
-  // manual “generate summary” action, which still streams through its own
-  // per-content QA session.
-  const isPipelineSummaryGenerating = computed(() => {
-    const task = activeWorkspaceResult.value
-    if (!task || !['queued', 'running'].includes(task.status)) return false
-    const progress = task.progress || {}
-    const summaryProgress = Number(progress.summarize || 0)
-    if (summaryProgress >= 100) return false
-    return task.step === 'summarize' || summaryProgress > 0
-  })
-
-  const pipelineGeneratingSummaryText = computed(() => (
-    isPipelineSummaryGenerating.value
-      ? String(activeWorkspaceResult.value?.summary || '')
-      : ''
-  ))
-
-  const currentQaEnabled = computed(() => {
-    const hasExistingContext = Boolean(
-      activeWorkspaceTranscript.value
-      || activeWorkspaceResult.value?.transcript
-      || result.transcript
-      || currentSummaryText.value
-    )
-    const readiness = activeWorkspaceContent.value?.text_readiness
-    if (readiness && readiness.can_ask_ai === false) {
-      return hasExistingContext
-    }
-    return Boolean(
-      activeWorkspaceContent.value?.id
-      || result.content_item_id
-      || hasExistingContext
-    )
-  })
-
-  const currentQaHint = computed(() => {
-    const readiness = activeWorkspaceContent.value?.text_readiness
-    if (activeWorkspaceContent.value && readiness?.can_ask_ai === false) {
-      return readiness.detail || readiness.label || '当前内容暂时没有可供追问的文本'
-    }
-    return currentQaEnabled.value ? '追问当前内容…' : '选择内容后追问'
-  })
-
-  const activeRegenerableContent = computed(() => {
-    const item = activeWorkspaceContent.value || selectedContentItem.value
-    return item?.id ? item : null
-  })
-
-  const canGenerateAiSummary = computed(() => {
-    return Boolean(
-      activeRegenerableContent.value?.id
-      && currentQaEnabled.value
-      && !isGeneratedReportDocument(activeRegenerableContent.value)
-      && !String(currentSummaryText.value || '').trim()
-    )
-  })
-
-  const currentObsidianPath = computed(() => {
-    if (activeWorkspaceTab.value) return markdownState.obsidian_path || result.obsidian_path || ''
-    return result.obsidian_path || markdownState.obsidian_path || ''
-  })
-
-  const currentSummaryText = computed(() => {
-    if (activeWorkspaceTab.value) {
-      if (isGeneratedReportDocument(activeWorkspaceContent.value)) return ''
-      return assistantSummaryFromMarkdown(markdownState.markdown) || activeWorkspaceResult.value?.summary || ''
-    }
-    if (isGeneratedReportDocument(selectedContentItem.value)) return ''
-    return result.summary || assistantSummaryFromMarkdown(markdownState.markdown)
+  const {
+    activeContentAiCalls,
+    currentInsightHtml,
+    currentInsightTitle,
+    isPipelineSummaryGenerating,
+    pipelineGeneratingSummaryText,
+    currentQaEnabled,
+    currentQaHint,
+    activeRegenerableContent,
+    canGenerateAiSummary,
+    currentObsidianPath,
+    currentSummaryText,
+  } = useAssistantWorkspaceProjectionController({
+    activeWorkspaceTab,
+    activeWorkspaceContent,
+    activeWorkspaceResult,
+    activeWorkspaceTranscript,
+    selectedContentItem,
+    markdownState,
+    result,
+    aiCallsByContentId,
+    renderMarkdown,
+    isGeneratedReportDocument,
   })
 
   const { askQuestion, regenerateQaAnswer } = useQaRequestController({

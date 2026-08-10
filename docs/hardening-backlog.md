@@ -179,7 +179,10 @@ lines.
   been removed instead of being carried into another abstraction. Markdown
   reader projection, durable source-text recovery, report classification,
   source statistics and UTF-8 size fallback now live in
-  `features/library/useMarkdownReaderController.js`;
+  `features/library/useMarkdownReaderController.js`. Active-content AI calls,
+  summary priority, pipeline summary state, QA readiness, insight title and
+  output-path projection now live in
+  `features/assistant/useAssistantWorkspaceProjectionController.js`;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,
