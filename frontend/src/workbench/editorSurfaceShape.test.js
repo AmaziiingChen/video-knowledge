@@ -10,6 +10,14 @@ const editorHostSource = await readFile(
   new URL('./EditorHost.vue', import.meta.url),
   'utf8',
 )
+const editorHostStyles = (
+  await Promise.all([
+    'editor-host-workspace.css',
+    'editor-host-documents.css',
+    'editor-host-articles.css',
+    'editor-host-transcript.css',
+  ].map((filename) => readFile(new URL(filename, import.meta.url), 'utf8')))
+).join('\n')
 const workbenchShellSource = await readFile(
   new URL('./WorkbenchShell.vue', import.meta.url),
   'utf8',
@@ -25,11 +33,11 @@ test('keeps central preview workbench surfaces square', () => {
     /:global\(\.main-canvas\)\s*\{[\s\S]*?border-radius:\s*0;/,
   )
   assert.match(
-    editorHostSource,
+    editorHostStyles,
     /\.workbench-editor-host\s*\{[\s\S]*?border-radius:\s*0;/,
   )
   assert.match(
-    editorHostSource,
+    editorHostStyles,
     /\.content-hero\.media-transcript-layout\s+\.transcript-timeline,[\s\S]*?\{[\s\S]*?border-radius:\s*0;/,
   )
 })
@@ -49,7 +57,7 @@ test('keeps Xiaohongshu captures visible as independent image and text streams',
   assert.match(editorHostSource, /shouldShowXhsImageCapturePreview\(activeContentTab\.id\)/)
   assert.match(editorHostSource, /shouldShowXhsTextCapturePreview\(activeContentTab\.id\)/)
   assert.match(editorHostSource, /content\?\.status === 'processing'/)
-  assert.match(editorHostSource, /\.xhs-capture-image-stream\s*\{/)
+  assert.match(editorHostStyles, /\.xhs-capture-image-stream\s*\{/)
   assert.match(editorHostSource, /<AiSkeletonStream[\s\S]*?label="正在读取作者文字"/)
   assert.match(aiSkeletonStreamSource, /ai-skeleton-stream-shimmer/)
 })
@@ -62,5 +70,12 @@ test('uses a native media spinner instead of skeleton text over a video cover', 
   assert.match(coverPreview, /class="media-preview-loader"/)
   assert.match(coverPreview, /class="media-preview-spinner"/)
   assert.doesNotMatch(coverPreview, /AiSkeletonStream/)
-  assert.match(editorHostSource, /@keyframes media-preview-spin/)
+  assert.match(editorHostStyles, /@keyframes media-preview-spin/)
+})
+
+test('keeps the EditorHost scoped style domains in their original cascade order', () => {
+  assert.match(
+    editorHostSource,
+    /<style scoped src="\.\/editor-host-workspace\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-documents\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-articles\.css"><\/style>[\s\S]*?<style scoped src="\.\/editor-host-transcript\.css"><\/style>/,
+  )
 })

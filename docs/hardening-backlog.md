@@ -229,7 +229,11 @@ lines.
   `workbench/editorReportPresentation.js` with pure formatting tests. Article
   outline filtering and visual hierarchy now live in
   `workbench/articleOutlineModel.js` with pure boundary tests. Report, article
-  and media readers still need their own mounted behavior boundaries.
+  and media readers still need their own mounted behavior boundaries. The
+  former 1,907-line scoped style block now preserves its exact cascade through
+  four co-located domains: `editor-host-workspace.css`,
+  `editor-host-documents.css`, `editor-host-articles.css` and
+  `editor-host-transcript.css`.
 - [x] Extract report-generation SSE decoding from `App.vue`; preserve local
   capability headers, fragmented event handling and explicit server errors in
   `features/reports/reportEventStream.js` with protocol-level tests.
