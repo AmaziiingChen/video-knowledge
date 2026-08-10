@@ -18,19 +18,17 @@ from services.cache import (
     write_cached_transcript_segments,
     write_cache_meta,
     write_cached_subtitle_transcript,
-    write_cached_transcript,
 )
 from services.article_fetcher import fetch_article
 from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_article_html
 from services.bilibili_context import fetch_bilibili_source_context
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
 from services.pipeline_asr_policy import (
-    ASR_MODEL_STRATEGIES,
-    WHISPER_MODELS,  # noqa: F401 - public compatibility re-export
+    ASR_MODEL_STRATEGIES, WHISPER_MODELS,  # noqa: F401 - public compatibility re-exports
     duration_from_info as _duration_from_info,
     normalize_asr_options as _normalize_asr_options,
     resolve_asr_model as _resolve_asr_model,
-    valid_whisper_model as _valid_whisper_model,
+    validate_asr_configuration,
 )
 from services.pipeline_cached_text import PipelineCachedTextRestorer
 from services.pipeline_contracts import (
@@ -63,6 +61,7 @@ from services.pipeline_stored_article import (
     prepare_stored_article,
     run_prepared_stored_article,
 )
+from services.pipeline_transcription import PipelineTranscriptionError, transcribe_pipeline_media
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.content_source_text import (
     _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
@@ -263,16 +262,12 @@ def run_pipeline_sync(
         return response
 
     try:
-        if asr_options["backend"] not in ASR_BACKENDS:
-            add_log("config", f"不支持的语音识别后端: {asr_options['backend']}", "error")
-            return fail("config", f"不支持的语音识别后端: {asr_options['backend']}")
-        if asr_options["strategy"] not in ASR_MODEL_STRATEGIES:
-            add_log("config", f"不支持的模型策略: {asr_options['strategy']}", "error")
-            return fail("config", f"不支持的模型策略: {asr_options['strategy']}")
-        for model in {asr_options["initial_model"], asr_options["short_model"], asr_options["long_model"], selected_model}:
-            if model and not _valid_whisper_model(model):
-                add_log("config", f"不支持的 Whisper 模型: {model}", "error")
-                return fail("config", f"不支持的 Whisper 模型: {model}")
+        asr_config_error = validate_asr_configuration(
+            asr_options, selected_model=selected_model, supported_backends=ASR_BACKENDS
+        )
+        if asr_config_error:
+            add_log("config", asr_config_error, "error")
+            return fail("config", asr_config_error)
 
         # Clipboard and integrations may create a generic task directly,
         # without first creating an inbox item. XHS image notes require an
@@ -773,75 +768,23 @@ def run_pipeline_sync(
                     publish()
                     return response
 
-                check_cancel()
-                if local_media_is_audio:
-                    # Never run ffmpeg with a WAV source and identical output:
-                    # that can overwrite the user-retained original. The ASR
-                    # backend accepts the uploaded audio file directly.
-                    audio_path = video_path
-                    response.timings["extract_audio"] = 0.0
-                    complete_stage("extract_audio")
-                    add_log("extract_audio", "本地音频已就绪，跳过音频提取", "success", 0.0)
-                else:
-                    audio_path = video_path.with_suffix(".wav")
-                    extract_start = time.perf_counter()
-                    add_log("extract_audio", "提取音频...")
-                    set_progress("extract_audio", 30)
-                    audio_result = extract_audio_with_details(
+                try:
+                    transcript, transcript_segments = transcribe_pipeline_media(
                         video_path,
-                        audio_path,
-                        progress_callback=lambda percent: set_progress("extract_audio", 30 + percent * 0.7),
-                        cancel_check=cancel_check,
+                        local_media_is_audio=local_media_is_audio,
+                        selected_model=selected_model,
+                        asr_options=asr_options,
+                        subtitle_fallback_reason=subtitle_fallback_reason,
+                        cache_dir=cache_dir,
+                        response=response,
+                        reporter=reporter,
+                        check_cancel=check_cancel,
+                        provider_cancel_check=cancel_check,
+                        extract_audio=extract_audio_with_details,
+                        transcribe=transcribe_with_details,
                     )
-                    response.timings["extract_audio"] = round(audio_result.elapsed_seconds or _elapsed(extract_start), 2)
-                    if getattr(audio_result, "cancelled", False) or (cancel_check and cancel_check()):
-                        raise PipelineCancelled()
-                    if not audio_result.success:
-                        error = audio_result.error or "音频提取失败"
-                        add_log("extract_audio", error, "error", response.timings["extract_audio"])
-                        return fail("extract_audio", error)
-                    complete_stage("extract_audio")
-                    add_log("extract_audio", "音频提取完成", "success", response.timings["extract_audio"])
-
-                check_cancel()
-                transcribe_start = time.perf_counter()
-                add_log("transcribe", f"开始语音识别（后端: {asr_options['backend']}，模型: {selected_model}，可能需要几分钟）...")
-                transcribe_result = transcribe_with_details(
-                    audio_path,
-                    selected_model,
-                    progress_callback=lambda percent: set_progress("transcribe", percent),
-                    backend=asr_options["backend"],
-                    beam_size=asr_options["beam_size"],
-                    vad_filter=asr_options["vad_filter"],
-                    fallback_enabled=asr_options["fallback_enabled"],
-                )
-                if not local_media_is_audio:
-                    audio_path.unlink(missing_ok=True)
-                response.timings["transcribe"] = _elapsed(transcribe_start)
-                for key, value in transcribe_result.timings.items():
-                    response.timings[key] = round(value, 2)
-
-                if not transcribe_result.success:
-                    error = transcribe_result.error or "转写失败"
-                    add_log("transcribe", error, "error", response.timings["transcribe"])
-                    return fail("transcribe", error)
-
-                transcript = transcribe_result.transcript
-                transcript_segments = getattr(transcribe_result, "segments", [])
-                actual_backend = getattr(transcribe_result, "backend", "")
-                response.asr_backend = actual_backend or response.asr_backend
-                text_source_backend = "faster-whisper" if actual_backend in {"", "faster_whisper"} else actual_backend
-                response.text_source = TextSourceInfo(
-                    kind="asr",
-                    source=text_source_backend,
-                    detail=f"Whisper {selected_model}",
-                    fallback_reason=subtitle_fallback_reason,
-                )
-                # Keep the compact text source even when large media caching
-                # is disabled; the content document is saved immediately
-                # afterwards and loads this transcript by content identity.
-                write_cached_transcript(cache_dir, selected_model, transcript)
-                write_cached_transcript_segments(cache_dir, selected_model, transcript_segments)
+                except PipelineTranscriptionError as exc:
+                    return fail(exc.step, str(exc))
 
         response.transcript = transcript
         complete_stage("transcribe")

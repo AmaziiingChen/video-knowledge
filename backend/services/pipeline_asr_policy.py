@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from config import settings
 
-
 WHISPER_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 ASR_MODEL_STRATEGIES = {"smart", "manual"}
 SMART_SHORT_VIDEO_SECONDS = 180
@@ -12,6 +11,28 @@ SMART_SHORT_VIDEO_SECONDS = 180
 
 def valid_whisper_model(model_name: str | None) -> bool:
     return bool(model_name and model_name in WHISPER_MODELS)
+
+
+def validate_asr_configuration(
+    options: dict,
+    *,
+    selected_model: str,
+    supported_backends: set[str],
+) -> str | None:
+    backend = options["backend"]
+    if backend not in supported_backends:
+        return f"不支持的语音识别后端: {backend}"
+    strategy = options["strategy"]
+    if strategy not in ASR_MODEL_STRATEGIES:
+        return f"不支持的模型策略: {strategy}"
+    models = {
+        options["initial_model"],
+        options["short_model"],
+        options["long_model"],
+        selected_model,
+    }
+    invalid_model = next((model for model in models if model and not valid_whisper_model(model)), None)
+    return f"不支持的 Whisper 模型: {invalid_model}" if invalid_model else None
 
 
 def duration_from_info(video_info: dict | None) -> float | None:

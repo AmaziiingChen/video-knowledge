@@ -322,6 +322,11 @@ lines.
   parsing, download and ASR orchestration. The same boundary now owns
   transcript-only completion, article summarization, summary persistence and
   best-effort search indexing for those stored documents.
+  Audio extraction, retained-audio protection, cancellation checkpoints, ASR
+  execution, backend attribution and compact transcript caching now live in
+  `services/pipeline_transcription.py`. ASR configuration validation remains
+  in `services/pipeline_asr_policy.py`, while the runner preserves its public
+  strategy/model exports.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and
