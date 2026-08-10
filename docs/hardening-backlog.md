@@ -70,7 +70,9 @@ lines.
   index rebuild orchestration and public chunker-version entry point. Embedding
   API transport, vector normalization and source-hash-guarded persistence now
   live in `services/knowledge_embedding_runtime.py`, while the embedding batch
-  budget and API-facing entry point remain in the index orchestrator.
+  budget and API-facing entry point remain in the index orchestrator. Source
+  set listing, paged ready-document projection, strict selection validation and
+  query-readiness statistics now live in `services/knowledge_source_catalog.py`.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
