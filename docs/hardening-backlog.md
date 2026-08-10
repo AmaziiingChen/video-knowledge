@@ -306,6 +306,10 @@ lines.
   Subtitle and ASR cache restoration now share
   `services/pipeline_cached_text.py`, returning transcript state explicitly
   instead of mutating two near-duplicate nested closures.
+  Shared single-download admission, waiting cancellation, transfer forwarding
+  and live provider-log de-duplication now live in
+  `services/pipeline_media_download.py`; the runner retains its injectable
+  downloader seam for existing integrations and tests.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and

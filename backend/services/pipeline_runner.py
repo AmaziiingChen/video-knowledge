@@ -6,7 +6,6 @@ from pathlib import Path
 import time
 import uuid
 from collections.abc import Callable
-from threading import BoundedSemaphore
 from types import SimpleNamespace
 
 from config import settings
@@ -48,7 +47,6 @@ from services.pipeline_contracts import (
 )
 from services.pipeline_progress_rules import (
     elapsed as _elapsed,
-    level_from_message as _level_from_message,
 )
 from services.pipeline_content_updates import (
     prepare_preview_thumbnails as _ensure_preview_thumbnails,
@@ -59,6 +57,7 @@ from services.pipeline_local_media_policy import (
     is_managed_local_media as _is_managed_local_media,
     is_under_data_dir as _is_under_data_dir,
 )
+from services.pipeline_media_download import download_media_with_live_logs
 from services.pipeline_run_reporter import PipelineRunReporter
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.content_source_text import (
@@ -81,10 +80,6 @@ from services.video_download_settings import should_auto_download_bilibili_video
 
 
 LOCAL_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".opus"}
-# A desktop can keep one network transfer moving while the previous file is
-# transcribed, but competing yt-dlp/browser downloads make both less reliable
-# and saturate the local network. Every pipeline path shares this one slot.
-_media_download_semaphore = BoundedSemaphore(1)
 ProgressCallback = Callable[[PipelineResponse], None]
 CancelCheck = Callable[[], bool]
 
@@ -155,45 +150,6 @@ def run_pipeline_sync(
     remember_ai_call = reporter.remember_ai_call
     publish_summary_delta = reporter.publish_summary_delta
 
-    def download_with_live_logs(url: str, platform: str, output_dir: Path):
-        """Run a media provider while forwarding provider milestones promptly.
-
-        Download adapters still return their complete log for durable task
-        history.  Keeping a count of lines already published avoids showing
-        the same milestone twice when the adapter returns.
-        """
-        published_counts: dict[str, int] = {}
-        waiting_for_download_slot = False
-
-        while not _media_download_semaphore.acquire(timeout=0.12):
-            check_cancel()
-            if not waiting_for_download_slot:
-                waiting_for_download_slot = True
-                add_log("download", "等待上一条视频下载完成…")
-
-        def publish_download_log(message: str) -> None:
-            published_counts[message] = published_counts.get(message, 0) + 1
-            add_log("download", message, _level_from_message(message))
-
-        try:
-            download_result = download_video(
-                url,
-                platform,
-                output_dir,
-                progress_callback=set_download_transfer,
-                cancel_check=cancel_check,
-                log_callback=publish_download_log,
-            )
-        finally:
-            _media_download_semaphore.release()
-        for line in download_result.logs:
-            remaining = published_counts.get(line, 0)
-            if remaining:
-                published_counts[line] = remaining - 1
-                continue
-            add_log("download", line, _level_from_message(line))
-        return download_result
-
     def check_cancel() -> None:
         if cancel_check and cancel_check():
             raise PipelineCancelled()
@@ -239,10 +195,15 @@ def run_pipeline_sync(
         preview_download_started_at = time.perf_counter()
         preview_download_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bilibili-preview")
         preview_download_future = preview_download_executor.submit(
-            download_with_live_logs,
+            download_media_with_live_logs,
             parsed.url,
             parsed.platform,
             output_dir,
+            add_log=add_log,
+            set_download_transfer=set_download_transfer,
+            check_cancel=check_cancel,
+            provider_cancel_check=cancel_check,
+            downloader=download_video,
         )
 
     def finish_parallel_bilibili_preview_download() -> None:
@@ -842,7 +803,16 @@ def run_pipeline_sync(
                 else:
                     download_start = time.perf_counter()
                     add_log("download", "开始下载视频...")
-                    dl_result = download_with_live_logs(parsed.url, parsed.platform, output_dir)
+                    dl_result = download_media_with_live_logs(
+                        parsed.url,
+                        parsed.platform,
+                        output_dir,
+                        add_log=add_log,
+                        set_download_transfer=set_download_transfer,
+                        check_cancel=check_cancel,
+                        provider_cancel_check=cancel_check,
+                        downloader=download_video,
+                    )
 
                     response.timings["download"] = _elapsed(download_start)
                     if not dl_result.success or not dl_result.video_path:
