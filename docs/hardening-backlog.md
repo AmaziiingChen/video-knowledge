@@ -313,6 +313,9 @@ lines.
   Best-effort Bilibili/Douyin interaction refresh, cache reuse and durable
   content attachment now share `services/pipeline_source_context.py`; provider
   failures remain non-fatal and the runner keeps both fetchers injectable.
+  Authorized local subtitle/audio/video path validation, subtitle parsing,
+  compact cache preparation and retained-media metadata now live in
+  `services/pipeline_local_inputs.py`; stage reporting remains in the runner.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and

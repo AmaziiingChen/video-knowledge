@@ -6,7 +6,6 @@ from pathlib import Path
 import time
 import uuid
 from collections.abc import Callable
-from types import SimpleNamespace
 
 from config import settings
 from services.cache import (
@@ -53,10 +52,9 @@ from services.pipeline_content_updates import (
     set_content_status as _set_content_status,
     set_content_title as _set_content_title,
 )
-from services.pipeline_local_media_policy import (
-    is_managed_local_media as _is_managed_local_media,
-    is_under_data_dir as _is_under_data_dir,
-)
+from services.pipeline_local_inputs import LocalInputError, prepare_local_media, prepare_local_subtitle
+from services.pipeline_local_media_policy import is_managed_local_media as _is_managed_local_media
+from services.pipeline_local_media_policy import is_under_data_dir as _is_under_data_dir
 from services.pipeline_media_download import download_media_with_live_logs
 from services.pipeline_run_reporter import PipelineRunReporter
 from services.pipeline_source_context import refresh_pipeline_source_context
@@ -73,13 +71,12 @@ from services.markdown_sync import replace_content_summary_and_sync, save_markdo
 from services.search_index import upsert_search_document
 from services.source_context_store import save_source_context
 from services.summarizer import generate_article_markdown, generate_markdown, summarize, summarize_stream
-from services.subtitles import SUBTITLE_EXTENSIONS, fetch_bilibili_subtitle, parse_subtitle_text
+from services.subtitles import fetch_bilibili_subtitle, parse_subtitle_text
 from services.transcriber import ASR_BACKENDS, extract_audio_with_details, transcribe_with_details
 from services.url_parser import parse_share_text, redact_sensitive_url
 from services.video_download_settings import should_auto_download_bilibili_video
 
 
-LOCAL_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".opus"}
 ProgressCallback = Callable[[PipelineResponse], None]
 CancelCheck = Callable[[], bool]
 
@@ -408,46 +405,31 @@ def run_pipeline_sync(
 
         if local_subtitle_path:
             check_cancel()
-            local_path = Path(local_subtitle_path).expanduser().resolve()
-            if not _is_managed_local_media(local_path, content_item_id=content_item_id):
-                add_log("parse", "本地字幕必须位于 data 目录下", "error")
-                return fail("parse", "本地字幕必须位于 data 目录下")
-            if not local_path.exists() or not local_path.is_file():
-                add_log("parse", "本地字幕文件不存在", "error")
-                return fail("parse", "本地字幕文件不存在")
-            if local_path.suffix.lower() not in SUBTITLE_EXTENSIONS:
-                add_log("parse", f"不支持的字幕格式: {local_path.suffix}", "error")
-                return fail("parse", f"不支持的字幕格式: {local_path.suffix}")
-
-            transcript = parse_subtitle_text(
-                local_path.read_text(encoding="utf-8", errors="replace"),
-                local_path.suffix,
-            )
-            if not transcript:
-                add_log("transcribe", "字幕文件为空或无法解析", "error")
-                return fail("transcribe", "字幕文件为空或无法解析")
-
-            parsed = SimpleNamespace(
-                url=source_url or f"local://{local_path.name}",
-                platform="subtitle",
-            )
-            cache_dir = cache_dir_for_url(parsed.url)
-            write_cached_subtitle_transcript(cache_dir, transcript)
-            video_info = {
-                "title": source_title or local_path.stem,
-                "platform": "subtitle",
-                "duration": 0,
-            }
+            try:
+                prepared_subtitle = prepare_local_subtitle(
+                    local_subtitle_path,
+                    source_url=source_url,
+                    source_title=source_title,
+                    content_item_id=content_item_id,
+                    authorize=_is_managed_local_media,
+                    parse_subtitle=parse_subtitle_text,
+                    resolve_cache_dir=cache_dir_for_url,
+                    cache_subtitle=write_cached_subtitle_transcript,
+                )
+            except LocalInputError as exc:
+                add_log(exc.step, str(exc), "error")
+                return fail(exc.step, str(exc))
+            local_path = prepared_subtitle.path
+            parsed = prepared_subtitle.source
+            cache_dir = prepared_subtitle.cache_dir
+            transcript = prepared_subtitle.transcript
+            video_info = prepared_subtitle.video_info
             use_cache = False
             text_ready = True
             response.url = parsed.url
             response.platform = parsed.platform
             response.transcript = transcript
-            response.text_source = TextSourceInfo(
-                kind="subtitle",
-                source="manual",
-                detail=local_path.name,
-            )
+            response.text_source = prepared_subtitle.text_source
             response.timings["parse"] = 0.0
             response.timings["info"] = 0.0
             response.timings["download"] = 0.0
@@ -463,36 +445,33 @@ def run_pipeline_sync(
             add_log("transcribe", f"字幕解析完成（{len(transcript)} 字）", "success", 0.0)
         elif local_video_path:
             check_cancel()
-            local_path = Path(local_video_path).expanduser().resolve()
             # Imported originals may be deliberately retained beside the
             # external Markdown library (for example an Obsidian vault), not
             # below the private data directory.  Accept only application
             # managed attachments or the exact original registered for this
             # content item; never open an arbitrary local path from a task.
-            if not _is_managed_local_media(local_path, content_item_id=content_item_id):
-                message = "本地媒体不在应用管理的 data 或附件目录中"
-                add_log("parse", message, "error")
-                return fail("parse", message)
-            if not local_path.exists() or not local_path.is_file():
-                add_log("parse", "本地视频文件不存在", "error")
-                return fail("parse", "本地视频文件不存在")
-            local_media_is_audio = local_path.suffix.lower() in LOCAL_AUDIO_EXTENSIONS
-
-            parsed = SimpleNamespace(
-                url=source_url or f"local://{local_path.name}",
-                platform="local",
-            )
+            try:
+                prepared_media = prepare_local_media(
+                    local_video_path,
+                    source_url=source_url,
+                    source_title=source_title,
+                    content_item_id=content_item_id,
+                    authorize=_is_managed_local_media,
+                    resolve_cache_dir=cache_dir_for_url,
+                    read_duration=media_duration_seconds,
+                )
+            except LocalInputError as exc:
+                add_log(exc.step, str(exc), "error")
+                return fail(exc.step, str(exc))
+            local_path = prepared_media.path
+            local_media_is_audio = prepared_media.is_audio
+            parsed = prepared_media.source
             # A retranscription deliberately skips media reuse, but its new
             # transcript must still be written beside the retained source
             # video.  Without this, cache_dir remains None and the cache
             # writer fails after ASR has already completed.
-            cache_dir = cache_dir_for_url(parsed.url)
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            video_info = {
-                "title": source_title or local_path.stem,
-                "platform": "local",
-                "duration": media_duration_seconds(local_path) or 0,
-            }
+            cache_dir = prepared_media.cache_dir
+            video_info = prepared_media.video_info
             use_cache = False
             cached_video = local_path
             response.url = parsed.url
