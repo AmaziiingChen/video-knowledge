@@ -87,6 +87,9 @@ lines.
   source splitting now live in `services/campus_digest_payloads.py`. The
   SQLite fact-card cache now lives in `services/campus_digest_fact_cache.py`,
   validating source hashes and card schema before returning cached projections.
+  Fact-card extraction now lives in
+  `services/campus_digest_fact_extraction.py`, retaining source-order output,
+  retry behavior, chunk-safe model calls and cache invalidation.
   Candidate material construction, deterministic pair rules and cluster-member
   similarity now live in `services/campus_digest_cluster_rules.py`; model
   relation review and SQLite cluster persistence remain in the generator.

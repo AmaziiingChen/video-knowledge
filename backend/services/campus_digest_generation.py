@@ -23,17 +23,15 @@ from services.campus_digest_editorial import (
     write_category_section as _write_category_section,
     write_overview as _write_overview,
 )
-from services.campus_digest_fact_cache import (
-    load_cached_facts as _load_cached_fact_cards,
-    save_fact_cards as _save_cached_fact_cards,
+from services.campus_digest_fact_extraction import (
+    FactCardSettings,
+    parse_fact_card as _parse_fact_card_with_settings,
+    prepare_fact_cards as _prepare_fact_cards_with_settings,
 )
-from services.campus_digest_identity import source_hash as _source_hash
 from services.campus_digest_payloads import (
     one_line as _one_line,
     parse_event_brief as _parse_event_brief_payload,
-    parse_fact_card as _parse_fact_card_payload,
     parse_json_object as _parse_json_object,
-    split_text_in_order as _split_text_in_order,
     string_list as _string_list,
 )
 from services.campus_digest_progress import DigestProgressCallback, emit_progress as _emit_progress
@@ -41,11 +39,8 @@ from services.database import connect, utc_now_iso
 from services.llm_provider import LLMMessage, LLMProvider, default_llm_provider
 from services.prompt_file_store import managed_prompt_text
 
-FACT_PROMPT_VERSION = "campus-publishing-card-v2"
 RELATION_PROMPT_VERSION = "campus-event-relation-v1"
 BRIEF_PROMPT_VERSION = "campus-event-brief-v1"
-FACT_SOURCE_CHUNK_CHARS = 32_000
-FACT_WORKERS = 5
 BRIEF_WORKERS = 4
 SECTION_WORKERS = 3
 CAMPUS_CATEGORIES = (
@@ -138,6 +133,20 @@ FACT_SYSTEM_PROMPT = f"""你负责把一篇深圳技术大学校园文章转换�
 
 结构：
 {FACT_CARD_SCHEMA}"""
+
+
+_FACT_CARD_SETTINGS = FactCardSettings(
+    prompt_version="campus-publishing-card-v2",
+    source_chunk_chars=32_000,
+    workers=5,
+    schema=FACT_CARD_SCHEMA,
+    system_prompt=lambda: managed_prompt_text("campus_fact_card", FACT_SYSTEM_PROMPT),
+    categories=CAMPUS_CATEGORIES,
+    content_decisions=CONTENT_DECISIONS,
+    document_types=DOCUMENT_TYPES,
+    event_stages=EVENT_STAGES,
+    include_decisions=_INCLUDE_DECISIONS,
+)
 
 
 RELATION_SYSTEM_PROMPT = f"""你负责判断两篇校园文章是否属于同一份内容的转载或近似改版，不负责写报告。
@@ -574,142 +583,19 @@ def _prepare_fact_cards(
     progress_callback: DigestProgressCallback | None,
     tracking_task_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    hashes = {source.content_item_id: _source_hash(source.material) for source in sources}
-    model_name = provider.model if provider is not None else "deepseek-v4-flash"
-    cached = _load_cached_facts(sources, hashes, model_name) if use_cache else {}
-    cards = dict(cached)
-    missing = [source for source in sources if source.content_item_id not in cards]
-    _emit_progress(
-        progress_callback,
-        "report_facts",
-        f"事实卡缓存命中 {len(cached)} 篇，待分析 {len(missing)} 篇",
-        8,
+    return _prepare_fact_cards_with_settings(
+        sources,
+        provider=provider,
+        use_cache=use_cache,
+        progress_callback=progress_callback,
+        tracking_task_id=tracking_task_id,
+        settings=_FACT_CARD_SETTINGS,
+        chat_json=_chat_json,
     )
-
-    def extract(source: CampusDigestSource) -> tuple[CampusDigestSource, dict[str, Any], str]:
-        last_error: Exception | None = None
-        for attempt in range(2):
-            base_worker = provider or default_llm_provider("deepseek-v4-flash:enabled")
-            worker = tracked_llm_provider(
-                base_worker,
-                call_type="campus_report",
-                task_id=tracking_task_id,
-            ) if tracking_task_id else base_worker
-            try:
-                return source, _extract_fact_card(source, provider=worker), worker.model
-            except Exception as exc:
-                last_error = exc
-                if attempt == 0:
-                    _emit_progress(
-                        progress_callback,
-                        "report_facts",
-                        f"《{source.title}》事实提取失败，正在重试：{exc}",
-                        8,
-                        level="warn",
-                    )
-        assert last_error is not None
-        raise last_error
-
-    failures: list[tuple[str, str]] = []
-    completed: list[tuple[CampusDigestSource, dict[str, Any], str]] = []
-    if missing:
-        max_workers = 1 if provider is not None else min(FACT_WORKERS, len(missing))
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="campus-fact-card") as executor:
-            futures = {executor.submit(extract, source): source for source in missing}
-            for completed_count, future in enumerate(as_completed(futures), start=1):
-                source = futures[future]
-                try:
-                    completed_source, card, used_model = future.result()
-                    cards[completed_source.content_item_id] = card
-                    completed.append((completed_source, card, used_model))
-                    if completed_count == len(missing) or completed_count % 10 == 0:
-                        _emit_progress(
-                            progress_callback,
-                            "report_facts",
-                            f"事实卡已完成 {len(cached) + completed_count}/{len(sources)}",
-                            8 + 27 * completed_count / max(1, len(missing)),
-                        )
-                except Exception as exc:
-                    failures.append((source.title, str(exc)))
-                    _emit_progress(
-                        progress_callback,
-                        "report_facts",
-                        f"《{source.title}》事实提取最终失败：{exc}",
-                        8 + 27 * completed_count / max(1, len(missing)),
-                        level="error",
-                    )
-    if completed and use_cache:
-        _save_fact_cards(completed, hashes)
-    if failures:
-        preview = "、".join(title for title, _ in failures[:3])
-        suffix = "等" if len(failures) > 3 else ""
-        raise ValueError(f"有 {len(failures)} 篇文章未能完成校园事实提取：{preview}{suffix}")
-    return [cards[source.content_item_id] for source in sources]
-
-
-def _extract_fact_card(source: CampusDigestSource, *, provider: LLMProvider) -> dict[str, Any]:
-    material = source.material.strip()
-    if len(material) <= FACT_SOURCE_CHUNK_CHARS:
-        return _extract_fact_card_once(source, material, provider=provider)
-    partial = [
-        _extract_fact_card_once(source, chunk, provider=provider)
-        for chunk in _split_text_in_order(material, FACT_SOURCE_CHUNK_CHARS)
-    ]
-    prompt = (
-        "将同一篇文章的分段事实卡合并。去重但保留互不重复的正文、OCR和附件事实；"
-        "广告决定取最严格结果：全篇广告才 exclude_ad，事实与广告并存则 mixed。不得新增事实。\n\n"
-        f"JSON结构：\n{FACT_CARD_SCHEMA}\n\n"
-        f"分段事实卡：\n{json.dumps(partial, ensure_ascii=False)}"
-    )
-    return _parse_fact_card(_chat_json(provider, managed_prompt_text("campus_fact_card", FACT_SYSTEM_PROMPT), prompt, temperature=0.0))
-
-
-def _extract_fact_card_once(
-    source: CampusDigestSource,
-    material: str,
-    *,
-    provider: LLMProvider,
-) -> dict[str, Any]:
-    prompt = (
-        "<source_metadata>\n"
-        f"标题：{source.title}\n发布来源：{source.publisher}\n来源渠道：{source.source_channel}\n"
-        f"来源栏目：{source.source_section}\n发布日期：{source.published_at}\n原文链接：{source.source_url}\n"
-        "</source_metadata>\n\n"
-        f"<article_material>\n{material}\n</article_material>"
-    )
-    return _parse_fact_card(_chat_json(provider, managed_prompt_text("campus_fact_card", FACT_SYSTEM_PROMPT), prompt, temperature=0.05))
 
 
 def _parse_fact_card(raw: str | dict[str, Any]) -> dict[str, Any]:
-    return _parse_fact_card_payload(
-        raw,
-        categories=CAMPUS_CATEGORIES,
-        content_decisions=CONTENT_DECISIONS,
-        document_types=DOCUMENT_TYPES,
-        event_stages=EVENT_STAGES,
-        include_decisions=_INCLUDE_DECISIONS,
-    )
-
-
-def _load_cached_facts(
-    sources: list[CampusDigestSource],
-    hashes: dict[str, str],
-    model: str,
-) -> dict[str, dict[str, Any]]:
-    return _load_cached_fact_cards(
-        sources,
-        hashes,
-        model,
-        prompt_version=FACT_PROMPT_VERSION,
-        parse_card=_parse_fact_card,
-    )
-
-
-def _save_fact_cards(
-    records: list[tuple[CampusDigestSource, dict[str, Any], str]],
-    hashes: dict[str, str],
-) -> None:
-    _save_cached_fact_cards(records, hashes, prompt_version=FACT_PROMPT_VERSION)
+    return _parse_fact_card_with_settings(raw, settings=_FACT_CARD_SETTINGS)
 
 
 def _prepare_embeddings(
