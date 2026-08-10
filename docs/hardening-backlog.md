@@ -219,6 +219,12 @@ lines.
   live in `services/pipeline_asr_policy.py`.
   Timing, percentage bounding and log-level classification now live in
   `services/pipeline_progress_rules.py`.
+- [ ] Split `downloader.py` by platform transport and pure media policy.
+  Douyin URL classification, strict media-host ownership, credential-free
+  browser header forwarding, signed-URL refresh decisions, payload lookup and
+  quality/bitrate selection now live in `services/douyin_media_rules.py`;
+  browser execution, cookies, downloads, cancellation and retries remain in
+  the downloader orchestrator.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now
