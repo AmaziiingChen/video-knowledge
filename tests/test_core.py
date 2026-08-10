@@ -4625,7 +4625,7 @@ class PipelineApiTests(unittest.TestCase):
                     timings={"whisper_model_load": 0.1, "whisper_decode": 0.2},
                 )
                 with (
-                    patch("services.pipeline_runner.attachments_root", return_value=attachment_root),
+                    patch("services.pipeline_local_media_policy.attachments_root", return_value=attachment_root),
                     patch("services.pipeline_runner.media_duration_seconds", return_value=8),
                     patch("services.pipeline_runner.extract_audio_with_details") as extract_audio,
                     patch("services.pipeline_runner.transcribe_with_details", return_value=transcribe_result),

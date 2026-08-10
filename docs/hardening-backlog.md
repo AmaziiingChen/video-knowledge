@@ -284,7 +284,10 @@ lines.
   `content_source_text.py` policy while retaining its non-mapping guard.
   Best-effort content status/title updates and preview-thumbnail preparation
   now live in `services/pipeline_content_updates.py`, separating those durable
-  side effects from the main execution flow.
+  side effects from the main execution flow. Managed local-media authorization
+  now lives in `services/pipeline_local_media_policy.py`; data and attachment
+  roots are compared after path resolution so parent traversal and escaping
+  symlinks fail closed, while exact database-owned originals remain compatible.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and

@@ -57,8 +57,11 @@ from services.pipeline_content_updates import (
     set_content_status as _set_content_status,
     set_content_title as _set_content_title,
 )
+from services.pipeline_local_media_policy import (
+    is_managed_local_media as _is_managed_local_media,
+    is_under_data_dir as _is_under_data_dir,
+)
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
-from services.knowledge_library import attachments_root
 from services.content_source_text import (
     _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
     load_content_source_text,
@@ -101,38 +104,6 @@ SUMMARY_PUBLISH_INTERVAL_SECONDS = 0.025
 
 ProgressCallback = Callable[[PipelineResponse], None]
 CancelCheck = Callable[[], bool]
-
-
-def _is_under_data_dir(path: Path) -> bool:
-    try:
-        path.relative_to(settings.data_dir.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-def _is_managed_local_media(path: Path, *, content_item_id: str | None = None) -> bool:
-    """Allow cache/data media and only the original attachment of this item."""
-    if _is_under_data_dir(path):
-        return True
-    try:
-        path.relative_to(attachments_root().resolve())
-        return True
-    except ValueError:
-        pass
-    if not content_item_id:
-        return False
-    try:
-        initialize_database()
-        with connect() as connection:
-            row = connection.execute(
-                """SELECT 1 FROM media_assets
-                   WHERE content_item_id=? AND asset_type='original_file' AND path=? LIMIT 1""",
-                (content_item_id, str(path)),
-            ).fetchone()
-        return row is not None
-    except Exception:
-        return False
 
 
 def run_pipeline_sync(
