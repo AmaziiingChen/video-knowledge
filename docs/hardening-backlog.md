@@ -127,7 +127,10 @@ lines.
   Task status, status-bar, progress, log-level and display-label presentation
   now live in `features/tasks/taskDisplayPresentation.js` with pure boundary
   tests; queue transport and durable task mutation remain in their existing
-  controllers.
+  controllers. Workspace tab opening, selection hydration, close selection,
+  reveal and recycle-bin dispatch now live in
+  `features/workspace/useWorkspaceTabController.js`; task runtime remains the
+  owner of progressive content refresh decisions.
 - [ ] Split `SecondarySidebar.vue` into conversation, composer and task-status
   surfaces. Its model normalization, shortcut filtering, empty state, external
   citation, OCR hint and text-preview rules now live in

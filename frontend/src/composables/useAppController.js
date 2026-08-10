@@ -14,10 +14,6 @@ import {
   timingOrder
 } from '../config/workbenchOptions'
 import { promptTemplateDisplayName, promptTemplatePersistedName } from '../config/promptInterface'
-import {
-  makeContentTab,
-  tabIdForContent
-} from '../workbench/workspaceModel'
 import { qaHistoryForPrompt, savedQaHistoryItems } from '../features/assistant/qaHistory'
 import { matchQaShortcut } from '../features/assistant/qaShortcutMatcher'
 import {
@@ -73,6 +69,7 @@ import { useOpenClawController } from '../features/integrations/useOpenClawContr
 import { useQaSessionController } from '../features/assistant/useQaSessionController.js'
 import { useSelectedTextContext } from '../features/assistant/useSelectedTextContext.js'
 import { useWorkspaceState } from '../features/workspace/useWorkspaceState.js'
+import { useWorkspaceTabController } from '../features/workspace/useWorkspaceTabController.js'
 import { useWorkspaceTabProjectionController } from '../features/workspace/useWorkspaceTabProjectionController.js'
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
@@ -385,6 +382,30 @@ export function useAppController() {
     allContentItems,
     selectedContentItem,
     applyContentFilter,
+  })
+  const {
+    openContentTab,
+    activateWorkspaceTab,
+    closeWorkspaceTab,
+    closeWorkspaceTabs,
+    revealWorkspaceTabLocation,
+    deleteWorkspaceTabContent,
+    syncActiveWorkspaceTabSelection,
+    syncCompletedTaskContent,
+    syncTaskTabMetadata,
+  } = useWorkspaceTabController({
+    workspaceTabs,
+    activeWorkspaceTabId,
+    activeView,
+    allContentItems,
+    selectedContentItem,
+    getContentItemDetail,
+    selectContentItem,
+    resetMarkdownState,
+    detachQaSession,
+    revealLibraryNodeLocation,
+    deleteContentItem,
+    notify: ElMessage,
   })
   const {
     loadCompletionNotifications,
@@ -1104,130 +1125,6 @@ export function useAppController() {
     if (content) {
       openContentTab(content)
     }
-  }
-
-  async function openContentTab(item) {
-    if (!item?.id) return
-    const tabId = tabIdForContent(item.id)
-    const existing = workspaceTabs.value.find((tab) => tab.id === tabId)
-    if (existing) {
-      existing.title = item.title || existing.title
-      existing.source_provider = item.source_provider || existing.source_provider
-      existing.status = item.status || existing.status
-    } else {
-      workspaceTabs.value.push(makeContentTab(item))
-    }
-    await activateWorkspaceTab(tabId)
-  }
-
-  async function activateWorkspaceTab(tabId) {
-    activeWorkspaceTabId.value = tabId
-    activeView.value = 'library'
-    const tab = workspaceTabs.value.find((item) => item.id === tabId)
-    let content = tab?.content_item_id
-      ? allContentItems.value.find((item) => item.id === tab.content_item_id)
-      : null
-    if (!content && tab?.content_item_id) {
-      content = await getContentItemDetail(tab.content_item_id)
-    }
-    if (content) {
-      await selectContentItem(content)
-    } else {
-      selectedContentItem.value = null
-      resetMarkdownState()
-      detachQaSession()
-    }
-  }
-
-  function removeWorkspaceTabState(tabId) {
-    closeWorkspaceTabs([tabId])
-  }
-
-  function closeWorkspaceTabs(tabIds) {
-    const closingIds = new Set(Array.isArray(tabIds) ? tabIds.filter(Boolean) : [])
-    if (!closingIds.size) return
-    const activeIndex = workspaceTabs.value.findIndex((tab) => tab.id === activeWorkspaceTabId.value)
-    const activeTabClosed = closingIds.has(activeWorkspaceTabId.value)
-    const remainingTabs = workspaceTabs.value.filter((tab) => !closingIds.has(tab.id))
-    if (remainingTabs.length === workspaceTabs.value.length) return
-    workspaceTabs.value = remainingTabs
-    if (!activeTabClosed) return
-
-    const nextTab = remainingTabs[Math.min(Math.max(activeIndex, 0), remainingTabs.length - 1)] || null
-    if (nextTab) {
-      activateWorkspaceTab(nextTab.id)
-    } else {
-      activeWorkspaceTabId.value = ''
-      selectedContentItem.value = null
-      resetMarkdownState()
-      detachQaSession()
-    }
-  }
-
-  function closeWorkspaceTab(tabId) {
-    removeWorkspaceTabState(tabId)
-  }
-
-  async function revealWorkspaceTabLocation(tab) {
-    const contentItemId = String(tab?.content_item_id || '').trim()
-    if (!contentItemId) return
-    await revealLibraryNodeLocation({ type: 'content', id: contentItemId })
-  }
-
-  async function deleteWorkspaceTabContent(tab) {
-    const contentItemId = String(tab?.content_item_id || '').trim()
-    if (!contentItemId) return
-    const content = allContentItems.value.find((item) => String(item.id) === contentItemId)
-      || await getContentItemDetail(contentItemId)
-    if (!content) {
-      ElMessage.error('找不到该文件，无法移入回收站')
-      return
-    }
-    await deleteContentItem(content)
-  }
-
-  async function syncActiveWorkspaceTabSelection({ awaitPrimaryPreview = false } = {}) {
-    const tab = activeWorkspaceTab.value
-    if (!tab?.content_item_id) return
-    let content = allContentItems.value.find((item) => item.id === tab.content_item_id)
-    if (!content) content = await getContentItemDetail(tab.content_item_id)
-    if (content) {
-      tab.title = content.title || tab.title
-      tab.source_provider = content.source_provider || tab.source_provider
-      tab.status = content.status || tab.status
-      await selectContentItem(content, { awaitPrimaryPreview })
-    }
-  }
-
-  async function syncCompletedTaskContent(contentItemId) {
-    if (!contentItemId) return
-    // Replacing the whole recent library while a media task settles resets
-    // the progressively disclosed tree and makes it look as though folders
-    // are repeatedly collapsing.  The detail endpoint also updates the one
-    // reactive entry used by the tree.
-    const content = await getContentItemDetail(contentItemId)
-    if (!content) return
-
-    const tabId = tabIdForContent(content.id)
-    const existing = workspaceTabs.value.find((tab) => tab.id === tabId)
-    if (existing) {
-      existing.title = content.title || existing.title
-      existing.source_provider = content.source_provider || existing.source_provider
-      existing.status = content.status || existing.status
-    } else {
-      workspaceTabs.value.push(makeContentTab(content))
-    }
-    await activateWorkspaceTab(tabId)
-  }
-
-  function syncTaskTabMetadata(content) {
-    if (!content?.id) return
-    const tabId = tabIdForContent(content.id)
-    const tab = workspaceTabs.value.find((candidate) => candidate.id === tabId)
-    if (!tab) return
-    tab.title = content.title || tab.title
-    tab.source_provider = content.source_provider || tab.source_provider
-    tab.status = content.status || tab.status
   }
 
   async function syncVisibleProgressiveContent(task) {
