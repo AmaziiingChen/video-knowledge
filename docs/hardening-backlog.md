@@ -152,8 +152,11 @@ lines.
   validation, terminal cleanup and polling fallback behavior.
   Task status, status-bar, progress, log-level and display-label presentation
   now live in `features/tasks/taskDisplayPresentation.js` with pure boundary
-  tests; queue transport and durable task mutation remain in their existing
-  controllers. Workspace tab opening, selection hydration, close selection,
+  tests. The active task result projection, reset transaction, task-identity QA
+  isolation, persistence-error reporting and visible step state now live in
+  `features/tasks/useActiveTaskStateController.js`; queue transport, polling
+  and durable task mutation remain in their existing controllers. Workspace
+  tab opening, selection hydration, close selection,
   reveal and recycle-bin dispatch now live in
   `features/workspace/useWorkspaceTabController.js`; task runtime remains the
   owner of progressive content refresh decisions.
