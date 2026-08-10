@@ -58,7 +58,11 @@ from services.pipeline_local_media_policy import is_under_data_dir as _is_under_
 from services.pipeline_media_download import download_media_with_live_logs
 from services.pipeline_run_reporter import PipelineRunReporter
 from services.pipeline_source_context import refresh_pipeline_source_context
-from services.pipeline_stored_article import StoredArticlePreparationError, prepare_stored_article
+from services.pipeline_stored_article import (
+    StoredArticlePreparationError,
+    prepare_stored_article,
+    run_prepared_stored_article,
+)
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.content_source_text import (
     _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
@@ -298,68 +302,21 @@ def run_pipeline_sync(
         except StoredArticlePreparationError as exc:
             return fail(exc.step, str(exc))
         if stored_article:
-            existing_item = stored_article.item
-            transcript = stored_article.transcript
-            source_context = stored_article.source_context
-            response.url = existing_item.source_url
-            response.platform = existing_item.source_provider
-            response.transcript = transcript
-            response.text_source = TextSourceInfo(kind="article", source=existing_item.source_provider, detail="已入库文章正文")
-            set_many_complete(["parse", "info", "download", "extract_audio", "transcribe"])
-            add_log("info", f"正文已就绪（{len(transcript)} 字）", "success")
-            if processing_mode == "transcript":
-                set_many_complete(["summarize", "save"])
-                _set_content_status(existing_item.id, "to_read")
-                response.display_title = existing_item.title
-                response.success = True
-                response.timings["total"] = _elapsed(total_start)
-                add_log("save", "正文已保存，未调用 AI 总结", "success")
-                response.step = None
-                publish()
-                return response
-            if not settings.deepseek_api_key:
-                return fail("summarize", "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）")
-            summarize_start = time.perf_counter()
-            add_log("summarize", "调用 DeepSeek 生成文章总结...")
-            try:
-                ai_title, summary = summarize(
-                    transcript,
-                    existing_item.title,
-                    model=ai_model,
-                    task_type="article_summary",
-                    task_id=response.task_id,
-                    content_item_id=existing_item.id,
-                    ai_call_callback=remember_ai_call("summary"),
-                    source_context=source_context,
-                )
-            except Exception as exc:
-                return fail("summarize", str(exc))
-            if not summary:
-                return fail("summarize", "总结生成失败")
-            response.summary = summary
-            response.display_title = ai_title or existing_item.title
-            complete_stage("summarize")
-            _set_content_title(existing_item.id, response.display_title)
-            replace_content_summary_and_sync(existing_item.id, summary)
-            _set_content_status(existing_item.id, "to_read")
-            try:
-                upsert_search_document(
-                    content_key=existing_item.id,
-                    title=response.display_title,
-                    summary=summary,
-                    transcript=transcript,
-                    source_context=source_context,
-                )
-            except Exception as exc:
-                add_log("save", f"搜索索引更新失败：{exc}", "warn")
-            complete_stage("save")
-            response.timings["summarize"] = _elapsed(summarize_start)
-            response.timings["total"] = _elapsed(total_start)
-            response.success = True
-            add_log("save", "文章总结已保存", "success")
-            response.step = None
-            publish()
-            return response
+            return run_prepared_stored_article(
+                stored_article,
+                response=response,
+                reporter=reporter,
+                fail=fail,
+                processing_mode=processing_mode,
+                api_key_configured=bool(settings.deepseek_api_key),
+                ai_model=ai_model,
+                total_started_at=total_start,
+                summarize_article=summarize,
+                set_content_status=_set_content_status,
+                set_content_title=_set_content_title,
+                replace_summary=replace_content_summary_and_sync,
+                update_search=upsert_search_document,
+            )
 
         cached_video = None
         cached_subtitle_transcript = None

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from services.content_source_text import ContentSourceText, load_content_source_text
 from services.database import connect
+from services.pipeline_contracts import PipelineResponse, TextSourceInfo
+from services.pipeline_progress_rules import elapsed
+from services.pipeline_run_reporter import PipelineRunReporter
 from services.repository import ContentItemRecord, ContentRepository
 from services.source_context_store import save_source_context
 
@@ -30,6 +34,95 @@ class PreparedStoredArticle:
     item: ContentItemRecord
     transcript: str
     source_context: dict[str, Any]
+
+
+def run_prepared_stored_article(
+    prepared: PreparedStoredArticle,
+    *,
+    response: PipelineResponse,
+    reporter: PipelineRunReporter,
+    fail: Callable[[str, str], PipelineResponse],
+    processing_mode: str,
+    api_key_configured: bool,
+    ai_model: str | None,
+    total_started_at: float,
+    summarize_article: Callable[..., tuple[str, str]],
+    set_content_status: Callable[[str, str], None],
+    set_content_title: Callable[[str, str], None],
+    replace_summary: Callable[[str, str], Any],
+    update_search: Callable[..., None],
+) -> PipelineResponse:
+    """Finish transcript-only or summarized processing for a stored article."""
+    item = prepared.item
+    transcript = prepared.transcript
+    source_context = prepared.source_context
+    response.url = item.source_url
+    response.platform = item.source_provider
+    response.transcript = transcript
+    response.text_source = TextSourceInfo(
+        kind="article",
+        source=item.source_provider,
+        detail="已入库文章正文",
+    )
+    reporter.set_many_complete(["parse", "info", "download", "extract_audio", "transcribe"])
+    reporter.add_log("info", f"正文已就绪（{len(transcript)} 字）", "success")
+
+    if processing_mode == "transcript":
+        reporter.set_many_complete(["summarize", "save"])
+        set_content_status(item.id, "to_read")
+        response.display_title = item.title
+        response.success = True
+        response.timings["total"] = elapsed(total_started_at)
+        reporter.add_log("save", "正文已保存，未调用 AI 总结", "success")
+        response.step = None
+        reporter.publish()
+        return response
+
+    if not api_key_configured:
+        return fail("summarize", "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）")
+
+    summarize_started_at = time.perf_counter()
+    reporter.add_log("summarize", "调用 DeepSeek 生成文章总结...")
+    try:
+        ai_title, summary = summarize_article(
+            transcript,
+            item.title,
+            model=ai_model,
+            task_type="article_summary",
+            task_id=response.task_id,
+            content_item_id=item.id,
+            ai_call_callback=reporter.remember_ai_call("summary"),
+            source_context=source_context,
+        )
+    except Exception as exc:  # noqa: BLE001 - provider errors use the pipeline failure contract
+        return fail("summarize", str(exc))
+    if not summary:
+        return fail("summarize", "总结生成失败")
+
+    response.summary = summary
+    response.display_title = ai_title or item.title
+    reporter.complete_stage("summarize")
+    set_content_title(item.id, response.display_title)
+    replace_summary(item.id, summary)
+    set_content_status(item.id, "to_read")
+    try:
+        update_search(
+            content_key=item.id,
+            title=response.display_title,
+            summary=summary,
+            transcript=transcript,
+            source_context=source_context,
+        )
+    except Exception as exc:  # noqa: BLE001 - search indexing is best effort
+        reporter.add_log("save", f"搜索索引更新失败：{exc}", "warn")
+    reporter.complete_stage("save")
+    response.timings["summarize"] = elapsed(summarize_started_at)
+    response.timings["total"] = elapsed(total_started_at)
+    response.success = True
+    reporter.add_log("save", "文章总结已保存", "success")
+    response.step = None
+    reporter.publish()
+    return response
 
 
 def _load_and_repair_item(content_item_id: str) -> tuple[ContentItemRecord | None, bool]:

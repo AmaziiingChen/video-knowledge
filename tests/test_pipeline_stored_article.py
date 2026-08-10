@@ -3,9 +3,13 @@ from unittest.mock import Mock, call
 
 import pytest
 from services.content_source_text import ContentSourceText
+from services.pipeline_contracts import PipelineResponse
+from services.pipeline_run_reporter import PipelineRunReporter
 from services.pipeline_stored_article import (
+    PreparedStoredArticle,
     StoredArticlePreparationError,
     prepare_stored_article,
+    run_prepared_stored_article,
 )
 from services.repository import ContentItemRecord
 
@@ -27,6 +31,135 @@ def _item(*, provider: str = "campus", content_type: str = "article") -> Content
         created_at="2026-08-10T00:00:00+00:00",
         updated_at="2026-08-10T00:00:00+00:00",
     )
+
+
+def _prepared_article() -> PreparedStoredArticle:
+    return PreparedStoredArticle(
+        item=_item(),
+        transcript="正文内容",
+        source_context={"comment_sample_count": 2},
+    )
+
+
+def test_runs_transcript_only_stored_article_without_ai_or_summary_write() -> None:
+    prepared = _prepared_article()
+    response = PipelineResponse(success=False, task_id="task-1")
+    updates = []
+    reporter = PipelineRunReporter(response, updates.append)
+    status = Mock()
+    summarize_article = Mock(side_effect=AssertionError("transcript mode must not call AI"))
+
+    result = run_prepared_stored_article(
+        prepared,
+        response=response,
+        reporter=reporter,
+        fail=Mock(side_effect=AssertionError("transcript mode must not fail")),
+        processing_mode="transcript",
+        api_key_configured=False,
+        ai_model=None,
+        total_started_at=0.0,
+        summarize_article=summarize_article,
+        set_content_status=status,
+        set_content_title=Mock(),
+        replace_summary=Mock(),
+        update_search=Mock(),
+    )
+
+    assert result is response
+    assert response.success is True
+    assert response.display_title == prepared.item.title
+    assert response.transcript == prepared.transcript
+    assert response.text_source and response.text_source.kind == "article"
+    assert response.step is None
+    assert all(response.progress[step] == 100 for step in response.progress)
+    status.assert_called_once_with(prepared.item.id, "to_read")
+    summarize_article.assert_not_called()
+    assert updates[-1].success is True
+
+
+def test_runs_full_stored_article_and_keeps_search_failure_non_fatal() -> None:
+    prepared = _prepared_article()
+    response = PipelineResponse(success=False, task_id="task-2")
+    reporter = PipelineRunReporter(response, None)
+    summarize_article = Mock(return_value=("AI 标题", "总结正文"))
+    set_status = Mock()
+    set_title = Mock()
+    replace_summary = Mock()
+    update_search = Mock(side_effect=RuntimeError("index unavailable"))
+
+    result = run_prepared_stored_article(
+        prepared,
+        response=response,
+        reporter=reporter,
+        fail=Mock(side_effect=AssertionError("successful summary must not fail")),
+        processing_mode="full",
+        api_key_configured=True,
+        ai_model="deepseek-chat",
+        total_started_at=0.0,
+        summarize_article=summarize_article,
+        set_content_status=set_status,
+        set_content_title=set_title,
+        replace_summary=replace_summary,
+        update_search=update_search,
+    )
+
+    assert result is response
+    assert response.success is True
+    assert response.summary == "总结正文"
+    assert response.display_title == "AI 标题"
+    assert response.step is None
+    summarize_article.assert_called_once()
+    assert summarize_article.call_args.args == (prepared.transcript, prepared.item.title)
+    assert summarize_article.call_args.kwargs["task_type"] == "article_summary"
+    assert summarize_article.call_args.kwargs["source_context"] == prepared.source_context
+    set_title.assert_called_once_with(prepared.item.id, "AI 标题")
+    replace_summary.assert_called_once_with(prepared.item.id, "总结正文")
+    set_status.assert_called_once_with(prepared.item.id, "to_read")
+    update_search.assert_called_once_with(
+        content_key=prepared.item.id,
+        title="AI 标题",
+        summary="总结正文",
+        transcript=prepared.transcript,
+        source_context=prepared.source_context,
+    )
+    assert any(log.level == "warn" and "index unavailable" in log.message for log in response.logs)
+
+
+@pytest.mark.parametrize(
+    ("api_key_configured", "summary_result", "expected_error"),
+    [
+        (False, ("", ""), "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）"),
+        (True, ("标题", ""), "总结生成失败"),
+    ],
+)
+def test_stored_article_summary_preconditions_use_the_pipeline_failure_contract(
+    api_key_configured: bool,
+    summary_result: tuple[str, str],
+    expected_error: str,
+) -> None:
+    prepared = _prepared_article()
+    response = PipelineResponse(success=False, task_id="task-3")
+    failure = PipelineResponse(success=False, task_id="failed")
+    fail = Mock(return_value=failure)
+
+    result = run_prepared_stored_article(
+        prepared,
+        response=response,
+        reporter=PipelineRunReporter(response, None),
+        fail=fail,
+        processing_mode="full",
+        api_key_configured=api_key_configured,
+        ai_model=None,
+        total_started_at=0.0,
+        summarize_article=Mock(return_value=summary_result),
+        set_content_status=Mock(),
+        set_content_title=Mock(),
+        replace_summary=Mock(),
+        update_search=Mock(),
+    )
+
+    assert result is failure
+    fail.assert_called_once_with("summarize", expected_error)
 
 
 def test_prepares_a_persisted_article_without_touching_media_paths() -> None:
