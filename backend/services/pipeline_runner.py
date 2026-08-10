@@ -13,7 +13,6 @@ from config import settings
 from services.cache import (
     cache_dir_for_url,
     find_cached_video,
-    read_cached_transcript_segments,
     read_cache_meta,
     media_duration_seconds,
     read_cached_subtitle_transcript,
@@ -35,6 +34,7 @@ from services.pipeline_asr_policy import (
     resolve_asr_model as _resolve_asr_model,
     valid_whisper_model as _valid_whisper_model,
 )
+from services.pipeline_cached_text import PipelineCachedTextRestorer
 from services.pipeline_contracts import (
     AICallInfo,
     DownloadTransferInfo,
@@ -722,57 +722,14 @@ def run_pipeline_sync(
             or cache_meta.get("subtitle_trust") == "browser_player_binding_v1"
         )
 
-        def reuse_cached_subtitle() -> None:
-            nonlocal transcript, transcript_segments
-            transcript = cached_subtitle_transcript
-            transcript_segments = read_cached_transcript_segments(cache_dir, preferred_model="subtitle")
-            response.transcript = transcript
-            response.text_source = TextSourceInfo(
-                kind="subtitle",
-                source="cache",
-                cached=True,
-                detail="已缓存字幕文本",
-            )
-            response.cache_hits.append("subtitle")
-            if cached_video:
-                response.video_path = str(cached_video)
-                publish_video_artifact()
-                _ensure_preview_thumbnails(cache_dir, cached_video, add_log)
-            response.timings["download"] = 0.0
-            response.timings["extract_audio"] = 0.0
-            response.timings["transcribe"] = 0.0
-            response.timings["whisper_model_load"] = 0.0
-            response.timings["whisper_decode"] = 0.0
-            set_many_complete(["download", "extract_audio", "transcribe"])
-            add_log("download", "复用字幕缓存，跳过下载", "success", 0.0)
-            add_log("extract_audio", "复用字幕缓存，跳过音频提取", "success", 0.0)
-            add_log("transcribe", f"复用字幕文本（{len(transcript)} 字）", "success", 0.0)
-
-        def reuse_cached_asr_transcript() -> None:
-            nonlocal transcript, transcript_segments
-            transcript = cached_transcript
-            transcript_segments = read_cached_transcript_segments(cache_dir, preferred_model=selected_model)
-            response.transcript = transcript
-            response.text_source = TextSourceInfo(
-                kind="asr",
-                source="cache",
-                cached=True,
-                detail=f"Whisper {selected_model} 转写缓存",
-            )
-            response.cache_hits.append("transcript")
-            if cached_video:
-                response.video_path = str(cached_video)
-                publish_video_artifact()
-                _ensure_preview_thumbnails(cache_dir, cached_video, add_log)
-            response.timings["download"] = 0.0
-            response.timings["extract_audio"] = 0.0
-            response.timings["transcribe"] = 0.0
-            response.timings["whisper_model_load"] = 0.0
-            response.timings["whisper_decode"] = 0.0
-            set_many_complete(["download", "extract_audio", "transcribe"])
-            add_log("download", "复用转写缓存，跳过下载", "success", 0.0)
-            add_log("extract_audio", "复用转写缓存，跳过音频提取", "success", 0.0)
-            add_log("transcribe", f"复用转写缓存（模型: {selected_model}，{len(transcript)} 字）", "success", 0.0)
+        cached_text_restorer = PipelineCachedTextRestorer(
+            response=response,
+            cache_dir=cache_dir,
+            cached_video=cached_video,
+            publish_video_artifact=publish_video_artifact,
+            set_many_complete=set_many_complete,
+            add_log=add_log,
+        )
 
         # An explicit subtitle retry is deliberately fresh: an old source
         # snapshot may be an ASR transcript and must not make the command look
@@ -780,9 +737,9 @@ def run_pipeline_sync(
         if text_ready and not subtitle_only:
             pass
         elif not force_video_download and cached_subtitle_transcript and not refresh_bilibili_subtitle:
-            reuse_cached_subtitle()
+            transcript, transcript_segments = cached_text_restorer.restore_subtitle(cached_subtitle_transcript)
         elif not force_video_download and cached_transcript and not refresh_bilibili_subtitle:
-            reuse_cached_asr_transcript()
+            transcript, transcript_segments = cached_text_restorer.restore_asr(cached_transcript, selected_model)
         else:
             check_cancel()
             subtitle_used = False
@@ -857,7 +814,7 @@ def run_pipeline_sync(
 
             subtitle_cache_used = False
             if not force_video_download and not subtitle_used and cached_subtitle_transcript and trusted_bilibili_subtitle_cache:
-                reuse_cached_subtitle()
+                transcript, transcript_segments = cached_text_restorer.restore_subtitle(cached_subtitle_transcript)
                 subtitle_cache_used = True
 
             if subtitle_only and not subtitle_used and not subtitle_cache_used:
@@ -865,7 +822,7 @@ def run_pipeline_sync(
 
             asr_cache_used = False
             if not force_video_download and not subtitle_used and not subtitle_cache_used and cached_transcript:
-                reuse_cached_asr_transcript()
+                transcript, transcript_segments = cached_text_restorer.restore_asr(cached_transcript, selected_model)
                 asr_cache_used = True
 
             if subtitle_used or subtitle_cache_used or asr_cache_used:

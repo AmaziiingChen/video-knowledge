@@ -303,6 +303,9 @@ lines.
   Monotonic stage progress, truthful transfer telemetry, immutable update
   snapshots, log projection, AI usage projection and throttled summary deltas
   now share the explicit `services/pipeline_run_reporter.py` state owner.
+  Subtitle and ASR cache restoration now share
+  `services/pipeline_cached_text.py`, returning transcript state explicitly
+  instead of mutating two near-duplicate nested closures.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and
