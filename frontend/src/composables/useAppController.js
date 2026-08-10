@@ -1,6 +1,6 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import axios from 'axios'
-import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { requestDestructiveConfirmation } from './useDestructiveConfirm'
 import {
   contentStatusOptions,
@@ -79,6 +79,7 @@ import { useMarkdownDocumentController } from '../features/library/useMarkdownDo
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { usePlatformCredentialController } from '../features/integrations/usePlatformCredentialController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
+import { useDesktopActionController } from '../features/desktop/useDesktopActionController.js'
 import { useAppSettingsController } from '../features/settings/useAppSettingsController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
@@ -106,6 +107,14 @@ export function useAppController() {
     startSettingsPersistence,
     restoreSettings,
   } = useAppSettingsController()
+  const {
+    copyText,
+    openExternalLink,
+    revealLibraryNodeLocation,
+    revealLocalPath,
+    recordTelemetry,
+    checkManualUpdate,
+  } = useDesktopActionController({ notify: ElMessage })
   const {
     showMarkdownDialog,
     currentMarkdownItem,
@@ -1517,99 +1526,6 @@ export function useAppController() {
     } catch (error) {
       const message = error.response?.data?.detail || error.message || '无法读取创作者处理任务'
       ElMessage.error(typeof message === 'string' ? message : '无法读取创作者处理任务')
-    }
-  }
-
-  async function copyText(value, message) {
-    if (!value) return
-    try {
-      const desktopCopy = window.knowledgeHubDesktop?.copyText
-      if (desktopCopy) await desktopCopy(value)
-      else await navigator.clipboard.writeText(value)
-      ElMessage.success(message)
-    } catch {
-      ElMessage.error('复制失败')
-    }
-  }
-
-  function openExternalLink(value) {
-    if (!value) return
-    if (window.knowledgeHubDesktop?.openExternal) {
-      window.knowledgeHubDesktop.openExternal(value).catch(() => {
-        ElMessage.error('无法使用默认浏览器打开链接')
-      })
-      return
-    }
-    window.open(value, '_blank', 'noopener,noreferrer')
-  }
-
-  async function revealLibraryNodeLocation(node) {
-    const desktopReveal = window.knowledgeHubDesktop?.revealPath
-    if (!desktopReveal) {
-      ElMessage.warning('请在桌面版中使用“在 Finder 中显示”')
-      return
-    }
-    const isFolder = node?.type === 'folder'
-    const nodeId = String(node?.raw?.id || node?.id || '').trim()
-    if (!nodeId) return
-    try {
-      let localPath = ''
-      if (isFolder) {
-        const response = await axios.get(`${API}/content/folders/${encodeURIComponent(nodeId)}/location`, { timeout: 10000 })
-        localPath = String(response.data?.path || '')
-      } else {
-        const response = await axios.get(`${API}/markdown/content/${encodeURIComponent(nodeId)}`, { timeout: 10000 })
-        localPath = String(response.data?.markdown_draft_path || response.data?.obsidian_path || '')
-      }
-      if (!localPath) throw new Error('本地 Markdown 文件尚未生成')
-      await desktopReveal(localPath)
-    } catch (error) {
-      const detail = error?.response?.data?.detail || error?.message || '无法打开所在位置'
-      ElMessage.error(typeof detail === 'string' ? detail : '无法打开所在位置')
-    }
-  }
-
-  async function revealLocalPath(localPath) {
-    const desktopReveal = window.knowledgeHubDesktop?.revealPath
-    if (!desktopReveal) {
-      ElMessage.warning('请在桌面版中使用“在 Finder 中显示”')
-      return
-    }
-    if (!String(localPath || '').trim()) return
-    try {
-      await desktopReveal(localPath)
-    } catch (error) {
-      ElMessage.error(error?.message || '无法打开所在位置')
-    }
-  }
-
-  function recordTelemetry(eventName, properties = {}) {
-    return axios.post(`${API}/telemetry/events`, { event_name: eventName, properties }, { timeout: 2000 }).catch(() => {})
-  }
-
-  async function checkManualUpdate() {
-    try {
-      const response = await axios.get(`${API}/updates/check`, { timeout: 6000 })
-      const update = response.data || {}
-      if (update.state !== 'available' || !update.download_page_url) return
-      const notes = String(update.release_notes || '').trim()
-      await ElMessageBox.confirm(
-        notes
-          ? `发现 KnowledgeHub ${update.latest_version}。\n\n${notes}`
-          : `发现 KnowledgeHub ${update.latest_version}。`,
-        '有可用更新',
-        {
-          confirmButtonText: '打开下载页',
-          cancelButtonText: '稍后再说',
-          type: 'info',
-          closeOnClickModal: true,
-        },
-      )
-      openExternalLink(update.download_page_url)
-      void recordTelemetry('update_download_page_opened')
-    } catch (error) {
-      // The manifest is optional and update checks must not interrupt startup.
-      if (error !== 'cancel' && error?.message !== 'cancel') return
     }
   }
 

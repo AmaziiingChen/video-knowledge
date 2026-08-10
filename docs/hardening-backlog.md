@@ -168,7 +168,10 @@ lines.
   next to its task presentation dependencies. Markdown draft loading, stale
   selection protection, editor state, saving and explicit output-directory
   synchronization now live in
-  `features/library/useMarkdownDocumentController.js`;
+  `features/library/useMarkdownDocumentController.js`. Clipboard fallback,
+  trusted external-link dispatch, Finder reveal, best-effort telemetry and the
+  optional update prompt now live in
+  `features/desktop/useDesktopActionController.js`;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,
