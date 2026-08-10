@@ -23,7 +23,6 @@ from services.cache import (
     write_cached_subtitle_transcript,
     write_cached_transcript,
 )
-from services.ai_call_logger import AICallRecord
 from services.article_fetcher import fetch_article
 from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_article_html
 from services.bilibili_context import fetch_bilibili_source_context
@@ -48,7 +47,6 @@ from services.pipeline_contracts import (
     classify_pipeline_error,
 )
 from services.pipeline_progress_rules import (
-    clamp_percent as _clamp_percent,
     elapsed as _elapsed,
     level_from_message as _level_from_message,
 )
@@ -61,6 +59,7 @@ from services.pipeline_local_media_policy import (
     is_managed_local_media as _is_managed_local_media,
     is_under_data_dir as _is_under_data_dir,
 )
+from services.pipeline_run_reporter import PipelineRunReporter
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.content_source_text import (
     _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
@@ -82,26 +81,10 @@ from services.video_download_settings import should_auto_download_bilibili_video
 
 
 LOCAL_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".opus"}
-PROGRESS_STAGES = ["parse", "info", "download", "extract_audio", "transcribe", "summarize", "save"]
-PROGRESS_WEIGHTS = {
-    "parse": 4,
-    "info": 4,
-    "download": 22,
-    "extract_audio": 10,
-    "transcribe": 36,
-    "summarize": 20,
-    "save": 4,
-}
 # A desktop can keep one network transfer moving while the previous file is
 # transcribed, but competing yt-dlp/browser downloads make both less reliable
 # and saturate the local network. Every pipeline path shares this one slot.
 _media_download_semaphore = BoundedSemaphore(1)
-# One opened assistant panel is cheap enough to repaint at roughly 40 fps.
-# This is a transport coalescing limit, not a typewriter effect: every
-# snapshot still contains exactly the text the model has returned so far.
-SUMMARY_PUBLISH_INTERVAL_SECONDS = 0.025
-
-
 ProgressCallback = Callable[[PipelineResponse], None]
 CancelCheck = Callable[[], bool]
 
@@ -160,72 +143,17 @@ def run_pipeline_sync(
     preview_download_started_at: float | None = None
     source_context: dict[str, object] = {}
     cache_dir: Path | None = None
-    last_summary_publish_at = 0.0
-
-    def publish() -> None:
-        if on_update:
-            on_update(response.model_copy(deep=True))
-
-    def update_overall_progress() -> None:
-        total = 0.0
-        for step, weight in PROGRESS_WEIGHTS.items():
-            total += (response.progress.get(step, 0.0) / 100.0) * weight
-        response.overall_progress = _clamp_percent(total)
-
-    def set_progress(step: str, percent: float, publish_update: bool = True) -> None:
-        if step not in PROGRESS_WEIGHTS:
-            return
-        current = response.progress.get(step, 0.0)
-        response.progress[step] = max(current, _clamp_percent(percent))
-        response.step = step
-        update_overall_progress()
-        if publish_update:
-            publish()
-
-    def set_download_transfer(progress: DownloadProgress) -> None:
-        """Publish only provider-reported media telemetry to the UI.
-
-        The existing weighted ``overall_progress`` remains useful for task
-        scheduling/history, but it must never be presented as a byte-level
-        download percentage.
-        """
-        response.step = "download"
-        response.download_transfer = DownloadTransferInfo(
-            phase=progress.phase,
-            detail=progress.detail,
-            received_bytes=progress.received_bytes,
-            total_bytes=progress.total_bytes,
-            bytes_per_second=progress.bytes_per_second,
-            percent=progress.percent,
-        )
-        if progress.percent is not None:
-            current = response.progress.get("download", 0.0)
-            response.progress["download"] = max(current, _clamp_percent(progress.percent))
-            update_overall_progress()
-        publish()
-
-    def complete_stage(step: str) -> None:
-        set_progress(step, 100.0, publish_update=False)
-
-    def add_log(
-        step: str,
-        message: str,
-        level: str = "info",
-        elapsed_seconds: float | None = None,
-    ) -> None:
-        response.step = step
-        if step in PROGRESS_WEIGHTS and response.progress.get(step, 0.0) == 0:
-            set_progress(step, 5.0, publish_update=False)
-        response.logs.append(
-            PipelineLog(
-                step=step,
-                message=message,
-                level=level,
-                elapsed_seconds=elapsed_seconds,
-                created_at=datetime.now().astimezone().isoformat(),
-            )
-        )
-        publish()
+    reporter = PipelineRunReporter(response, on_update)
+    publish = reporter.publish
+    update_overall_progress = reporter.update_overall_progress
+    set_progress = reporter.set_progress
+    set_download_transfer = reporter.set_download_transfer
+    complete_stage = reporter.complete_stage
+    add_log = reporter.add_log
+    mark_stage = reporter.mark_stage
+    set_many_complete = reporter.set_many_complete
+    remember_ai_call = reporter.remember_ai_call
+    publish_summary_delta = reporter.publish_summary_delta
 
     def download_with_live_logs(url: str, platform: str, output_dir: Path):
         """Run a media provider while forwarding provider milestones promptly.
@@ -370,48 +298,6 @@ def run_pipeline_sync(
         update_overall_progress()
         publish()
         return response
-
-    def mark_stage(step: str, message: str, start: float, level: str = "success") -> None:
-        elapsed_seconds = _elapsed(start)
-        response.timings[step] = elapsed_seconds
-        complete_stage(step)
-        add_log(step, message, level, elapsed_seconds)
-
-    def set_many_complete(steps: list[str]) -> None:
-        for step in steps:
-            complete_stage(step)
-
-    def remember_ai_call(fallback_call_type: str) -> Callable[[AICallRecord], None]:
-        def append_call(record: AICallRecord) -> None:
-            call_type = record.call_type or fallback_call_type
-            response.ai_calls.append(
-                AICallInfo(
-                    call_type=call_type,
-                    prompt_tokens=record.prompt_tokens,
-                    completion_tokens=record.completion_tokens,
-                    total_tokens=record.total_tokens,
-                    prompt_cache_hit_tokens=record.prompt_cache_hit_tokens,
-                    prompt_cache_miss_tokens=record.prompt_cache_miss_tokens,
-                    estimated_cost=record.estimated_cost,
-                    elapsed_seconds=record.elapsed_seconds,
-                )
-            )
-            if call_type == "article_summary_prepare":
-                count = sum(item.call_type == "article_summary_prepare" for item in response.ai_calls)
-                add_log("summarize", f"超长文章材料压缩完成（第 {count} 次）", "success", record.elapsed_seconds)
-
-        return append_call
-
-    def publish_summary_delta(title: str, partial_summary: str) -> None:
-        """Persist streamed summary text without turning every token into I/O."""
-        nonlocal last_summary_publish_at
-        response.display_title = title or response.display_title
-        response.summary = partial_summary
-        now = time.perf_counter()
-        if now - last_summary_publish_at < SUMMARY_PUBLISH_INTERVAL_SECONDS:
-            return
-        last_summary_publish_at = now
-        publish()
 
     try:
         if asr_options["backend"] not in ASR_BACKENDS:
