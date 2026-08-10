@@ -82,8 +82,11 @@ lines.
   now live in `services/campus_digest_identity.py`. Embedding API selection,
   local-model loading and deterministic fallback vectors now live in
   `services/campus_digest_embeddings.py`; the shared progress-event contract
-  now lives in `services/campus_digest_progress.py`. The remaining generation
-  and persistence flow will be separated in behavior-preserving slices.
+  now lives in `services/campus_digest_progress.py`. Untrusted model JSON
+  parsing, fact-card normalization, event-brief normalization and chunk-safe
+  source splitting now live in `services/campus_digest_payloads.py`. The
+  remaining generation and persistence flow will be separated in
+  behavior-preserving slices.
 - [ ] Split `useAppController.js` by library, task-runtime, import and
   assistant-session ownership while preserving its external facade.
   The first library boundary, debounced global search and result hydration, now
