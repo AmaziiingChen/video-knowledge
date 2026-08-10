@@ -197,7 +197,11 @@ lines.
   tab opening, selection hydration, close selection,
   reveal and recycle-bin dispatch now live in
   `features/workspace/useWorkspaceTabController.js`; task runtime remains the
-  owner of progressive content refresh decisions.
+  owner of progressive content refresh decisions. AI, assistant and appearance
+  preference persistence now lives in
+  `features/settings/useAppSettingsController.js`; the unconsumed legacy ASR
+  form facade has been retired while the fixed desktop ASR request policy
+  remains unchanged.
 - [ ] Split `SecondarySidebar.vue` into conversation, composer and task-status
   surfaces. Its model normalization, shortcut filtering, empty state, external
   citation, OCR hint and text-preview rules now live in

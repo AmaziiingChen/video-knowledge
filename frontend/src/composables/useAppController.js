@@ -236,17 +236,8 @@ export function useAppController() {
     askQuestion: (...args) => askQuestion(...args),
   })
   const openSections = ref(['source', 'timings'])
-  const selectedModel = ref('small')
   const availableModels = ref(['tiny', 'base', 'small'])
-  const selectedAsrBackend = ref('auto')
-  const availableAsrBackends = ref(['auto'])
   const miniprogramForumCaptureEnabled = ref(false)
-  const asrModelStrategy = ref('manual')
-  const asrShortVideoModel = ref('base')
-  const asrLongVideoModel = ref('small')
-  const asrBeamSize = ref(1)
-  const asrVadFilter = ref(true)
-  const asrFallbackEnabled = ref(false)
   const availableAiModels = ref([
     { value: 'deepseek-v4-flash:enabled', label: 'deepseek-v4-flash' },
     { value: 'deepseek-v4-pro:enabled', label: 'deepseek-v4-pro' }
@@ -955,15 +946,6 @@ export function useAppController() {
       if (Array.isArray(res.data.available_whisper_models)) {
         availableModels.value = res.data.available_whisper_models
       }
-      if (Array.isArray(res.data.available_asr_backends)) {
-        availableAsrBackends.value = res.data.available_asr_backends
-        // A prior version allowed selecting the other platform's runtime.
-        // Keep the rest of that local preset, but move this stale backend
-        // choice back to automatic so the UI and actual runtime agree.
-        if (!availableAsrBackends.value.includes(selectedAsrBackend.value)) {
-          selectedAsrBackend.value = 'auto'
-        }
-      }
       if (!hasLocalAiSettings && res.data.deepseek_model_option) {
         selectedAiModel.value = res.data.deepseek_model_option
       } else if (!hasLocalAiSettings && res.data.deepseek_model) {
@@ -1098,20 +1080,10 @@ export function useAppController() {
     logs,
     processLogEntries,
     taskStatus,
-    selectedModel,
-    selectedAsrBackend,
-    availableAsrBackends,
     miniprogramForumCaptureEnabled,
-    asrModelStrategy,
-    asrShortVideoModel,
-    asrLongVideoModel,
-    asrBeamSize,
-    asrVadFilter,
-    asrFallbackEnabled,
     selectedAiModel,
     assistantAiModel,
     availableAiModels,
-    useCache,
     autoDownloadBilibiliVideo,
     douyinVideoQuality,
     searchQuery,
