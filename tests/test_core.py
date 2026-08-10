@@ -3466,7 +3466,7 @@ class DownloadStorageTests(unittest.TestCase):
                     output_path.write_bytes(b"2" * 12000)
                     return SimpleNamespace(success=True, cancelled=False, stalled=False, returncode=0, stderr="")
 
-                with patch("services.downloader.run_ffmpeg", side_effect=fake_run):
+                with patch("services.download_media_processing.run_ffmpeg", side_effect=fake_run):
                     optimized = _compress_video_for_storage(video_path, logs)
 
                 self.assertEqual(optimized.name, "source_compact.mp4")

@@ -287,7 +287,10 @@ lines.
   download result/progress contracts, callback isolation, bounded percentages,
   yt-dlp rate parsing and inactivity diagnostics now live in
   `services/download_contracts.py`, while `downloader.py` retains its former
-  import surface;
+  import surface. Codec probing, playable-H.264 conversion, media validation
+  and optional storage compression now live in
+  `services/download_media_processing.py`, with partial-output cleanup and the
+  former private imports preserved;
   browser execution, cookies, downloads, cancellation and retries remain in
   the downloader orchestrator.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
