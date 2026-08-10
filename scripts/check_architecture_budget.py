@@ -26,7 +26,7 @@ KNOWN_DEBT_BUDGETS = {
     "backend/services/campus_digest_generation.py": 984,
     "backend/services/campus_sources.py": 992,
     "backend/services/pipeline_runner.py": 1_447,
-    "backend/services/downloader.py": 1_464,
+    "backend/services/downloader.py": 1_337,
     "backend/services/wechat_reports.py": 1_229,
     "backend/services/prompt_templates.py": 1_424,
     "backend/services/knowledge_library.py": 1_386,

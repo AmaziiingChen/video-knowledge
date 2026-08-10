@@ -6,9 +6,7 @@ import threading
 import httpx
 from pathlib import Path
 from queue import Empty, Queue
-from collections.abc import Callable
 from typing import Optional
-from dataclasses import dataclass, field
 from config import settings
 from services.media_tools import resolve_tool
 from services.ffmpeg_runner import FfmpegProgress, probe_media_duration, run_ffmpeg
@@ -37,37 +35,22 @@ from services.douyin_media_rules import (
     select_video_variant as _select_douyin_video_variant,
     video_variants as _douyin_video_variants,  # noqa: F401 - compatibility alias
 )
+from services.download_contracts import (
+    CancelCheck,
+    DownloadLogCallback,
+    DownloadProgress,
+    DownloadResult,
+    ProgressCallback,
+    activity_timeout_error as _activity_timeout_error,
+    append_download_log as _append_download_log,
+    media_transfer_error as _media_transfer_error,
+    report_phase as _report_phase,
+    report_progress as _report,
+    report_transfer as _report_transfer,
+    report_transfer_percent as _report_transfer_percent,
+    yt_dlp_bytes_per_second as _yt_dlp_bytes_per_second,
+)
 from services.video_download_settings import douyin_video_quality as _load_douyin_video_quality
-
-@dataclass
-class DownloadResult:
-    success: bool
-    video_path: Optional[Path] = None
-    video_info: dict = field(default_factory=dict)
-    logs: list[str] = field(default_factory=list)
-    error: str = ""
-
-
-@dataclass(frozen=True)
-class DownloadProgress:
-    """A truthful, transport-level update for the media download UI.
-
-    ``percent`` exists only when the provider has a real denominator.  It is
-    deliberately absent for parsing, DASH merging, validation and compression:
-    those operations have no reliable completion ratio.
-    """
-
-    phase: str
-    detail: str
-    received_bytes: int | None = None
-    total_bytes: int | None = None
-    bytes_per_second: float | None = None
-    percent: float | None = None
-
-
-ProgressCallback = Callable[[DownloadProgress], None]
-CancelCheck = Callable[[], bool]
-DownloadLogCallback = Callable[[str], None]
 BILIBILI_1080P_FORMAT = "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]"
 YTDLP_ACTIVITY_TIMEOUT_SECONDS = 300
 # A Douyin work page commonly renders the player after the document commit.
@@ -100,116 +83,6 @@ def download_video(
         return _download_douyin(url, output_dir, progress_callback, cancel_check, log_callback)
     
     return DownloadResult(success=False, error=f"不支持的平台: {platform}")
-
-def _report(progress_callback: ProgressCallback | None, progress: DownloadProgress) -> None:
-    if progress_callback:
-        progress_callback(progress)
-
-
-def _append_download_log(logs: list[str], message: str, log_callback: DownloadLogCallback | None = None) -> None:
-    """Persist a provider log and immediately expose it to an active task."""
-    logs.append(message)
-    if log_callback:
-        try:
-            log_callback(message)
-        except Exception:
-            # A UI/database progress notification must not interrupt a media
-            # transfer that can still be completed and recovered locally.
-            pass
-
-
-def _report_phase(progress_callback: ProgressCallback | None, phase: str, detail: str) -> None:
-    _report(progress_callback, DownloadProgress(phase=phase, detail=detail))
-
-
-def _report_transfer(
-    progress_callback: ProgressCallback | None,
-    received_bytes: int,
-    total_bytes: int | None,
-    *,
-    started_at: float,
-    detail: str,
-) -> None:
-    percent = (received_bytes / total_bytes) * 100 if total_bytes else None
-    elapsed = max(time.monotonic() - started_at, 0.001)
-    _report(
-        progress_callback,
-        DownloadProgress(
-            phase="transfer",
-            detail=detail,
-            received_bytes=received_bytes,
-            total_bytes=total_bytes,
-            bytes_per_second=received_bytes / elapsed,
-            percent=max(0.0, min(100.0, percent)) if percent is not None else None,
-        ),
-    )
-
-
-def _report_transfer_percent(
-    progress_callback: ProgressCallback | None,
-    percent: float,
-    detail: str,
-    *,
-    bytes_per_second: float | None = None,
-) -> None:
-    """yt-dlp supplies a stream percentage and usually its instantaneous rate."""
-    _report(
-        progress_callback,
-        DownloadProgress(
-            phase="transfer",
-            detail=detail,
-            bytes_per_second=bytes_per_second,
-            percent=max(0.0, min(100.0, percent)),
-        ),
-    )
-
-
-def _media_transfer_error(transfer) -> str:
-    """Keep a CDN HTTP status visible to retry and cookie-health policy."""
-    detail = str(getattr(transfer, "error", "") or "媒体传输失败")
-    status_code = getattr(transfer, "status_code", None)
-    return f"HTTP {status_code}: {detail}" if status_code else detail
-
-
-def _yt_dlp_bytes_per_second(line: str) -> float | None:
-    match = re.search(r"\bat\s+~?\s*([\d.]+)\s*([KMGT]?i?B)/s\b", line, re.IGNORECASE)
-    if not match:
-        return None
-    try:
-        amount = float(match.group(1))
-    except ValueError:
-        return None
-    unit = match.group(2).lower()
-    multipliers = {
-        "b": 1,
-        "kb": 1000,
-        "mb": 1000**2,
-        "gb": 1000**3,
-        "tb": 1000**4,
-        "kib": 1024,
-        "mib": 1024**2,
-        "gib": 1024**3,
-        "tib": 1024**4,
-    }
-    return amount * multipliers[unit] if unit in multipliers else None
-
-
-def _activity_timeout_error(
-    *,
-    now: float,
-    last_activity_at: float,
-    stall_seconds: float,
-    operation: str,
-) -> str | None:
-    if now - last_activity_at <= stall_seconds:
-        return None
-    if stall_seconds >= 60 and stall_seconds % 60 == 0:
-        window = f"{int(stall_seconds // 60)} 分钟"
-    else:
-        window = f"{int(stall_seconds)} 秒"
-    separator = " " if operation and operation[-1].isascii() else ""
-    return f"{operation}{separator}连续 {window}没有新的进度或输出"
-
 
 def _stop_process(process: subprocess.Popen) -> None:
     if process.poll() is not None:

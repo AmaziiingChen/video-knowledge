@@ -284,6 +284,10 @@ lines.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and
   quality/bitrate selection now live in `services/douyin_media_rules.py`;
+  download result/progress contracts, callback isolation, bounded percentages,
+  yt-dlp rate parsing and inactivity diagnostics now live in
+  `services/download_contracts.py`, while `downloader.py` retains its former
+  import surface;
   browser execution, cookies, downloads, cancellation and retries remain in
   the downloader orchestrator.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging
