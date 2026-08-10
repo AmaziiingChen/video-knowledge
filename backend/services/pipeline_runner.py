@@ -12,7 +12,6 @@ from types import SimpleNamespace
 from config import settings
 from services.cache import (
     cache_dir_for_url,
-    ensure_preview_thumbnails,
     find_cached_video,
     read_cached_transcript_segments,
     read_cache_meta,
@@ -52,6 +51,11 @@ from services.pipeline_progress_rules import (
     clamp_percent as _clamp_percent,
     elapsed as _elapsed,
     level_from_message as _level_from_message,
+)
+from services.pipeline_content_updates import (
+    prepare_preview_thumbnails as _ensure_preview_thumbnails,
+    set_content_status as _set_content_status,
+    set_content_title as _set_content_title,
 )
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.knowledge_library import attachments_root
@@ -1384,45 +1388,3 @@ def run_pipeline_sync(
 
 def _wechat_article_needs_ocr_refresh(article_info: object) -> bool:
     return isinstance(article_info, dict) and _content_source_text_needs_ocr_refresh(article_info)
-
-
-def _set_content_status(content_item_id: str, status: str) -> None:
-    try:
-        initialize_database()
-        with connect() as connection:
-            connection.execute(
-                "UPDATE content_items SET status = ?, updated_at = ? WHERE id = ?",
-                (status, datetime.now().isoformat(), content_item_id),
-            )
-            connection.commit()
-    except Exception:
-        return
-
-
-def _set_content_title(content_item_id: str, title: str) -> None:
-    safe_title = (title or "").strip()
-    if not safe_title:
-        return
-    try:
-        initialize_database()
-        with connect() as connection:
-            connection.execute(
-                "UPDATE content_items SET title = ?, updated_at = ? WHERE id = ?",
-                (safe_title, datetime.now().isoformat(), content_item_id),
-            )
-            connection.commit()
-    except Exception:
-        return
-
-
-def _ensure_preview_thumbnails(
-    cache_dir: Path | None,
-    video_path: Path | None,
-    add_log: Callable[[str, str, str, float | None], None],
-) -> None:
-    if not cache_dir or not video_path:
-        return
-    add_log("download", "正在准备播放器预览缩略图…", "info", None)
-    preview_path = ensure_preview_thumbnails(cache_dir, video_path)
-    if preview_path:
-        add_log("download", "播放器预览缩略图已生成", "success", None)

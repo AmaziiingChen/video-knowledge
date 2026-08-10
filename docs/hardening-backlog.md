@@ -282,6 +282,9 @@ lines.
   `services/pipeline_progress_rules.py`. The duplicate legacy article-OCR
   refresh policy has been removed; the runner now delegates to the canonical
   `content_source_text.py` policy while retaining its non-mapping guard.
+  Best-effort content status/title updates and preview-thumbnail preparation
+  now live in `services/pipeline_content_updates.py`, separating those durable
+  side effects from the main execution flow.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and
