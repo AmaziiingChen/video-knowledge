@@ -182,7 +182,10 @@ lines.
   `features/library/useMarkdownReaderController.js`. Active-content AI calls,
   summary priority, pipeline summary state, QA readiness, insight title and
   output-path projection now live in
-  `features/assistant/useAssistantWorkspaceProjectionController.js`;
+  `features/assistant/useAssistantWorkspaceProjectionController.js`. Local and
+  queue log merging, clear boundaries, latest-event token totals, persistence
+  failures and deterministic deduplication now live in
+  `features/logs/useProcessLogProjectionController.js`;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,
