@@ -174,7 +174,9 @@ lines.
   `features/desktop/useDesktopActionController.js`. Progressive task-detail
   hydration, active-reader milestone refresh and bounded article/media/text
   preview deduplication now live in
-  `features/tasks/useProgressiveTaskHydrationController.js`;
+  `features/tasks/useProgressiveTaskHydrationController.js`. Unreturned legacy
+  task-detail row projections and the unconsumed selected-model projection have
+  been removed instead of being carried into another abstraction;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,

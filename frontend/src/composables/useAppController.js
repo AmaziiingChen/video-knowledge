@@ -10,8 +10,7 @@ import {
   ribbonItems,
   stages,
   stepNames,
-  terminalStatuses,
-  timingOrder
+  terminalStatuses
 } from '../config/workbenchOptions'
 import {
   assistantSummaryFromMarkdown,
@@ -28,27 +27,20 @@ import {
 import { waitForDesktopBackend } from './backendStartupGate.js'
 import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from '../utils/localApiAuth.js'
 import {
-  aiCallTypeLabel,
   cacheHitLabel,
-  errorCategoryLabel,
   formatBytes,
   formatDateTime,
   formatDuration,
-  formatEstimatedCost,
   formatSeconds,
-  formatTokenCount,
   markdownSyncLabel,
   renderMarkdown,
   stripReportMarkdownHeader,
-  retryScopeLabel,
   roundedProgress,
   sanitizeHtml,
   sourceProviderLabel,
   stripMarkdownMetadata,
   statusLabel,
   statusTagType,
-  textSourceKindLabel,
-  textSourceProviderLabel
 } from '../utils/viewFormatters'
 import { sourceProviderFromUrl } from '../utils/taskSource.js'
 import { extractReportSourceStats } from '../utils/reportSourceStats.js'
@@ -956,49 +948,6 @@ export function useAppController() {
     recordTelemetry,
   })
 
-  const timingRows = computed(() => {
-    const timings = result.timings || {}
-    return timingOrder
-      .filter((key) => typeof timings[key] === 'number')
-      .map((key) => ({
-        name: stepLabel(key),
-        duration: formatSeconds(timings[key])
-      }))
-  })
-
-  const textSourceRows = computed(() => {
-    const source = result.text_source
-    if (!source) return []
-    const rows = [
-      { label: '类型', value: textSourceKindLabel(source.kind) },
-      { label: '来源', value: textSourceProviderLabel(source.source) }
-    ]
-    if (source.cached) rows.push({ label: '缓存', value: '已复用' })
-    if (source.detail) rows.push({ label: '细节', value: source.detail })
-    if (source.fallback_reason) rows.push({ label: '回退原因', value: source.fallback_reason })
-    return rows
-  })
-
-  const aiCallRows = computed(() => {
-    return (result.ai_calls || []).map((call) => ({
-      type: aiCallTypeLabel(call.call_type),
-      tokens: formatTokenCount(call.total_tokens),
-      duration: formatSeconds(call.elapsed_seconds),
-      cost: formatEstimatedCost(call.estimated_cost)
-    }))
-  })
-
-  const errorInfoRows = computed(() => {
-    const info = result.error_info
-    if (!info) return []
-    return [
-      { label: '分类', value: errorCategoryLabel(info.category) },
-      { label: '阶段', value: stepLabel(info.stage) },
-      { label: '建议', value: info.retryable ? retryScopeLabel(info.retry_scope) : '不建议直接重试' },
-      { label: '原因', value: info.message || result.error || '未知错误' }
-    ]
-  })
-
   const totalElapsed = computed(() => {
     const value = result.timings?.total
     return typeof value === 'number' ? value : null
@@ -1130,10 +1079,6 @@ export function useAppController() {
       .filter((model) => availableModels.value.includes(model))
       .map((model) => modelProfiles.find((profile) => profile.model === model))
       .filter(Boolean)
-  })
-
-  const selectedModelProfile = computed(() => {
-    return modelProfiles.find((profile) => profile.model === selectedModel.value) || modelProfiles[2]
   })
 
   const currentStageLabel = computed(() => {
