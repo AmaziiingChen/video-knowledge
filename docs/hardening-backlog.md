@@ -62,6 +62,9 @@ lines.
   Scope predicates, FTS ranks and lexical fallback ranks now live in
   `services/knowledge_retrieval_store.py`; the answer orchestrator retains
   vector ranking and result selection.
+  The process-local vector cache and scope-first dense ranking now live in
+  `services/knowledge_vector_index.py`; embedding writes only invalidate that
+  dedicated cache after a completed batch.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
