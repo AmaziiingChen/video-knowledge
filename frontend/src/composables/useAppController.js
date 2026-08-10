@@ -1,4 +1,4 @@
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { requestDestructiveConfirmation } from './useDestructiveConfirm'
@@ -75,6 +75,7 @@ import { useContentRecoveryController } from '../features/library/useContentReco
 import { useLinkIngestController } from '../features/imports/useLinkIngestController.js'
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
 import { useMarkdownOutputSettingsController } from '../features/library/useMarkdownOutputSettingsController.js'
+import { useMarkdownDocumentController } from '../features/library/useMarkdownDocumentController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
 import { usePlatformCredentialController } from '../features/integrations/usePlatformCredentialController.js'
 import { useCompletionNotificationController } from '../features/notifications/useCompletionNotificationController.js'
@@ -105,6 +106,28 @@ export function useAppController() {
     startSettingsPersistence,
     restoreSettings,
   } = useAppSettingsController()
+  const {
+    showMarkdownDialog,
+    currentMarkdownItem,
+    loadingMarkdown,
+    savingMarkdown,
+    syncingMarkdown,
+    markdownState,
+    applyMarkdownState,
+    resetMarkdownState,
+    loadMarkdownForItem,
+    openMarkdownDialog,
+    saveMarkdownDraft,
+    syncMarkdownDraft,
+  } = useMarkdownDocumentController({
+    notify: ElMessage,
+    setSelectedContentItem: (item) => {
+      selectedContentItem.value = item
+    },
+    isSelectedContentItem: (itemId) => (
+      String(selectedContentItem.value?.id || '') === String(itemId || '')
+    ),
+  })
   const {
     workspaceTabs,
     activeWorkspaceTabId,
@@ -404,11 +427,6 @@ export function useAppController() {
     activeView,
     ribbonItems,
   })
-  const showMarkdownDialog = ref(false)
-  const currentMarkdownItem = ref(null)
-  const loadingMarkdown = ref(false)
-  const savingMarkdown = ref(false)
-  const syncingMarkdown = ref(false)
   const batchTasks = ref([])
   const batchTaskIds = ref([])
   const batchTaskNames = ref({})
@@ -642,17 +660,6 @@ export function useAppController() {
     notify: ElMessage,
     confirmDisconnect: requestDestructiveConfirmation,
   })
-  const markdownState = reactive({
-    content_item_id: null,
-    markdown_draft_path: null,
-    obsidian_path: null,
-    markdown: '',
-    markdown_size_bytes: 0,
-    sync_status: 'unknown',
-    conflict: false,
-    last_synced_at: null
-  })
-
   const renderedSummary = computed(() => {
     return renderMarkdown(result.summary)
   })
@@ -1424,28 +1431,6 @@ export function useAppController() {
     })
   }
 
-  function applyMarkdownState(data) {
-    markdownState.content_item_id = data.content_item_id || null
-    markdownState.markdown_draft_path = data.markdown_draft_path || null
-    markdownState.obsidian_path = data.obsidian_path || null
-    markdownState.markdown = data.markdown || ''
-    markdownState.markdown_size_bytes = Number(data.markdown_size_bytes || 0)
-    markdownState.sync_status = data.sync_status || 'unknown'
-    markdownState.conflict = Boolean(data.conflict)
-    markdownState.last_synced_at = data.last_synced_at || null
-  }
-
-  function resetMarkdownState() {
-    markdownState.content_item_id = null
-    markdownState.markdown_draft_path = null
-    markdownState.obsidian_path = null
-    markdownState.markdown = ''
-    markdownState.markdown_size_bytes = 0
-    markdownState.sync_status = 'unknown'
-    markdownState.conflict = false
-    markdownState.last_synced_at = null
-  }
-
   async function selectContentItem(item, { awaitPrimaryPreview = false } = {}) {
     const changed = String(selectedContentItem.value?.id || '') !== String(item.id || '')
     selectedContentItem.value = item
@@ -1477,21 +1462,7 @@ export function useAppController() {
     }
     void loadCurrentArticleOcrStatus()
     void loadContentAiCalls(item.id)
-    loadingMarkdown.value = true
-    try {
-      const res = await axios.get(`${API}/markdown/content/${item.id}`, { timeout: 10000 })
-      if (String(selectedContentItem.value?.id || '') === String(item.id)) {
-        applyMarkdownState(res.data)
-      }
-    } catch {
-      if (String(selectedContentItem.value?.id || '') === String(item.id)) {
-        resetMarkdownState()
-      }
-    } finally {
-      if (String(selectedContentItem.value?.id || '') === String(item.id)) {
-        loadingMarkdown.value = false
-      }
-    }
+    await loadMarkdownForItem(item)
     if (awaitPrimaryPreview) {
       await Promise.all([hydrationPromise, primaryPreviewPromise])
     }
@@ -1507,57 +1478,6 @@ export function useAppController() {
     const format = String(item?.source_metadata?.file_format || '').toUpperCase()
     const filename = String(item?.source_metadata?.file_name || '')
     return ['HTML', 'HTM', 'XHTML'].includes(format) || /\.x?html?$/i.test(filename)
-  }
-
-  async function openMarkdownDialog(item) {
-    currentMarkdownItem.value = item
-    selectedContentItem.value = item
-    showMarkdownDialog.value = true
-    loadingMarkdown.value = true
-    try {
-      const res = await axios.get(`${API}/markdown/content/${item.id}`, { timeout: 10000 })
-      applyMarkdownState(res.data)
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '读取 Markdown 草稿失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '读取 Markdown 草稿失败')
-      showMarkdownDialog.value = false
-    } finally {
-      loadingMarkdown.value = false
-    }
-  }
-
-  async function saveMarkdownDraft() {
-    if (!currentMarkdownItem.value?.id) return
-    savingMarkdown.value = true
-    try {
-      const res = await axios.put(`${API}/markdown/content/${currentMarkdownItem.value.id}`, {
-        markdown: markdownState.markdown
-      }, { timeout: 10000 })
-      applyMarkdownState(res.data)
-      selectedContentItem.value = currentMarkdownItem.value
-      ElMessage.success('草稿已保存')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '保存 Markdown 失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '保存 Markdown 失败')
-    } finally {
-      savingMarkdown.value = false
-    }
-  }
-
-  async function syncMarkdownDraft() {
-    if (!currentMarkdownItem.value?.id) return
-    syncingMarkdown.value = true
-    try {
-      const res = await axios.post(`${API}/markdown/content/${currentMarkdownItem.value.id}/sync`, {}, { timeout: 10000 })
-      applyMarkdownState(res.data)
-      selectedContentItem.value = currentMarkdownItem.value
-      ElMessage.success('已写入指定 Markdown 目录')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '写入 Markdown 失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '写入 Markdown 失败')
-    } finally {
-      syncingMarkdown.value = false
-    }
   }
 
   async function monitorCreatorSyncTasks({ taskIds = [], contentItemIds = [] } = {}) {

@@ -165,7 +165,10 @@ lines.
   process-log collection, report-log persistence, incremental backend-log
   ingestion and the clear-log transaction now live in
   `features/logs/useProcessLogController.js`, while the UI projection remains
-  next to its task presentation dependencies;
+  next to its task presentation dependencies. Markdown draft loading, stale
+  selection protection, editor state, saving and explicit output-directory
+  synchronization now live in
+  `features/library/useMarkdownDocumentController.js`;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,
