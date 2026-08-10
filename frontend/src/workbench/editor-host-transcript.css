@@ -1,9 +1,3 @@
-.content-fact-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
 .content-fact-button {
   width: 28px;
   height: 28px;
