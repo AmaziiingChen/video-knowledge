@@ -253,6 +253,9 @@ lines.
   in `features/library/libraryTreeDragPolicy.js`, while dispatch, file-import
   routing and move transactions now live in
   `workbench/useLibraryTreeDragController.js` with behavior-level tests.
+  Folder/content editing, picker/drop imports and delete-request projection
+  now live in `workbench/useLibraryNodeEditingController.js`; direct tests lock
+  parent-folder expansion, focus timing and the existing event payloads.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
   backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network

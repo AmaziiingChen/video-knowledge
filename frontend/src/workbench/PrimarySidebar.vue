@@ -301,6 +301,7 @@ import PromptFileTree from './PromptFileTree.vue'
 import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 import { useLibraryTreeDragController } from './useLibraryTreeDragController.js'
+import { useLibraryNodeEditingController } from './useLibraryNodeEditingController.js'
 import { useTreeBoxSelectionController } from './useTreeBoxSelectionController.js'
 import { useVirtualLibraryTreeController } from './useVirtualLibraryTreeController.js'
 const folderIcon = 'folder'
@@ -469,11 +470,8 @@ function saveOpenFolderIds(folderIds) { saveSavedOpenFolderIds(folderIds) }
 
 // An empty saved state deliberately means that every folder starts collapsed.
 const openFolderIds = ref(loadOpenFolderIds())
-const editingNode = ref(null)
-const editingInput = ref(null)
 const librarySearchInput = ref(null)
 const searchScope = computed(() => props.searchScope)
-const markdownImportInput = ref(null)
 const selectedKeys = ref(new Set())
 const anchorKey = ref(null)
 const contentContextMenu = ref(null)
@@ -571,6 +569,33 @@ const presentationLibraryNodes = computed(() => {
   return presentLibraryNodesWithSeparators(visibleLibraryNodes.value, userGroupSeparators.value)
 })
 
+const selectedNodes = computed(() => {
+  const selected = selectedKeys.value
+  return visibleLibraryNodes.value.filter((node) => selected.has(nodeKey(node)))
+})
+const selectedContentNodes = computed(() => selectedNodes.value.filter(isContentNode))
+const {
+  editingNode,
+  editingInput,
+  markdownImportInput,
+  startNewFolder,
+  chooseMarkdownFile,
+  importMarkdownFile,
+  importDroppedFiles,
+  startRename,
+  isEditing,
+  commitEditing,
+  cancelEditing,
+  requestDelete,
+  requestDeleteSelected,
+} = useLibraryNodeEditingController({
+  openFolderIds,
+  selectedKeys,
+  selectedNodes,
+  saveOpenFolderIds,
+  emit,
+})
+
 const renderedLibraryNodes = computed(() => {
   const draft = editingNode.value?.isNew ? editingNode.value : null
   if (!draft || draft.parentFolderId === null) return presentationLibraryNodes.value
@@ -639,12 +664,6 @@ const {
   emit,
   cancelBoxSelection,
 })
-
-const selectedNodes = computed(() => {
-  const selected = selectedKeys.value
-  return visibleLibraryNodes.value.filter((node) => selected.has(nodeKey(node)))
-})
-const selectedContentNodes = computed(() => selectedNodes.value.filter(isContentNode))
 
 function rootLayoutEntries({ excludeFolderIds = new Set(), excludeSeparatorIds = new Set() } = {}) {
   const folders = visibleLibraryNodes.value.filter((node) => (
@@ -1083,106 +1102,6 @@ function selectRange(fromKey, toKey) {
   }
   const [start, end] = from < to ? [from, to] : [to, from]
   setSelectedKeys(keys.slice(start, end + 1))
-}
-
-function startNewFolder(parentFolderId) {
-  if (parentFolderId) {
-    const next = new Set(openFolderIds.value)
-    next.add(String(parentFolderId))
-    openFolderIds.value = next
-    saveOpenFolderIds(next)
-  }
-  editingNode.value = {
-    type: 'folder',
-    id: `new:${Date.now()}`,
-    value: '新建文件夹',
-    isNew: true,
-    parentFolderId: parentFolderId || null
-  }
-  focusEditingInput()
-}
-
-function chooseMarkdownFile() {
-  markdownImportInput.value?.click()
-}
-
-function importMarkdownFile(event) {
-  const files = Array.from(event.target?.files || [])
-  if (!files.length) return
-  const targetFolder = selectedNodes.value.find((node) => node.type === 'folder')
-  emit('import-markdown', {
-    files,
-    libraryFolderId: targetFolder?.id || null,
-  })
-  event.target.value = ''
-}
-
-function importDroppedFiles(event) {
-  const files = Array.from(event.dataTransfer?.files || [])
-  if (!files.length) return
-  const targetFolder = selectedNodes.value.find((node) => node.type === 'folder')
-  emit('import-markdown', { files, libraryFolderId: targetFolder?.id || null })
-}
-
-function startRename(node) {
-  editingNode.value = {
-    type: node.type,
-    id: node.id,
-    value: node.name,
-    isNew: false
-  }
-  focusEditingInput()
-}
-
-function isEditing(node) {
-  return editingNode.value && !editingNode.value.isNew && editingNode.value.type === node.type && editingNode.value.id === node.id
-}
-
-function focusEditingInput() {
-  nextTick(() => {
-    const target = Array.isArray(editingInput.value) ? editingInput.value.at(-1) : editingInput.value
-    target?.focus()
-    target?.select()
-  })
-}
-
-function commitEditing() {
-  const current = editingNode.value
-  const value = current?.value?.trim()
-  if (!current || !value) {
-    cancelEditing()
-    return
-  }
-
-  if (current.isNew) {
-    emit('create-folder', {
-      name: value,
-      parent_folder_id: current.parentFolderId
-    })
-  } else if (current.type === 'folder') {
-    emit('rename-folder', { id: current.id, name: value })
-  } else {
-    emit('rename-content', { id: current.id, title: value })
-  }
-  editingNode.value = null
-}
-
-function cancelEditing() {
-  editingNode.value = null
-}
-
-function requestDelete(node) {
-  if (node.type === 'folder') {
-    emit('delete-folder', node.raw)
-  } else {
-    emit('delete-content', node.raw)
-  }
-}
-
-function requestDeleteSelected() {
-  if (!selectedNodes.value.length) return
-  emit('delete-selected', selectedNodes.value.map((node) => node.raw ? { ...node.raw, type: node.type } : node))
-  selectedKeys.value = new Set()
 }
 
 </script>
