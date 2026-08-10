@@ -104,6 +104,11 @@ lines.
   lives in `features/library/useLibrarySearchController.js`; tree presentation,
   task runtime, imports and assistant sessions remain in the facade pending
   their own behavior-preserving slices.
+  Folder-tree startup hydration, bounded restored-item resolution, per-folder
+  history pagination, retry lifecycle and local content projection now live in
+  `features/library/useLibraryContentController.js`. The unreachable legacy
+  global recent-window pagination/fallback chain has been retired; the backend
+  pagination contract remains unchanged for API compatibility.
   The independent trash transaction boundary now lives in
   `features/library/useLibraryTrashController.js`; history snapshots, undo/redo
   and shortcut handling now live in `features/library/useLibraryHistoryController.js`.
@@ -139,9 +144,9 @@ lines.
   live in `features/library/useLibrarySourceGroupController.js`. Folder-tree
   mutation transactions (rename, move and recycle-bin deletion) now live in
   `features/library/useLibraryMutationController.js`, preserving optimistic
-  updates, rollback, tab cleanup and durable history records. Folder-tree
-  ownership, task runtime, link import and assistant sessions remain in the
-  facade because they still share durable queue state. The active-reader
+  updates, rollback, tab cleanup and durable history records. Task runtime,
+  link import and assistant sessions remain in the facade because
+  they still share durable queue state. The active-reader
   EventSource lifecycle now lives in
   `features/tasks/useActiveTaskEventStreamController.js`, retaining task-ID
   validation, terminal cleanup and polling fallback behavior.

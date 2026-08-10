@@ -928,7 +928,6 @@ const {
   libraryFolderHistoryStates,
   libraryFolderRevealIds,
   allContentItems,
-  contentPagesLoading,
   contentPageLoadStatus,
   libraryTrashEntries,
   loadingLibraryTrash,

@@ -71,6 +71,7 @@ import { useWorkspaceTabProjectionController } from '../features/workspace/useWo
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
 import { useContentReadinessController } from '../features/library/useContentReadinessController.js'
+import { useLibraryContentController } from '../features/library/useLibraryContentController.js'
 import { useLibraryFolderController } from '../features/library/useLibraryFolderController.js'
 import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
 import { useLibraryTrashController } from '../features/library/useLibraryTrashController.js'
@@ -250,56 +251,31 @@ export function useAppController() {
   const autoDownloadBilibiliVideo = ref(false)
   const douyinVideoQuality = ref('standard')
   const libraryFolders = ref([])
-  // Archive rows are intentionally opt-in. They are merged into the current
-  // tree only after a user expands a folder or completes a history sync.
-  const libraryFolderHistoryStates = ref({})
-  const libraryFolderRevealIds = ref([])
-  const contentItems = ref([])
-  const allContentItems = ref([])
-  // The global startup gate only needs the folder tree and first page.  Keep
-  // the slower historical pagination observable inside the sidebar instead.
-  const contentPagesLoading = ref(false)
-  const contentPageLoadStatus = reactive({
-    state: 'idle',
-    loaded: 0,
-    total: 0,
-  })
-  let contentPageLoadVersion = 0
-  let contentPageApiAvailable = null
-  let contentRecentAfter = null
-  let contentStartupRetryTimer = null
-  let contentStartupRetryCount = 0
-  // The workbench may render before Electron has finished starting Python.
-  // Keep one explicit gate for the first usable library page so status-bound
-  // controls cannot race their startup hydration.
-  const startupPhase = ref('connecting')
-  const startupBlocking = computed(() => startupPhase.value !== 'ready')
-  const startupCanRetry = computed(() => startupPhase.value === 'retrying')
-  const startupStatus = computed(() => {
-    if (startupPhase.value === 'library') {
-      return {
-        title: '正在读取资料库',
-        detail: '正在整理文件树，完成后即可开始操作。'
-      }
-    }
-    if (startupPhase.value === 'workspace') {
-      return {
-        title: '正在恢复工作台',
-        detail: '正在打开上次查看的资料。'
-      }
-    }
-    if (startupPhase.value === 'retrying') {
-      return {
-        title: '资料库暂未响应',
-        detail: '正在自动重新连接；也可以立即再试一次。'
-      }
-    }
-    return {
-      title: '正在连接本机服务',
-      detail: '资料库与后台任务正在准备中。'
-    }
-  })
   const selectedContentItem = ref(null)
+  const {
+    libraryFolderHistoryStates,
+    libraryFolderRevealIds,
+    contentItems,
+    allContentItems,
+    contentPageLoadStatus,
+    startupBlocking,
+    startupCanRetry,
+    startupStatus,
+    loadContentItems,
+    retryStartupHydration,
+    revealContentItems,
+    expandLibraryFolders,
+    loadLibraryFolderHistory,
+    applyContentFilter,
+    updateLocalContentItem,
+    dispose: disposeLibraryContentController,
+  } = useLibraryContentController({
+    selectedContentItem,
+    mergeContentItems: mergeUniqueContentItems,
+    reconcileContentViewState: (...args) => reconcileContentViewState(...args),
+    loadLibraryFolders: (...args) => loadLibraryFolders(...args),
+    syncActiveWorkspaceTabSelection: (...args) => syncActiveWorkspaceTabSelection(...args),
+  })
   const {
     cookieConfigured,
     cookieState,
@@ -452,8 +428,6 @@ export function useAppController() {
     activeView,
     ribbonItems,
   })
-  const loadingContent = ref(false)
-  const updatingContentId = ref(null)
   const showMarkdownDialog = ref(false)
   const currentMarkdownItem = ref(null)
   const loadingMarkdown = ref(false)
@@ -916,14 +890,6 @@ export function useAppController() {
     recordTelemetry,
   })
 
-  const contentStatusCounts = computed(() => {
-    const counts = { all: allContentItems.value.length }
-    for (const item of allContentItems.value) {
-      counts[item.status] = (counts[item.status] || 0) + 1
-    }
-    return counts
-  })
-
   const timingRows = computed(() => {
     const timings = result.timings || {}
     return timingOrder
@@ -1176,19 +1142,8 @@ export function useAppController() {
     }
   }
 
-  function contentStatusCount(status) {
-    return contentStatusCounts.value[status] || 0
-  }
-
   function openContentFromSidebar(item) {
     openContentTab(item)
-  }
-
-  function openSearchResult(item) {
-    const content = allContentItems.value.find((current) => current.id === item.content_key)
-    if (content) {
-      openContentTab(content)
-    }
   }
 
   async function syncVisibleProgressiveContent(task) {
@@ -1436,10 +1391,7 @@ export function useAppController() {
     disposeArticlePreviews()
     stopAiTokenUsagePolling()
     cancelDeferredCookieProbe()
-    if (contentStartupRetryTimer) {
-      window.clearTimeout(contentStartupRetryTimer)
-      contentStartupRetryTimer = null
-    }
+    disposeLibraryContentController()
     window.removeEventListener('keydown', handleLibraryHistoryShortcut)
     disposeLibrarySearchController()
   })
@@ -1648,246 +1600,6 @@ export function useAppController() {
         openSections.value = ['logs']
       }
       pollTimer.value = setTimeout(() => pollTask(taskId), retryDelay)
-    }
-  }
-
-  function scheduleContentStartupRetry() {
-    startupPhase.value = 'retrying'
-    if (contentStartupRetryTimer || contentStartupRetryCount >= 3) return
-    contentStartupRetryCount += 1
-    const delay = 600 * contentStartupRetryCount
-    contentStartupRetryTimer = window.setTimeout(() => {
-      contentStartupRetryTimer = null
-      void loadContentItems({ startup: true })
-    }, delay)
-  }
-
-  async function loadContentItems({ startup = false } = {}) {
-    if (startup) startupPhase.value = 'library'
-    loadingContent.value = true
-    const loadVersion = ++contentPageLoadVersion
-    contentPagesLoading.value = false
-    Object.assign(contentPageLoadStatus, {
-      state: 'idle',
-      loaded: allContentItems.value.length,
-      total: allContentItems.value.length,
-    })
-    try {
-      // The source tree is the startup contract.  Article rows deliberately
-      // stay out of this request path: a large library can have thousands of
-      // entries, but the user only needs one small folder page at a time.
-      await loadLibraryFolders({ throwOnError: startup })
-      if (loadVersion !== contentPageLoadVersion) return
-      contentStartupRetryCount = 0
-      if (startup) {
-        startupPhase.value = 'workspace'
-        // A restored tab resolves only its own content item. It must not make
-        // the complete library a startup dependency.
-        void syncActiveWorkspaceTabSelection()
-        startupPhase.value = 'ready'
-      } else {
-        void syncActiveWorkspaceTabSelection()
-      }
-    } catch (e) {
-      const timedOut = e?.code === 'ECONNABORTED' || /timeout/i.test(String(e?.message || ''))
-      if (startup && timedOut) {
-        scheduleContentStartupRetry()
-        ElMessage.warning('资料库暂未响应，正在重新连接')
-      } else {
-        if (startup) startupPhase.value = 'retrying'
-        const msg = e.response?.data?.detail || e.message || '读取内容库失败'
-        ElMessage.error(typeof msg === 'string' ? msg : '读取内容库失败')
-      }
-    } finally {
-      loadingContent.value = false
-    }
-  }
-
-  function retryStartupHydration() {
-    if (startupPhase.value !== 'retrying') return
-    if (contentStartupRetryTimer) {
-      window.clearTimeout(contentStartupRetryTimer)
-      contentStartupRetryTimer = null
-    }
-    contentStartupRetryCount = 0
-    void loadContentItems({ startup: true })
-  }
-
-  function publishContentItems(items, { initialWindowComplete = false } = {}) {
-    const recentItems = Array.isArray(items) ? items : []
-    const retainedHistory = allContentItems.value.filter(isLoadedHistoryContent)
-    const mergedItems = mergeUniqueContentItems(recentItems, retainedHistory)
-    allContentItems.value = mergedItems
-    reconcileContentViewState(mergedItems, { initialWindowComplete })
-    applyContentFilter()
-  }
-
-  function isLoadedHistoryContent(item) {
-    if (!contentRecentAfter || !item) return false
-    const timestamp = Date.parse(item.published_at || item.created_at || '')
-    const cutoff = Date.parse(contentRecentAfter)
-    return Number.isFinite(timestamp) && Number.isFinite(cutoff) && timestamp < cutoff
-  }
-
-  function mergeExplicitHistoryItems(items) {
-    const historyItems = Array.isArray(items) ? items.filter(Boolean) : []
-    if (!historyItems.length) return
-    allContentItems.value = mergeUniqueContentItems(allContentItems.value, historyItems)
-    reconcileContentViewState(allContentItems.value)
-    applyContentFilter()
-  }
-
-  function expandLibraryFolders(folderIds) {
-    const ids = [...new Set((folderIds || []).map(String).filter(Boolean))]
-    if (ids.length) libraryFolderRevealIds.value = ids
-  }
-
-  async function revealContentItems(contentItemIds) {
-    const ids = [...new Set((contentItemIds || []).map(String).filter(Boolean))].slice(0, 300)
-    if (!ids.length) return []
-    try {
-      const response = await axios.post(`${API}/content/items/resolve`, {
-        content_item_ids: ids,
-      }, { timeout: 15000 })
-      const items = Array.isArray(response.data) ? response.data : []
-      mergeExplicitHistoryItems(items)
-      expandLibraryFolders(items.map((item) => item.library_folder_id))
-      return items
-    } catch (error) {
-      // The normal refresh already succeeded. Do not turn a tree enhancement
-      // into a failed source sync when this optional bounded request is lost.
-      ElMessage.warning('历史资料已保存；展开左侧对应文件夹可重新加载')
-      return []
-    }
-  }
-
-  async function loadLibraryFolderHistory({ folderId, append = false } = {}) {
-    const id = String(folderId || '')
-    if (!id) return
-    const previous = libraryFolderHistoryStates.value[id] || {
-      offset: 0,
-      hasMore: true,
-      loaded: false,
-    }
-    if (previous.loading || (append && !previous.hasMore)) return
-    const offset = append ? Number(previous.offset || 0) : 0
-    libraryFolderHistoryStates.value = {
-      ...libraryFolderHistoryStates.value,
-      [id]: { ...previous, loading: true },
-    }
-    try {
-      const response = await axios.get(`${API}/content/folders/${encodeURIComponent(id)}/items`, {
-        params: {
-          limit: 80,
-          offset,
-        },
-        timeout: 15000,
-      })
-      const page = response.data || {}
-      const items = Array.isArray(page.items) ? page.items : []
-      mergeExplicitHistoryItems(items)
-      libraryFolderHistoryStates.value = {
-        ...libraryFolderHistoryStates.value,
-        [id]: {
-          offset: offset + items.length,
-          hasMore: Boolean(page.has_more),
-          loaded: true,
-          loading: false,
-        },
-      }
-    } catch (error) {
-      libraryFolderHistoryStates.value = {
-        ...libraryFolderHistoryStates.value,
-        [id]: { ...previous, loading: false },
-      }
-      const detail = error?.response?.data?.detail || error?.message || '加载文件夹资料失败'
-      ElMessage.error(typeof detail === 'string' ? detail : '加载文件夹资料失败')
-    }
-  }
-
-  async function loadRemainingContentPages(
-    initialItems,
-    offset,
-    loadVersion,
-    recentAfter,
-    totalItems = 0,
-    { publishProgress = true } = {},
-  ) {
-    let collectedItems = [...initialItems]
-    let nextOffset = offset
-    let hasMore = true
-    while (loadVersion === contentPageLoadVersion && hasMore) {
-      const page = await fetchContentPage(nextOffset, recentAfter)
-      const items = Array.isArray(page.items) ? page.items : []
-      if (!items.length) throw new Error('内容分页提前结束')
-      collectedItems = mergeUniqueContentItems(collectedItems, items)
-      nextOffset += items.length
-      hasMore = Boolean(page.has_more)
-      // Startup keeps the gate in place until this recent window is complete;
-      // publishing once avoids repeated tree layout work behind the overlay.
-      if (loadVersion === contentPageLoadVersion && publishProgress) {
-        publishContentItems(collectedItems, { initialWindowComplete: !hasMore })
-        contentPageLoadStatus.loaded = collectedItems.length
-        contentPageLoadStatus.total = Math.max(
-          collectedItems.length,
-          Number(page.total || totalItems || 0),
-        )
-        if (!hasMore) contentPageLoadStatus.state = 'idle'
-      }
-    }
-    return collectedItems
-  }
-
-  async function fetchContentPage(offset, recentAfter = contentRecentAfter, limit = 200, { timeout = 10000 } = {}) {
-    if (contentPageApiAvailable !== false) {
-      try {
-        const params = { limit, offset }
-        if (recentAfter) params.recent_after = recentAfter
-        const res = await axios.get(`${API}/content/page`, { params, timeout })
-        contentPageApiAvailable = true
-        const page = res.data || {}
-        if (!contentRecentAfter && typeof page.recent_after === 'string') contentRecentAfter = page.recent_after
-        return page
-      } catch (error) {
-        const status = error.response?.status
-        if (status !== 404 && status !== 405) throw error
-        contentPageApiAvailable = false
-      }
-    }
-
-    const legacy = await axios.get(`${API}/content`, { params: { limit: 500 }, timeout })
-    const items = Array.isArray(legacy.data) ? legacy.data : []
-    return { items, total: items.length, offset: 0, has_more: false }
-  }
-
-  function applyContentFilter() {
-    contentItems.value = allContentItems.value
-  }
-
-  async function updateContentStatus(item, status) {
-    if (!item?.id || updatingContentId.value) return
-    updatingContentId.value = item.id
-    try {
-      const res = await axios.patch(`${API}/content/${item.id}/status`, { status }, { timeout: 10000 })
-      const updated = res.data
-      allContentItems.value = allContentItems.value.map((current) => current.id === updated.id ? updated : current)
-      applyContentFilter()
-      ElMessage.success('状态已更新')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '更新状态失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '更新状态失败')
-    } finally {
-      updatingContentId.value = null
-    }
-  }
-
-  function updateLocalContentItem(id, updater) {
-    allContentItems.value = allContentItems.value.map((item) => {
-      return item.id === id ? updater({ ...item }) : item
-    })
-    applyContentFilter()
-    if (selectedContentItem.value?.id === id) {
-      selectedContentItem.value = allContentItems.value.find((item) => item.id === id) || selectedContentItem.value
     }
   }
 
@@ -2318,7 +2030,6 @@ export function useAppController() {
     libraryTrashEntries,
     loadingLibraryTrash,
     allContentItems,
-    contentPagesLoading,
     contentPageLoadStatus,
     selectedContentItem,
     startupBlocking,
