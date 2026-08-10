@@ -21,6 +21,14 @@ const reportReaderStyles = await readFile(
   new URL('./report-reader-surface.css', import.meta.url),
   'utf8',
 )
+const timedMediaSource = await readFile(
+  new URL('./TimedMediaPreviewSurface.vue', import.meta.url),
+  'utf8',
+)
+const timedMediaStyles = await readFile(
+  new URL('./timed-media-preview-surface.css', import.meta.url),
+  'utf8',
+)
 const workbenchShellSource = await readFile(
   new URL('./WorkbenchShell.vue', import.meta.url),
   'utf8',
@@ -66,19 +74,15 @@ test('keeps Xiaohongshu captures visible as independent image and text streams',
 })
 
 test('uses a native media spinner instead of skeleton text over a video cover', () => {
-  const coverPreview = editorHostSource.slice(
-    editorHostSource.indexOf("contentForTab(activeContentTab.id)?.cover_url"),
-    editorHostSource.indexOf("<div v-else class=\"media-placeholder\">")
-  )
-  assert.match(coverPreview, /class="media-preview-loader"/)
-  assert.match(coverPreview, /class="media-preview-spinner"/)
-  assert.doesNotMatch(coverPreview, /AiSkeletonStream/)
-  assert.match(editorHostStyles, /@keyframes media-preview-spin/)
+  assert.match(timedMediaSource, /class="media-preview-loader"/)
+  assert.match(timedMediaSource, /class="media-preview-spinner"/)
+  assert.doesNotMatch(timedMediaSource, /AiSkeletonStream/)
+  assert.match(timedMediaStyles, /@keyframes media-preview-spin/)
   assert.match(
     editorHostSource,
     /\{\s*activeContentActionMenuModel,\s*handleContentActionMenuSelect,\s*isVideoCacheExpired\s*\}\s*=\s*useEditorContentActionMenuController/,
   )
-  assert.match(coverPreview, /isVideoCacheExpired\(activeContentTab\.id\)/)
+  assert.match(editorHostSource, /:video-cache-expired="isVideoCacheExpired\(activeContentTab\.id\)"/)
 })
 
 test('keeps the EditorHost scoped style domains in their original cascade order', () => {
@@ -91,11 +95,20 @@ test('keeps the EditorHost scoped style domains in their original cascade order'
 test('keeps local originals ahead of article and timed-media preview branches', () => {
   const localReader = editorHostSource.indexOf('<LocalFileReaderSurface')
   const articleReader = editorHostSource.indexOf('<ArticleReaderSurface')
-  const audioPlayer = editorHostSource.indexOf('isAudioTab(activeContentTab.id) && mediaUrlForTab')
+  const mediaPreview = editorHostSource.indexOf('<TimedMediaPreviewSurface')
 
   assert.ok(localReader >= 0)
   assert.ok(localReader < articleReader)
-  assert.ok(localReader < audioPlayer)
+  assert.ok(localReader < mediaPreview)
+})
+
+test('exposes only a mounted timed-media player to the transcript controller', () => {
+  assert.match(
+    editorHostSource,
+    /const activePlayer = computed\(\(\) => \([\s\S]*?mediaPreviewSurface\.value\?\.hasPlayer\?\.\(\)[\s\S]*?mediaPreviewSurface\.value : null/,
+  )
+  assert.match(timedMediaSource, /hasPlayer:\s*\(\) => Boolean\(player\.value\)/)
+  assert.match(timedMediaSource, /seek,[\s\S]*?togglePlayback,/)
 })
 
 test('keeps capture metadata separators with the report reader surface', () => {

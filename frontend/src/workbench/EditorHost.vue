@@ -163,58 +163,19 @@
                   @open-external-link="$emit('open-external-link', $event)"
                   @open-campus-attachment="$emit('open-campus-attachment', $event)"
                 />
-                <template v-else-if="isAudioTab(activeContentTab.id) && mediaUrlForTab(activeContentTab.id)">
-                  <ArtAudioPlayer
-                    ref="activePlayer"
-                    :src="mediaUrlForTab(activeContentTab.id)"
-                    :title="contentForTab(activeContentTab.id)?.title || activeContentTab.title"
-                    :cache-key="activeContentTab.id"
-                    @time-update="handlePlayerTimeUpdate"
-                    @playback-change="handleAudioPlaybackChange"
-                  />
-                </template>
-                <template v-else-if="mediaUrlForTab(activeContentTab.id)">
-                  <ArtVideoPlayer
-                    ref="activePlayer"
-	                    :src="mediaUrlForTab(activeContentTab.id)"
-	                    :poster="contentForTab(activeContentTab.id)?.cover_url || ''"
-	                    :thumbnail-vtt-url="contentForTab(activeContentTab.id)?.thumbnail_vtt_url || ''"
-	                    @time-update="handlePlayerTimeUpdate"
-	                  />
-                </template>
-                <template v-else-if="contentForTab(activeContentTab.id)?.cover_url">
-                  <img
-                    :src="contentForTab(activeContentTab.id).cover_url"
-                    alt=""
-                  />
-                  <div v-if="isVideoCacheExpired(activeContentTab.id)" class="media-cache-expired" role="status">
-                    本地视频预览已于 {{ formatDateTime(contentForTab(activeContentTab.id)?.video_cache_expired_at) }} 清理，文本与摘要仍可阅读。
-                  </div>
-                  <div
-                    v-if="contentForTab(activeContentTab.id)?.status === 'processing'"
-                    class="media-preview-loader"
-                    role="status"
-                    aria-live="polite"
-                    aria-label="正在加载视频预览"
-                  >
-                    <span class="media-preview-spinner" aria-hidden="true"></span>
-                  </div>
-                </template>
-                <div
-                  v-else-if="contentForTab(activeContentTab.id)?.status === 'processing' && ['video', 'audio'].includes(contentForTab(activeContentTab.id)?.content_type)"
-                  class="media-preview-loader is-empty"
-                  role="status"
-                  aria-live="polite"
-                  aria-label="正在加载媒体预览"
-                >
-                  <span class="media-preview-spinner" aria-hidden="true"></span>
-                </div>
-                <div v-else class="media-placeholder">
-                  <SvgMaskIcon :src="movieClapperIcon" :size="40" />
-                  <span v-if="contentForTab(activeContentTab.id)?.content_type === 'video'">
-                    {{ isVideoCacheExpired(activeContentTab.id) ? '本地视频预览已过期，可从右上角“内容操作”重新下载' : '视频文件尚未缓存，可从右上角“内容操作”重新处理' }}
-                  </span>
-                </div>
+                <TimedMediaPreviewSurface
+                  v-else
+                  ref="mediaPreviewSurface"
+                  :tab="activeContentTab"
+                  :content="contentForTab(activeContentTab.id)"
+                  :media-url="mediaUrlForTab(activeContentTab.id)"
+                  :audio="isAudioTab(activeContentTab.id)"
+                  :timed-media="isTimedMediaTab(activeContentTab.id)"
+                  :video-cache-expired="isVideoCacheExpired(activeContentTab.id)"
+                  :video-cache-expired-label="formatDateTime(contentForTab(activeContentTab.id)?.video_cache_expired_at)"
+                  @time-update="handlePlayerTimeUpdate"
+                  @playback-change="handleAudioPlaybackChange"
+                />
 
                 <div
                   class="content-overlay-actions"
@@ -507,6 +468,7 @@ import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'
 import ReportReaderSurface from './ReportReaderSurface.vue'
+import TimedMediaPreviewSurface from './TimedMediaPreviewSurface.vue'
 import { usePreviewFindController } from './usePreviewFindController.js'
 import { useMediaTranscriptWorkspaceController } from './useMediaTranscriptWorkspaceController.js'
 import { useXhsGalleryController } from './useXhsGalleryController.js'
@@ -522,8 +484,6 @@ import {
 import { createEditorReportPresentation } from './editorReportPresentation.js'
 import { isPreviewFindShortcut } from './previewFindShortcut.js'
 
-const ArtVideoPlayer = defineAsyncComponent(() => import('./ArtVideoPlayer.vue'))
-const ArtAudioPlayer = defineAsyncComponent(() => import('./ArtAudioPlayer.vue'))
 const ContentActionMenu = defineAsyncComponent(() => import('./ContentActionMenu.vue'))
 const props = defineProps({
   activeView: { type: String, required: true },
@@ -596,7 +556,6 @@ const emit = defineEmits([
   'delete-content',
 ])
 
-const activePlayer = ref(null)
 const contentHero = ref(null)
 const reportReaderSurface = ref(null)
 const reportReader = computed(() => reportReaderSurface.value?.getScrollRoot?.() || null)
@@ -640,6 +599,10 @@ const {
   contentForTab: props.contentForTab,
   articlePreviewForTab: props.articlePreviewForTab,
 })
+const mediaPreviewSurface = ref(null)
+const activePlayer = computed(() => (
+  mediaPreviewSurface.value?.hasPlayer?.() ? mediaPreviewSurface.value : null
+))
 const {
   reportDateLabel,
   reportDisplayTitle,

@@ -279,11 +279,6 @@
   cursor: default;
 }
 
-.media-stage {
-  display: block;
-  margin: 0;
-}
-
 .media-placeholder {
   flex: 1 1 auto;
   min-width: 0;

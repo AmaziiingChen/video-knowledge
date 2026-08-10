@@ -256,11 +256,13 @@ lines.
   `workbench/LocalFileReaderSurface.vue`; resolved local API URLs and content
   classification stay in the parent while the iframe/image DOM and its scoped
   presentation own one focused reader boundary.
+  Audio/video players, cover/loading/expired-cache states and the seek/playback
+  facade now live in mounted-tested `workbench/TimedMediaPreviewSurface.vue`;
+  transcript layout and timing state remain in their existing controller.
   Report title, date-window and generated-time presentation now live in
   `workbench/editorReportPresentation.js` with pure formatting tests. Article
   outline filtering and visual hierarchy now live in
-  `workbench/articleOutlineModel.js` with pure boundary tests. Timed-media
-  preview still needs its own mounted behavior boundary. The
+  `workbench/articleOutlineModel.js` with pure boundary tests. The
   former 1,907-line scoped style block now preserves its exact cascade through
   three co-located EditorHost domains: `editor-host-workspace.css`,
   `editor-host-articles.css` and `editor-host-transcript.css`; local-original
