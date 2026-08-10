@@ -176,5 +176,9 @@ export function useEditorContentActionMenuController({
     })
   }
 
-  return { activeContentActionMenuModel, handleContentActionMenuSelect }
+  return {
+    activeContentActionMenuModel,
+    handleContentActionMenuSelect,
+    isVideoCacheExpired,
+  }
 }

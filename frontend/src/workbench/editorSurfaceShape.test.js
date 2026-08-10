@@ -75,6 +75,11 @@ test('uses a native media spinner instead of skeleton text over a video cover', 
   assert.match(coverPreview, /class="media-preview-spinner"/)
   assert.doesNotMatch(coverPreview, /AiSkeletonStream/)
   assert.match(editorHostStyles, /@keyframes media-preview-spin/)
+  assert.match(
+    editorHostSource,
+    /\{\s*activeContentActionMenuModel,\s*handleContentActionMenuSelect,\s*isVideoCacheExpired\s*\}\s*=\s*useEditorContentActionMenuController/,
+  )
+  assert.match(coverPreview, /isVideoCacheExpired\(activeContentTab\.id\)/)
 })
 
 test('keeps the EditorHost scoped style domains in their original cascade order', () => {

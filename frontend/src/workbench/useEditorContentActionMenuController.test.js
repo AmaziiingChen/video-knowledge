@@ -84,6 +84,17 @@ test('keeps remote video eligibility and action payloads on the existing contrac
   ])
 })
 
+test('keeps the expired video cache predicate available to the preview surface', () => {
+  const content = {
+    id: 'content:video', content_type: 'video', video_cache_status: 'expired',
+  }
+  const { controller } = createHarness(content)
+
+  assert.equal(controller.isVideoCacheExpired('content:1'), true)
+  content.video_cache_status = 'ready'
+  assert.equal(controller.isVideoCacheExpired('content:1'), false)
+})
+
 test('exports a BOM transcript with a portable bounded filename and revokes its URL', () => {
   const content = {
     id: 'content:audio', content_type: 'audio', source_provider: 'local_file',

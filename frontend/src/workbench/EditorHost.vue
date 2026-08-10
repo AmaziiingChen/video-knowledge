@@ -917,10 +917,7 @@ onMounted(() => {
   scheduleReadingProgressRefresh()
 })
 
-const {
-  activeContentActionMenuModel,
-  handleContentActionMenuSelect,
-} = useEditorContentActionMenuController({
+const { activeContentActionMenuModel, handleContentActionMenuSelect, isVideoCacheExpired } = useEditorContentActionMenuController({
   props,
   activeContentTab,
   canOpenRemotePage: canOpenWechatRemotePage,
