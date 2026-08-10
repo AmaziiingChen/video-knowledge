@@ -119,8 +119,10 @@ lines.
   delegation now live in `features/assistant/useContentAnalysisController.js`.
   QA response SSE decoding, display throttling, usage updates and completed
   answer state reconciliation now live in
-  `features/assistant/createQaResponseStreamController.js`; request creation
-  and session orchestration remain in the facade.
+  `features/assistant/createQaResponseStreamController.js`. Initial QA-history
+  loading, bounded retry, cursor pagination and stale-request invalidation now
+  belong to `features/assistant/useQaSessionController.js`; request creation
+  remains in the facade.
   Content recovery actions (source text, reprocessing, retranscription,
   subtitles and redownloads) now live in
   `features/library/useContentRecoveryController.js` while reusing the durable

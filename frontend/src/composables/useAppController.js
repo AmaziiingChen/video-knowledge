@@ -13,7 +13,7 @@ import {
   terminalStatuses,
   timingOrder
 } from '../config/workbenchOptions'
-import { qaHistoryForPrompt, savedQaHistoryItems } from '../features/assistant/qaHistory'
+import { qaHistoryForPrompt } from '../features/assistant/qaHistory'
 import { matchQaShortcut } from '../features/assistant/qaShortcutMatcher'
 import {
   assistantSummaryFromMarkdown,
@@ -144,8 +144,13 @@ export function useAppController() {
     syncQaSessionIfActive,
     refreshQaSessionHistory,
     clearQaSession,
-    resetActiveQaSession
-  } = useQaSessionController()
+    resetActiveQaSession: resetQaState,
+    loadContentQaHistory,
+    loadMoreContentQaHistory,
+    retryContentQaHistory,
+  } = useQaSessionController({
+    getActiveContentId: () => activeWorkspaceContent.value?.id || result.content_item_id || null,
+  })
   const activeView = ref('library')
   const {
     aiCallsByContentId,
@@ -1447,89 +1452,6 @@ export function useAppController() {
     Object.entries(aiRequestOptions()).forEach(([key, value]) => {
       formData.append(key, String(value))
     })
-  }
-
-  function resetQaState() {
-    resetActiveQaSession()
-  }
-
-  async function loadContentQaHistory(contentItemId, session = ensureQaSession(contentItemId)) {
-    if (!contentItemId) return
-    if (session.historyLoaded || session.historyLoading) return
-    const requestId = ++session.historyRequestId
-    const initialHistoryLength = session.history.length
-    session.historyLoading = true
-    session.historyError = ''
-    syncQaSessionIfActive(contentItemId, session)
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const res = await axios.get(`${API}/content/${contentItemId}/qa-history`, {
-          params: { limit: 12 },
-          timeout: 10000
-        })
-        if (requestId !== session.historyRequestId) return
-        const savedItems = savedQaHistoryItems(res.data?.items)
-        // The user may send a question before the supplementary history request
-        // returns. Merge that locally-created pending turn instead of replacing
-        // it with the older persisted history.
-        session.history = session.history.length === initialHistoryLength
-          ? savedItems
-          : [...savedItems, ...session.history]
-        session.historyLoaded = true
-        session.historyHasMore = Boolean(res.data?.has_more)
-        session.historyNextBefore = String(res.data?.next_before || '')
-        return
-      } catch (error) {
-        if (attempt < 2) {
-          await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)))
-          continue
-        }
-        session.historyError = error.response?.data?.detail || '历史对话加载失败，可重试'
-      } finally {
-        if (attempt === 2 || session.historyLoaded || requestId !== session.historyRequestId) {
-          session.historyLoading = false
-          syncQaSessionIfActive(contentItemId, session)
-        }
-      }
-    }
-  }
-
-  async function loadMoreContentQaHistory() {
-    const contentItemId = activeWorkspaceContent.value?.id || result.content_item_id || null
-    if (!contentItemId) return
-    const session = ensureQaSession(contentItemId)
-    if (!session.historyLoaded || !session.historyHasMore || !session.historyNextBefore || session.historyLoadingMore) return
-    const requestId = session.historyRequestId
-    session.historyLoadingMore = true
-    session.historyError = ''
-    syncQaSessionIfActive(contentItemId, session)
-    try {
-      const res = await axios.get(`${API}/content/${contentItemId}/qa-history`, {
-        params: { limit: 12, before: session.historyNextBefore },
-        timeout: 10000
-      })
-      if (requestId !== session.historyRequestId) return
-      session.history = [...savedQaHistoryItems(res.data?.items), ...session.history]
-      session.historyHasMore = Boolean(res.data?.has_more)
-      session.historyNextBefore = String(res.data?.next_before || '')
-    } catch (error) {
-      session.historyError = error.response?.data?.detail || '加载更早对话失败，可重试'
-    } finally {
-      session.historyLoadingMore = false
-      syncQaSessionIfActive(contentItemId, session)
-    }
-  }
-
-  async function retryContentQaHistory() {
-    const contentItemId = activeWorkspaceContent.value?.id || result.content_item_id || null
-    if (!contentItemId) return
-    const session = ensureQaSession(contentItemId)
-    if (session.historyHasMore && session.historyNextBefore) {
-      await loadMoreContentQaHistory()
-      return
-    }
-    session.historyLoaded = false
-    await loadContentQaHistory(contentItemId, session)
   }
 
   function resetRunState() {

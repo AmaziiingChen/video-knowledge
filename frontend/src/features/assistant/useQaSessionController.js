@@ -1,7 +1,16 @@
 import { reactive, ref, watch } from 'vue'
-import { clearQaSessionState, createQaSession, qaSessionKey } from './qaSessionState'
+import axios from 'axios'
 
-export function useQaSessionController() {
+import { API_BASE as API } from '../../utils/localApiAuth.js'
+import { savedQaHistoryItems } from './qaHistory.js'
+import { clearQaSessionState, createQaSession, qaSessionKey } from './qaSessionState.js'
+
+export function useQaSessionController({
+  request = axios,
+  apiBase = API,
+  getActiveContentId = () => null,
+  wait = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)),
+} = {}) {
   const questionInput = ref('')
   const qaHistory = ref([])
   const qaHistoryLoading = ref(false)
@@ -89,6 +98,92 @@ export function useQaSessionController() {
     clearQaSession(activeQaSessionId.value, session)
   }
 
+  async function loadContentQaHistory(contentItemId, session = ensureQaSession(contentItemId)) {
+    if (!contentItemId || session.historyLoaded || session.historyLoading) return
+    const requestId = ++session.historyRequestId
+    const initialHistoryLength = session.history.length
+    session.historyLoading = true
+    session.historyError = ''
+    syncQaSessionIfActive(contentItemId, session)
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await request.get(`${apiBase}/content/${contentItemId}/qa-history`, {
+          params: { limit: 12 },
+          timeout: 10000,
+        })
+        if (requestId !== session.historyRequestId) return
+        const savedItems = savedQaHistoryItems(response.data?.items)
+        // A question may be sent before supplementary history returns. Keep
+        // that pending local turn after the older persisted conversation.
+        session.history = session.history.length === initialHistoryLength
+          ? savedItems
+          : [...savedItems, ...session.history]
+        session.historyLoaded = true
+        session.historyHasMore = Boolean(response.data?.has_more)
+        session.historyNextBefore = String(response.data?.next_before || '')
+        return
+      } catch (error) {
+        if (requestId !== session.historyRequestId) return
+        if (attempt < 2) {
+          await wait(500 * (attempt + 1))
+          if (requestId !== session.historyRequestId) return
+          continue
+        }
+        session.historyError = error?.response?.data?.detail || '历史对话加载失败，可重试'
+      } finally {
+        if (attempt === 2 || session.historyLoaded || requestId !== session.historyRequestId) {
+          session.historyLoading = false
+          syncQaSessionIfActive(contentItemId, session)
+        }
+      }
+    }
+  }
+
+  async function loadMoreContentQaHistory() {
+    const contentItemId = getActiveContentId()
+    if (!contentItemId) return
+    const session = ensureQaSession(contentItemId)
+    if (
+      !session.historyLoaded
+      || !session.historyHasMore
+      || !session.historyNextBefore
+      || session.historyLoadingMore
+    ) return
+    const requestId = session.historyRequestId
+    session.historyLoadingMore = true
+    session.historyError = ''
+    syncQaSessionIfActive(contentItemId, session)
+    try {
+      const response = await request.get(`${apiBase}/content/${contentItemId}/qa-history`, {
+        params: { limit: 12, before: session.historyNextBefore },
+        timeout: 10000,
+      })
+      if (requestId !== session.historyRequestId) return
+      session.history = [...savedQaHistoryItems(response.data?.items), ...session.history]
+      session.historyHasMore = Boolean(response.data?.has_more)
+      session.historyNextBefore = String(response.data?.next_before || '')
+    } catch (error) {
+      if (requestId === session.historyRequestId) {
+        session.historyError = error?.response?.data?.detail || '加载更早对话失败，可重试'
+      }
+    } finally {
+      session.historyLoadingMore = false
+      syncQaSessionIfActive(contentItemId, session)
+    }
+  }
+
+  async function retryContentQaHistory() {
+    const contentItemId = getActiveContentId()
+    if (!contentItemId) return
+    const session = ensureQaSession(contentItemId)
+    if (session.historyHasMore && session.historyNextBefore) {
+      await loadMoreContentQaHistory()
+      return
+    }
+    session.historyLoaded = false
+    await loadContentQaHistory(contentItemId, session)
+  }
+
   watch(questionInput, (value) => {
     if (!activeQaSessionId.value) return
     const session = qaSessionsByContentId[activeQaSessionId.value]
@@ -114,6 +209,9 @@ export function useQaSessionController() {
     syncQaSessionIfActive,
     refreshQaSessionHistory,
     clearQaSession,
-    resetActiveQaSession
+    resetActiveQaSession,
+    loadContentQaHistory,
+    loadMoreContentQaHistory,
+    retryContentQaHistory,
   }
 }
