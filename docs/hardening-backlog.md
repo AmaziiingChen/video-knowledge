@@ -208,7 +208,7 @@ lines.
   `features/library/useContentSelectionController.js` transaction for stale
   detail rejection, QA-session activation, read-state scheduling, article
   preview restoration and Markdown hydration.
-- [ ] Split `SecondarySidebar.vue` into conversation, composer and task-status
+- [x] Split `SecondarySidebar.vue` into conversation, composer and task-status
   surfaces. Its model normalization, shortcut filtering, empty state, external
   citation, OCR hint and text-preview rules now live in
   `features/assistant/assistantPresentation.js` with pure boundary tests;
@@ -222,7 +222,10 @@ lines.
   `features/assistant/useAssistantComposerController.js` with injected DOM and
   scheduler behavior tests; an unreachable completed-OCR decoration has also
   been removed, while the completed OCR input hint remains intact. The composer
-  UI surface remains in the sidebar.
+  UI now lives in `features/assistant/AssistantComposer.vue` with its complete
+  scoped style and mounted interaction tests. `SecondarySidebar.vue` is now the
+  820-line conversation surface; the former task-status surface was proven
+  unconsumed and deleted rather than preserved behind a compatibility wrapper.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it
