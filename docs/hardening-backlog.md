@@ -6,6 +6,39 @@ fixed before moving large amounts of code between files.  Completion means a
 behavior test and the applicable full gate pass; it never means merely moving
 lines.
 
+## RC blockers
+
+- [ ] Restore the packaged MCP bridge without weakening the local API boundary.
+  The bridge must receive a scoped capability without placing it in URLs or
+  logs, the unsigned DMG must contain an executable MCP entry, status checks
+  must prove the bridge is callable rather than only finding a config key, and
+  an integration test must cover valid, missing and incorrect capabilities.
+- [ ] Add a deterministic packaged-app core smoke using an isolated temporary
+  user-data directory. It must start the unsigned `.app`, prove the renderer and
+  bundled backend are ready, import and reopen a local fixture, restart once,
+  clean up and write machine-readable evidence.
+- [ ] Add a reproducible idle-resource sampler. With no active queue work,
+  model download or optional automation, record the Electron/backend process
+  tree's CPU, RSS, thread count and disk read/write activity after fixed warm-up
+  and sampling windows.
+
+## RC verification required
+
+- [ ] Freeze and record the exact clean candidate commit; run complete backend,
+  frontend, dependency, public-tree and architecture gates.
+- [ ] Build the unsigned Apple Silicon DMG from that commit; run physical DMG
+  validation, checksum verification, packaged-app core smoke and a clean-account
+  install/open/reopen check without weakening Gatekeeper.
+- [ ] Record the macOS builder's Python, Node and resolved runtime dependencies
+  for the exact candidate. This evidence does not claim that complete
+  cross-platform runtime lock files exist.
+- [ ] Run MCP/OpenClaw contract tests and a packaged MCP tool smoke without real
+  accounts, external gateways or production credentials. Base desktop smoke
+  remains independent of optional OpenClaw and WeChat integrations. The missing
+  `scripts/smoke_macos_mcp.py` must write JSON evidence for valid, missing and
+  incorrect capabilities without placing a capability in a URL, log, command
+  argument or OpenClaw configuration.
+
 ## P0 — release safety and confirmed broken behavior
 
 - [x] Scan all tracked text, including tests, for credential-shaped values;
@@ -26,7 +59,12 @@ lines.
   certificate validation; this closes the validation-to-connect DNS-rebinding
   window without weakening redirect checks.
 
-## P1 — maintainability, test truthfulness, and resource control
+## Post-baseline evidence-triggered architecture debt
+
+Checked items below are retained as the history of completed ownership work.
+Unchecked split plans are frozen and are not release-candidate completion
+criteria. Reopen one only with evidence of a correctness, security, privacy,
+data-integrity, ownership-conflict or test-isolation blocker.
 
 - [x] Extract the prompt-workspace controller from `App.vue`; retain all four
   tab types, draft/trash behavior and add mock-API race regression tests.
@@ -410,15 +448,13 @@ lines.
   scripts. Public-tree credential/history checks, unsigned-DMG layout/model
   exclusion checks and backend packaging exclusions/native-helper commands now
   have direct tests.
-- [ ] Persist release measurements. Verify jobs now have bounded timeouts and
-  repeated pull-request/main checks cancel stale in-progress runs.
-- [ ] Establish auditable Python dependency constraints/lock data and add an
-  incremental, explicit coverage baseline for high-risk boundaries. The base
-  manifest has removed its three verified-unused dependencies; exact
-  verification-tool pins now live in `requirements-dev.txt`, while complete
-  cross-platform runtime lock data remains outstanding.
+- [ ] Extend high-risk coverage incrementally when an affected boundary changes;
+  do not create broad coverage work merely to complete a percentage target.
+- [ ] Remove committed macOS helper binaries only after an Apple Silicon rebuild
+  proves the tracked Objective-C sources reproduce the released behavior and
+  packaging no longer requires the tracked artifacts.
 
-## P2 — repository hygiene and release provenance
+## Repository hygiene and explicit governance deferrals
 
 - [x] Remove verified-unreachable renderer batch-link, batch-upload and queue
   action code after facade/template/call-site audit; retain the live queue,
@@ -426,11 +462,12 @@ lines.
 - [x] Remove the two remaining verified-unused Vite starter assets after the
   full renderer build confirmed they are absent from source and output.  The
   previously listed third starter asset was no longer tracked.
-- [ ] Remove committed macOS helper binaries after an arm64 build proves the
-  tracked Objective-C sources reproduce them.
-- [ ] Add generated SBOM/license review evidence to release artifacts; evaluate
-  immutable action pins.  Dependabot now covers GitHub Actions alongside npm
-  and pip dependencies.
+- [ ] Complete cross-platform Python runtime locks and corresponding CI changes
+  in a later governed cycle; the supported release target remains macOS Apple
+  Silicon.
+- [ ] Generate SBOM/license-review evidence and evaluate immutable GitHub Action
+  pins in a later governed release-hardening cycle. Dependabot already covers
+  GitHub Actions alongside npm and pip dependencies.
 - [x] Remove the unused external download-site instructions; the release guide
   now documents only the normal GitHub Release DMG and SHA-256 path.
 - [x] Freeze line-count-driven contraction. File size is now a review signal,

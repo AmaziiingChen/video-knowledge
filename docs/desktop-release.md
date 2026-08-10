@@ -34,6 +34,9 @@ xattr -dr com.apple.quarantine "/Applications/KnowledgeHub.app"
 
 ## 发布前清单
 
+完整的本地候选版本门禁、证据格式、安装包冒烟和待机资源记录见
+[发布候选验证](release-candidate-verification.md)。
+
 - macOS：发布不使用 Developer ID 签名或 Apple 公证的 Apple Silicon DMG，并在干净账户完成安装、首次打开、复启验证后再上传；随 Release 提供实际文件的 SHA-256。
 - 发布标签必须与 `frontend/package.json` 的版本严格一致；不要复用或覆盖已经公开的版本标签。
 - 上传前核对 GitHub Release 的版本、DMG 文件名与 SHA-256 校验值一致。

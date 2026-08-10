@@ -10,6 +10,10 @@ documentation, measured performance improvements and evidence-backed dead-code
 removal are welcome. Architecture changes require a demonstrated ownership,
 conflict or testability problem; line count alone is not sufficient.
 
+Use the risk tiers and release evidence format in
+[`docs/release-candidate-verification.md`](docs/release-candidate-verification.md)
+when deciding which local checks a change requires.
+
 1. Discuss significant product or privacy changes in an issue before coding.
 2. Keep changes focused; retain existing local data compatibility and avoid
    unrelated formatting or dependency upgrades.

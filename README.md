@@ -300,6 +300,9 @@ npm run build
 python scripts/check_public_release_tree.py
 ```
 
+候选版本的分层门禁、unsigned DMG 冒烟与待机资源证据格式见
+[发布候选验证](docs/release-candidate-verification.md)。
+
 ## 常见问题
 
 | 现象 | 优先检查 |
