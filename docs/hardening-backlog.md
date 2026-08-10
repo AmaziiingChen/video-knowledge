@@ -122,8 +122,10 @@ lines.
   `features/assistant/createQaResponseStreamController.js`. Initial QA-history
   loading, bounded retry, cursor pagination and stale-request invalidation now
   belong to `features/assistant/useQaSessionController.js`, together with the
-  guarded new-conversation archive and reset transaction; question and summary
-  request creation remain in the facade. Deterministic shortcut insertion,
+  guarded new-conversation archive and reset transaction. Protected QA request
+  creation, selected-text context, completion notification and answer
+  regeneration now live in `features/assistant/useQaRequestController.js`;
+  summary request creation remains in the facade. Deterministic shortcut insertion,
   explicit expansion and local intent composition now live in the pure
   `features/assistant/qaPromptComposer.js` boundary. Conversation Markdown
   assembly, desktop export and local-API fallback now live in

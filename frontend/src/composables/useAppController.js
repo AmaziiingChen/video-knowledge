@@ -13,7 +13,6 @@ import {
   terminalStatuses,
   timingOrder
 } from '../config/workbenchOptions'
-import { qaHistoryForPrompt } from '../features/assistant/qaHistory'
 import {
   assistantSummaryFromMarkdown,
   documentMarkdownWithoutConversation,
@@ -87,6 +86,7 @@ import { useAppSettingsController } from '../features/settings/useAppSettingsCon
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
 import { useConversationMarkdownExportController } from '../features/assistant/useConversationMarkdownExportController.js'
+import { useQaRequestController } from '../features/assistant/useQaRequestController.js'
 import { usePromptTemplateController } from '../features/prompts/usePromptTemplateController.js'
 import { useActiveTaskEventStreamController } from '../features/tasks/useActiveTaskEventStreamController.js'
 import { useTaskQueueController } from '../features/tasks/useTaskQueueController.js'
@@ -207,7 +207,7 @@ export function useAppController() {
     runContentAnalysis,
   } = useContentAnalysisController({
     sortTemplates: sortPromptTemplates,
-    askQuestion,
+    askQuestion: (...args) => askQuestion(...args),
   })
   let inputParseTimer = null
   let inputParseRequestId = 0
@@ -863,6 +863,29 @@ export function useAppController() {
     }
     if (isGeneratedReportDocument(selectedContentItem.value)) return ''
     return result.summary || assistantSummaryFromMarkdown(markdownState.markdown)
+  })
+
+  const { askQuestion, regenerateQaAnswer } = useQaRequestController({
+    ensureQaSession,
+    syncQaSessionIfActive,
+    refreshQaSessionHistory,
+    resolveQaQuestion,
+    removeSelectedTextContextToken,
+    readQaStream,
+    getRequestContext: () => ({
+      contentItemId: activeWorkspaceContent.value?.id || result.content_item_id || null,
+      selectionContext: activeSelectedTextContext.value,
+      summary: currentSummaryText.value,
+      transcript: activeWorkspaceTranscript.value || result.transcript || '',
+      videoTitle: activeWorkspaceContent.value?.title || result.source_title || '',
+      sourceUrl: activeWorkspaceContent.value?.source_url || result.url || '',
+      obsidianAutoWrite: obsidianAutoWrite.value,
+      obsidianPath: currentObsidianPath.value,
+      aiModel: assistantAiModel.value,
+    }),
+    getActiveContentId: () => activeWorkspaceContent.value?.id || null,
+    isStartingNewChat: () => startingNewChat.value,
+    loadCompletionNotifications,
   })
 
   const {
@@ -2233,131 +2256,6 @@ export function useAppController() {
     }
   }
 
-  async function askQuestion(quickPrompt = '', { customTemplate = null } = {}) {
-    const contentItemId = activeWorkspaceContent.value?.id || result.content_item_id || null
-    const session = ensureQaSession(contentItemId)
-    if (session.asking || session.generatingSummary || startingNewChat.value) return
-    const draftQuestion = customTemplate
-      ? `自定义按钮：${customTemplate.name || '未命名提示词'}`
-      : removeSelectedTextContextToken(String(quickPrompt || session.draft)).trim()
-    const resolvedQuestion = customTemplate
-      ? {
-          prompt: `已选择的追问方式：\n${customTemplate.name || '自定义按钮'}\n${customTemplate.template.trim()}`,
-          autoShortcutName: ''
-        }
-      : resolveQaQuestion(draftQuestion)
-    const question = resolvedQuestion.prompt
-    if (!question) {
-      ElMessage.warning('请输入追问内容')
-      return
-    }
-    const selectionContext = activeSelectedTextContext.value
-    const modelQuestion = selectionContext
-      ? `【用户选中的原文】\n${selectionContext.text}\n\n【用户的问题】\n${question}`
-      : question
-    const displayQuestion = selectionContext
-      ? `@选中文本\n> ${selectionContext.text.replace(/\n/gu, '\n> ')}\n\n${draftQuestion}`
-      : draftQuestion
-    session.asking = true
-    session.lastSaved = false
-    syncQaSessionIfActive(contentItemId, session)
-    const historySnapshot = qaHistoryForPrompt(session.history)
-    const pendingItem = {
-      question: draftQuestion,
-      modelQuestion,
-      displayQuestion,
-      selectedText: selectionContext?.text || '',
-      answer: '',
-      saved: false,
-      autoShortcutName: resolvedQuestion.autoShortcutName,
-      pending: true,
-      error: false,
-      time: new Date().toLocaleTimeString()
-    }
-    session.history.push(pendingItem)
-    refreshQaSessionHistory(contentItemId, session)
-    if (!quickPrompt && !customTemplate) {
-      session.draft = ''
-      syncQaSessionIfActive(contentItemId, session)
-    }
-    try {
-      const shouldAppendToObsidian = obsidianAutoWrite.value && Boolean(currentObsidianPath.value)
-      const response = await fetch(localApiRequestUrl(`${API}/qa/stream`), {
-        method: 'POST',
-        headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          question: modelQuestion,
-          display_question: displayQuestion,
-          summary: currentSummaryText.value || '',
-          transcript: activeWorkspaceTranscript.value || result.transcript || '',
-          video_title: activeWorkspaceContent.value?.title || result.source_title || '',
-          source_url: activeWorkspaceContent.value?.source_url || result.url || '',
-          content_item_id: contentItemId,
-          obsidian_path: shouldAppendToObsidian ? currentObsidianPath.value : null,
-          history: historySnapshot,
-          append_to_obsidian: shouldAppendToObsidian,
-          ai_model: assistantAiModel.value
-        })
-      })
-      if (!response.ok) {
-        const errorText = await response.text()
-        try {
-          const errorData = JSON.parse(errorText)
-          throw new Error(errorData.detail || '追问失败')
-        } catch (error) {
-          if (error instanceof SyntaxError) {
-            throw new Error(errorText || '追问失败')
-          }
-          throw error
-        }
-      }
-      await readQaStream(response, pendingItem, contentItemId, { session })
-      // Do not interrupt an answer the user is already reading. If they
-      // switched context while it streamed, keep a lightweight local event.
-      if (String(activeWorkspaceContent.value?.id || '') !== String(contentItemId || '') || document.visibilityState !== 'visible') {
-        const questionPreview = String(draftQuestion || 'AI 追问').replace(/\s+/gu, ' ').slice(0, 80)
-        const answerPreview = String(pendingItem.answer || '').replace(/\s+/gu, ' ').slice(0, 240)
-        await axios.post(`${API}/completion-notifications`, {
-          event_key: `qa:${contentItemId || 'workspace'}:${pendingItem.id || Date.now()}`,
-          event_type: 'assistant_response', title: questionPreview, body: answerPreview,
-          content_item_id: contentItemId, target_view: 'library',
-        }, { timeout: 10000 }).catch(() => {})
-        await loadCompletionNotifications()
-        if (document.visibilityState === 'visible') {
-          ElNotification({
-            title: questionPreview,
-            message: answerPreview || 'AI 已完成回复，点击顶部待查看按钮可回到这条内容。',
-            duration: 6000,
-          })
-        }
-      }
-      if (resolvedQuestion.autoShortcutName) {
-        ElMessage.info(`已按本地规则附加 @${resolvedQuestion.autoShortcutName} 追问指引`)
-      }
-      if (session.lastSaved) {
-        ElMessage.success('追问已自动写入 Markdown')
-      } else if (pendingItem.savedToContent) {
-        if (pendingItem.obsidianError) {
-          ElMessage.warning('回答已保存到内容记录；Markdown 未自动写入')
-        } else {
-          ElMessage.success('已保存到内容记录，可在重新打开时继续追问')
-        }
-      } else {
-        ElMessage.success('已基于当前内容生成回答')
-      }
-    } catch (e) {
-      pendingItem.pending = false
-      pendingItem.error = true
-      pendingItem.answer = pendingItem.answer || '追问失败'
-      refreshQaSessionHistory(contentItemId, session)
-      const msg = e.response?.data?.detail || e.message || '追问失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '追问失败')
-    } finally {
-      session.asking = false
-      syncQaSessionIfActive(contentItemId, session)
-    }
-  }
-
   function copyQaExchange(item) {
     const question = String(item?.displayQuestion || item?.question || '').trim()
     const selectedText = String(item?.selectedText || '').trim()
@@ -2369,65 +2267,6 @@ export function useAppController() {
     const selectedSection = selectedText ? `\n\n> ${selectedText.replace(/\n/gu, '\n> ')}` : ''
     const markdown = `## 我\n\n${question}${selectedSection}\n\n## AI\n\n${answer}`
     copyText(markdown, '已复制本次完整问答')
-  }
-
-  async function regenerateQaAnswer(item) {
-    const contentItemId = activeWorkspaceContent.value?.id || result.content_item_id || null
-    const session = ensureQaSession(contentItemId)
-    const itemIndex = session.history.indexOf(item)
-    if (!contentItemId || !item?.id || itemIndex !== session.history.length - 1) {
-      ElMessage.warning('只能重新生成当前会话最后一条回答')
-      return
-    }
-    if (session.asking || session.generatingSummary || startingNewChat.value || item.pending) return
-
-    const previousAnswer = String(item.answer || '')
-    const question = String(item.modelQuestion || resolveQaQuestion(item.question).prompt || '').trim()
-    if (!question) {
-      ElMessage.warning('找不到原始提问，无法重新生成')
-      return
-    }
-    const historySnapshot = qaHistoryForPrompt(session.history.slice(0, itemIndex))
-    session.asking = true
-    session.lastSaved = false
-    item.answer = ''
-    item.pending = true
-    item.error = false
-    refreshQaSessionHistory(contentItemId, session)
-    try {
-      const response = await fetch(localApiRequestUrl(`${API}/qa/stream`), {
-        method: 'POST',
-        headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          question,
-          display_question: String(item.displayQuestion || item.question || '').trim(),
-          summary: currentSummaryText.value || '',
-          transcript: activeWorkspaceTranscript.value || result.transcript || '',
-          video_title: activeWorkspaceContent.value?.title || result.source_title || '',
-          source_url: activeWorkspaceContent.value?.source_url || result.url || '',
-          content_item_id: contentItemId,
-          history: historySnapshot,
-          append_to_obsidian: false,
-          ai_model: assistantAiModel.value,
-          regenerate_assistant_message_id: item.id
-        })
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(payload.detail || '重新生成回答失败')
-      }
-      await readQaStream(response, item, contentItemId, { session })
-      ElMessage.success(item.obsidianError ? '回答已重新生成，但 Markdown 更新失败' : '回答已重新生成')
-    } catch (error) {
-      item.answer = previousAnswer
-      item.pending = false
-      item.error = false
-      refreshQaSessionHistory(contentItemId, session)
-      ElMessage.error(error?.message || '重新生成回答失败')
-    } finally {
-      session.asking = false
-      syncQaSessionIfActive(contentItemId, session)
-    }
   }
 
   async function generateAiSummary() {
