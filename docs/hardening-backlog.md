@@ -59,6 +59,9 @@ lines.
   Query rewriting and structured-object response parsing now live in
   `services/knowledge_query_rewrite.py`; the public query entry point and the
   existing structured-parser alias remain available from `knowledge_v2.py`.
+  Scope predicates, FTS ranks and lexical fallback ranks now live in
+  `services/knowledge_retrieval_store.py`; the answer orchestrator retains
+  vector ranking and result selection.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
