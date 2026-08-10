@@ -40,6 +40,10 @@ from services.knowledge_conversation_context import (
 from services.knowledge_response_transport import (
     collect_model_response as _answer_model_response,
 )
+from services.knowledge_query_rewrite import (
+    parse_json_object as _parse_answer_json,
+    rewrite_knowledge_query,
+)
 from services.knowledge_answer_evidence import (
     ANSWER_CONTEXT_CHAR_BUDGET,  # noqa: F401 - compatibility re-export
     ANSWER_EVIDENCE_MAX_CANDIDATES,  # noqa: F401 - compatibility re-export
@@ -62,7 +66,7 @@ from services.prompt_file_store import managed_prompt_text
 from services.prompt_templates import (
     DEFAULT_KNOWLEDGE_ANSWER_PROMPT,
     DEFAULT_KNOWLEDGE_ANSWER_RETRY_PROMPT,
-    DEFAULT_KNOWLEDGE_QUERY_REWRITE_PROMPT,
+    DEFAULT_KNOWLEDGE_QUERY_REWRITE_PROMPT,  # noqa: F401 - compatibility re-export
 )
 from services.repository import new_id
 
@@ -506,54 +510,17 @@ def rewrite_query(
     conversation_context: Iterable[dict[str, object]] | None = None,
     task_id: str | None = None,
 ) -> str:
-    """Use Flash Thinking to turn a vague question into a retrieval query.
-
-    This stage never answers the user.  Any malformed or unavailable model
-    response falls back to the original question so retrieval remains usable.
-    """
-    original = str(question or "").strip()
-    if not original or not settings.deepseek_api_key:
-        return original
-    messages = [
-        LLMMessage(
-            role="system",
-            content=managed_prompt_text("knowledge_query_rewrite", DEFAULT_KNOWLEDGE_QUERY_REWRITE_PROMPT),
-        ),
-        LLMMessage(role="system", content=CONVERSATION_CONTEXT_GUARDRAIL),
-        *_conversation_context_messages(conversation_context),
-        LLMMessage(role="user", content=f"用户问题：{original}"),
-    ]
-    started = perf_counter()
-    try:
-        response = _knowledge_llm_provider(KNOWLEDGE_REWRITE_MODEL).chat(
-            messages,
-            temperature=0,
-            response_format="json_object",
-            max_tokens=800,
-        )
-        parsed = _parse_answer_json(response.content)
-        rewritten = re.sub(r"\s+", " ", str(parsed.get("search_query") or "")).strip()
-        if not 2 <= len(rewritten) <= 320:
-            raise ValueError("查询改写结果为空或过长")
-    except Exception as exc:
-        record_ai_call(
-            call_type="knowledge_v2_query_rewrite",
-            provider_response=None,
-            input_chars=sum(len(message.content) for message in messages),
-            elapsed_seconds=perf_counter() - started,
-            task_id=task_id,
-            error=str(exc),
-        )
-        return original
-    record_ai_call(
-        call_type="knowledge_v2_query_rewrite",
-        provider_response=response,
-        input_chars=sum(len(message.content) for message in messages),
-        output_chars=len(rewritten),
-        elapsed_seconds=perf_counter() - started,
+    return rewrite_knowledge_query(
+        question,
+        conversation_context=conversation_context,
         task_id=task_id,
+        model=KNOWLEDGE_REWRITE_MODEL,
+        provider_factory=_knowledge_llm_provider,
+        conversation_message_builder=_conversation_context_messages,
+        conversation_guardrail=CONVERSATION_CONTEXT_GUARDRAIL,
+        prompt_loader=managed_prompt_text,
+        call_recorder=record_ai_call,
     )
-    return rewritten
 
 
 def retrieve(
@@ -882,19 +849,6 @@ def stream_answer_from_evidence(
                 *messages,
                 LLMMessage(role="user", content=managed_prompt_text("knowledge_answer_retry", DEFAULT_KNOWLEDGE_ANSWER_RETRY_PROMPT)),
             ]
-
-
-def _parse_answer_json(value: str) -> dict[str, object]:
-    raw = str(value or "").strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.I)
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError("模型没有返回有效 JSON") from exc
-    if not isinstance(parsed, dict):
-        raise ValueError("模型返回的 JSON 不是对象")
-    return parsed
 
 
 def invalidate_vector_cache() -> None:

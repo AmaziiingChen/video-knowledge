@@ -56,6 +56,9 @@ lines.
   excerpt selection and model quotation validation now live in
   `services/knowledge_answer_evidence.py`, while existing internal call sites
   retain their aliases.
+  Query rewriting and structured-object response parsing now live in
+  `services/knowledge_query_rewrite.py`; the public query entry point and the
+  existing structured-parser alias remain available from `knowledge_v2.py`.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity
