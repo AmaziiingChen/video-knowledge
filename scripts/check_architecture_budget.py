@@ -1,15 +1,14 @@
-"""Prevent known architecture debt from growing during the hardening cycle."""
+"""Prevent reviewed architecture hot spots from growing unnoticed."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-MAX_NEW_SOURCE_LINES = 1_000
 
-# These are ceilings, not targets. Ratchet a value down whenever a refactor
-# shrinks the file; never raise one to make CI green.
+# These are reviewed non-regression ceilings, not line-count targets. Add or
+# lower one only after an evidenced responsibility move with behavior tests or
+# a fully proven unreachable-code deletion; size alone is not a failure.
 KNOWN_DEBT_BUDGETS = {
     "frontend/src/composables/useAppController.js": 1_245,
     "frontend/src/workbench/EditorHost.vue": 1_052,
@@ -67,10 +66,6 @@ def main() -> int:
         budget = KNOWN_DEBT_BUDGETS.get(relative)
         if budget is not None and count > budget:
             failures.append(f"{relative}: {count} lines exceeds debt ceiling {budget}")
-        elif budget is None and count > MAX_NEW_SOURCE_LINES:
-            failures.append(
-                f"{relative}: new oversized source has {count} lines; split below {MAX_NEW_SOURCE_LINES}"
-            )
 
     missing = sorted(set(KNOWN_DEBT_BUDGETS) - set(measured))
     failures.extend(f"architecture budget references missing file: {path}" for path in missing)

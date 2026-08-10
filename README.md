@@ -6,7 +6,7 @@
 
 在提交 issue、发布 fork 或打包前，请先阅读 [隐私与数据处理](PRIVACY.md)、[安全策略](SECURITY.md)、[第三方声明](THIRD_PARTY_NOTICES.md) 和 [贡献指南](CONTRIBUTING.md)。本项目采用 [MIT License](LICENSE)。
 
-`v0.1.0` 是项目的首个公开版本基线；此前开发没有伪造为历史发行版。当前已停止新增产品功能，进入兼容性优先的架构治理阶段，规则与退出条件见 [架构治理计划](docs/architecture-hardening.md)，后续版本记录见 [CHANGELOG](CHANGELOG.md)。
+`v0.1.0` 是项目的首个公开版本基线；此前开发没有伪造为历史发行版。当前已停止新增产品功能，并从大规模架构收缩转入兼容性优先的稳定发布阶段；规则与退出条件见 [稳定化计划](docs/architecture-hardening.md)，后续版本记录见 [CHANGELOG](CHANGELOG.md)。
 
 ## 能做什么
 

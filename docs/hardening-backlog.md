@@ -1,6 +1,6 @@
-# Architecture hardening execution backlog
+# Stabilization and release-readiness backlog
 
-This is the executable post-`v0.1.0` hardening backlog.  It is deliberately
+This is the executable post-`v0.1.0` stabilization backlog. It is deliberately
 ordered by risk and dependency: a checkable security or lifecycle defect is
 fixed before moving large amounts of code between files.  Completion means a
 behavior test and the applicable full gate pass; it never means merely moving
@@ -31,7 +31,7 @@ lines.
 - [x] Extract the prompt-workspace controller from `App.vue`; retain all four
   tab types, draft/trash behavior and add mock-API race regression tests.
 - [x] Extract the WeChat subscription controller from `App.vue`; retain
-  single/bulk task behavior with mock-API regression tests and ratchet the
+  single/bulk task behavior with mock-API regression tests and update the
   remaining composition-root budget down. Account authorization, QR polling,
   transfer and account-search state live in
   `features/wechat/useWechatAccountController.js`; body-cleaning filter CRUD
@@ -433,8 +433,10 @@ lines.
   and pip dependencies.
 - [x] Remove the unused external download-site instructions; the release guide
   now documents only the normal GitHub Release DMG and SHA-256 path.
-- [ ] Continue ratcheting every production source below 1,000 lines, or add a
-  narrowly documented generated/declarative exception. The group-report source
+- [x] Freeze line-count-driven contraction. File size is now a review signal,
+  not a completion target; future splits require evidence of mixed ownership,
+  frequent conflicts, poor test isolation or duplicated branches. The completed
+  contraction work remains useful: the group-report source
   summary cache now has its own database owner; source membership queries,
   deterministic ordering and managed-text/Markdown material loading now live
   in `group_report_sources.py`; the planner's JSON shape compatibility and
@@ -450,8 +452,9 @@ lines.
   Keychain session handling, validation cache and local request-budget policy
   now live in `wechat_subscription_accounts.py`, while
   `wechat_subscription.py` retains subscription persistence and collection
-  orchestration. Report normalization and writing remain the next intentional
-  boundaries in the main pipeline.
+  orchestration. Further report normalization or writing splits are deferred
+  unless stabilization evidence proves that they block correctness, testing or
+  release work.
 
 ## Non-negotiable compatibility checks
 

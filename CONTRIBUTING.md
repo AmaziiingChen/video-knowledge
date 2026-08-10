@@ -2,12 +2,13 @@
 
 Thank you for helping improve the macOS knowledge workbench.
 
-KnowledgeHub is currently feature-frozen while the architecture is hardened.
-New product capabilities should wait until the exit criteria in
+KnowledgeHub is currently feature-frozen while the local release baseline is
+stabilized. New product capabilities should wait until the exit criteria in
 [`docs/architecture-hardening.md`](docs/architecture-hardening.md) are met.
 Bug fixes, security and privacy repairs, compatibility work, tests,
-documentation, performance improvements and behavior-preserving refactors are
-welcome.
+documentation, measured performance improvements and evidence-backed dead-code
+removal are welcome. Architecture changes require a demonstrated ownership,
+conflict or testability problem; line count alone is not sufficient.
 
 1. Discuss significant product or privacy changes in an issue before coding.
 2. Keep changes focused; retain existing local data compatibility and avoid
@@ -16,8 +17,10 @@ welcome.
    `cd frontend && npm run lint && npm run typecheck && npm test && npm run test:coverage && npm run build`.
    Run `ruff check --select E9,F63,F7,F82 backend tests scripts` and the affected
    backend tests for Python changes. Run
-   `python scripts/check_architecture_budget.py` for structural changes and
-   ratchet any reduced debt ceiling downward. The component coverage gate is a
+   `python scripts/check_architecture_budget.py` for structural changes. Its
+   reviewed ceilings are a CI non-regression gate for known hot spots, not a
+   whole-repository line-count target; behavior and contract tests protect
+   responsibility boundaries. The component coverage gate is a
    scoped baseline: add each newly extracted interactive boundary to the
    coverage include list instead of weakening its thresholds.
 4. Never commit `.env` files, tokens, cookies, `data/`, `materials/`, real
