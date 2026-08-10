@@ -298,6 +298,8 @@ lines.
   now lives in `services/pipeline_local_media_policy.py`; data and attachment
   roots are compared after path resolution so parent traversal and escaping
   symlinks fail closed, while exact database-owned originals remain compatible.
+  Failure transitions now write status and error metadata through the actual
+  active cache directory instead of an unreachable nested-function local.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and

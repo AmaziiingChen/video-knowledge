@@ -159,6 +159,7 @@ def run_pipeline_sync(
     preview_download_future: Future | None = None
     preview_download_started_at: float | None = None
     source_context: dict[str, object] = {}
+    cache_dir: Path | None = None
     last_summary_publish_at = 0.0
 
     def publish() -> None:
@@ -362,9 +363,8 @@ def run_pipeline_sync(
         response.error = error
         response.error_info = classify_pipeline_error(step, error)
         response.timings["total"] = _elapsed(total_start)
-        active_cache_dir = locals().get("cache_dir")
-        if active_cache_dir:
-            write_cache_meta(active_cache_dir, {"pipeline_status": "failed", "pipeline_error": error})
+        if cache_dir:
+            write_cache_meta(cache_dir, {"pipeline_status": "failed", "pipeline_error": error})
         if response.content_item_id:
             _set_content_status(response.content_item_id, "failed")
         update_overall_progress()
@@ -551,7 +551,6 @@ def run_pipeline_sync(
                 publish()
                 return response
 
-        cache_dir = None
         cached_video = None
         cached_subtitle_transcript = None
         cached_transcript = None
