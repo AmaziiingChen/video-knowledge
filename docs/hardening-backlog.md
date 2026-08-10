@@ -90,6 +90,9 @@ lines.
   Fact-card extraction now lives in
   `services/campus_digest_fact_extraction.py`, retaining source-order output,
   retry behavior, chunk-safe model calls and cache invalidation.
+  Deterministic source projections, cluster-primary selection,
+  publishing-brief fallback and source-appendix rendering now live in
+  `services/campus_digest_source_views.py`.
   Candidate material construction, deterministic pair rules and cluster-member
   similarity now live in `services/campus_digest_cluster_rules.py`; model
   relation review and SQLite cluster persistence remain in the generator.

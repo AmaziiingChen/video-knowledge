@@ -28,8 +28,15 @@ from services.campus_digest_fact_extraction import (
     parse_fact_card as _parse_fact_card_with_settings,
     prepare_fact_cards as _prepare_fact_cards_with_settings,
 )
+from services.campus_digest_source_views import (
+    cluster_profiles as _cluster_profiles,
+    event_identity_text as _event_identity_text,
+    facts_for_brief as _facts_for_brief,
+    publishing_brief as _publishing_brief,
+    select_report_cluster_primaries as _select_report_cluster_primaries,
+    source_appendix as _source_appendix,
+)
 from services.campus_digest_payloads import (
-    one_line as _one_line,
     parse_event_brief as _parse_event_brief_payload,
     parse_json_object as _parse_json_object,
     string_list as _string_list,
@@ -668,97 +675,6 @@ def _prepare_embeddings(
     return [cached.get(source.content_item_id) or computed[index] for index, source in enumerate(sources)], actual_model
 
 
-def _event_identity_text(source: CampusDigestSource, card: dict[str, Any]) -> str:
-    parts = [
-        f"标题：{source.title}",
-        f"来源：{source.publisher}",
-        f"渠道：{source.source_channel}",
-        f"文种：{card['document_type']}",
-        f"阶段：{card['event_stage']}",
-        f"核心事项：{card['event_or_subject']}",
-        f"摘要：{card['summary']}",
-    ]
-    labels = {
-        "issuers": "发布单位",
-        "organizers": "主办单位",
-        "actors": "主体",
-        "actions": "动作",
-        "objects": "对象事项",
-        "audiences": "面向对象",
-        "time_points": "时间",
-        "locations": "地点",
-        "terms_or_batches": "届次批次",
-        "identifiers": "编号",
-        "attachments": "附件",
-        "topics": "主题",
-    }
-    for key, label in labels.items():
-        values = card.get(key) or []
-        if values:
-            parts.append(f"{label}：{'；'.join(values)}")
-    ocr_facts = [fact["text"] for fact in card.get("atomic_facts") or [] if fact.get("origin") == "image_ocr"]
-    if ocr_facts:
-        parts.append("图片事实：" + "；".join(ocr_facts[:12]))
-    return "\n".join(part for part in parts if not part.endswith("："))[:8000]
-
-
-def _cluster_profiles(sources: list[CampusDigestSource]) -> list[dict[str, Any]]:
-    """Create lightweight, non-LLM inputs used only for duplicate retrieval."""
-    profiles: list[dict[str, Any]] = []
-    for source in sources:
-        profiles.append(
-            {
-                "summary": _cluster_rules.cluster_material(source),
-                "content_decision": "include",
-                "decision_reason": "聚类候选不作内容取舍",
-                "category": "其他动态",
-                "document_type": "other",
-                "event_stage": "unknown",
-                "event_or_subject": source.title,
-                "issuers": [], "organizers": [], "actors": [], "actions": [],
-                "objects": [], "audiences": [], "time_points": [], "locations": [],
-                "terms_or_batches": [], "identifiers": [], "links": [], "attachments": [],
-                "topics": [], "atomic_facts": [], "ad_segments": [], "uncertainties": [],
-            }
-        )
-    return profiles
-
-
-def _select_report_cluster_primaries(
-    clusters: list[EventCluster],
-    sources: list[CampusDigestSource],
-    report_ids: set[str],
-) -> list[tuple[EventCluster, int]]:
-    selected: list[tuple[EventCluster, int]] = []
-    for cluster in clusters:
-        candidates = [index for index in cluster.member_indexes if sources[index].content_item_id in report_ids]
-        if not candidates:
-            continue
-        # 公文通是同一内容的主来源；其余正式来源按最早发布时间稳定选择。
-        primary = min(
-            candidates,
-            key=lambda index: (
-                0 if sources[index].source_channel == "gwt" else 1,
-                sources[index].published_at or "9999",
-                sources[index].content_item_id,
-            ),
-        )
-        selected.append((cluster, primary))
-    return selected
-
-
-def _publishing_brief(source: CampusDigestSource, card: dict[str, Any]) -> dict[str, Any]:
-    facts = _facts_for_brief(card, source.citation_id)
-    return {
-        "title": card["event_or_subject"] or source.title,
-        "category": card["category"],
-        "summary": card["summary"],
-        "stages": [{"stage": card["event_stage"], "facts": facts}],
-        "conflicts": list(card.get("uncertainties") or []),
-        "source_ids": [source.citation_id],
-    }
-
-
 def _cluster_sources(
     sources: list[CampusDigestSource],
     cards: list[dict[str, Any]],
@@ -1040,29 +956,6 @@ def _persist_clusters(
             "DELETE FROM campus_event_clusters WHERE id NOT IN (SELECT DISTINCT cluster_id FROM campus_event_members)"
         )
         connection.commit()
-
-
-def _source_appendix(sources: list[CampusDigestSource]) -> str:
-    lines = ["## 来源文章", ""]
-    for source in sources:
-        title = _one_line(source.title).replace("[", "\\[").replace("]", "\\]") or "未命名文章"
-        publisher = _one_line(source.publisher) or "未知来源"
-        date = source.published_at[:10] if source.published_at else "日期未知"
-        channel = {
-            "gwt": "公文通",
-            "college_website": "学院官网",
-            "wechat": "微信公众号",
-        }.get(source.source_channel, source.source_channel or "校园来源")
-        link = f"[{title}](<{source.source_url}>)" if source.source_url else title
-        lines.append(f"[^{source.citation_id}]: {link} · {channel} · {publisher} · {date}")
-    return "\n".join(lines)
-
-
-def _facts_for_brief(card: dict[str, Any], source_id: str) -> list[dict[str, Any]]:
-    facts = [{"text": fact["text"], "source_ids": [source_id]} for fact in card.get("atomic_facts") or []]
-    if not facts:
-        facts.append({"text": card["summary"], "source_ids": [source_id]})
-    return facts
 
 
 def _chat_json(
