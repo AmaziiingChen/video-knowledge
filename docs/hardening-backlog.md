@@ -236,8 +236,12 @@ lines.
   boundary tests, including local PDF, image and durable Markdown readers.
   Readable-body extraction, character counts and current-document size
   selection now live in `workbench/editorReaderMetadata.js` with behavior
-  tests. Menu-action dispatch and detail-row presentation now live in
-  `workbench/editorContentActions.js` and `workbench/editorContentDetails.js`.
+  tests. Menu-action dispatch and detail-row presentation live in
+  `workbench/editorContentActions.js` and `workbench/editorContentDetails.js`;
+  their active-tab eligibility, detail assembly and transcript-export browser
+  effects now compose in `workbench/useEditorContentActionMenuController.js`
+  with behavior tests. Two unused root props, one undeclared fallthrough prop
+  and the dead image-tab helper have been retired.
   Report title, date-window and generated-time presentation now live in
   `workbench/editorReportPresentation.js` with pure formatting tests. Article
   outline filtering and visual hierarchy now live in

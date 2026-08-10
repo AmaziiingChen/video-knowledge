@@ -12,8 +12,8 @@ MAX_NEW_SOURCE_LINES = 1_000
 # shrinks the file; never raise one to make CI green.
 KNOWN_DEBT_BUDGETS = {
     "frontend/src/composables/useAppController.js": 1_245,
-    "frontend/src/workbench/EditorHost.vue": 1_476,
-    "frontend/src/App.vue": 2_762,
+    "frontend/src/workbench/EditorHost.vue": 1_378,
+    "frontend/src/App.vue": 2_759,
     "backend/services/database.py": 167,
     "backend/services/group_report_pipeline.py": 1_403,
     "frontend/src/styles/app.css": 2_410,
