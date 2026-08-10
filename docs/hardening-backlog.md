@@ -279,7 +279,9 @@ lines.
   ASR configuration normalization and automatic short/long-model selection now
   live in `services/pipeline_asr_policy.py`.
   Timing, percentage bounding and log-level classification now live in
-  `services/pipeline_progress_rules.py`.
+  `services/pipeline_progress_rules.py`. The duplicate legacy article-OCR
+  refresh policy has been removed; the runner now delegates to the canonical
+  `content_source_text.py` policy while retaining its non-mapping guard.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and

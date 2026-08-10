@@ -29,7 +29,6 @@ from services.article_fetcher import fetch_article
 from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_article_html
 from services.bilibili_context import fetch_bilibili_source_context
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
-from services.paddle_ocr import is_paddle_ocr_configured
 from services.pipeline_asr_policy import (
     ASR_MODEL_STRATEGIES,
     WHISPER_MODELS,  # noqa: F401 - public compatibility re-export
@@ -56,7 +55,10 @@ from services.pipeline_progress_rules import (
 )
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.knowledge_library import attachments_root
-from services.content_source_text import load_content_source_text
+from services.content_source_text import (
+    _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
+    load_content_source_text,
+)
 from services.database import connect, initialize_database
 from services.repository import ContentRepository
 from services.downloader import DownloadProgress, download_video, get_video_info
@@ -1381,28 +1383,7 @@ def run_pipeline_sync(
 
 
 def _wechat_article_needs_ocr_refresh(article_info: object) -> bool:
-    if not is_paddle_ocr_configured() or not isinstance(article_info, dict):
-        return False
-    images = article_info.get("images")
-    if not isinstance(images, list) or not images:
-        return False
-    image_ocr = article_info.get("image_ocr")
-    if not isinstance(image_ocr, dict) or not bool(image_ocr.get("attempted")):
-        return True
-    if int(image_ocr.get("pending_count") or 0) > 0:
-        return True
-    local_filter_counts = image_ocr.get("local_filter_counts")
-    if isinstance(local_filter_counts, dict):
-        try:
-            if int(local_filter_counts.get("text_below_threshold") or 0) > 0:
-                return True
-        except (TypeError, ValueError):
-            pass
-    return (
-        int(image_ocr.get("recognized_count") or 0) == 0
-        and int(image_ocr.get("failed_count") or 0) > 0
-        and not str(image_ocr.get("attempted_at") or "").strip()
-    )
+    return isinstance(article_info, dict) and _content_source_text_needs_ocr_refresh(article_info)
 
 
 def _set_content_status(content_item_id: str, status: str) -> None:
