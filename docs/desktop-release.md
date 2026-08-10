@@ -18,6 +18,11 @@ npm run desktop:package:mac
 
 语音模型不随安装包分发。用户在“设置 → 本机处理”中按需下载所选模型；模型保存在用户本机数据目录，不进入应用包或 GitHub Release。
 
+安装包内的同一后端可执行文件也提供 `--mcp-stdio` 入口，不复制第二套
+Python/模型运行时。KnowledgeHub 不会自动改写 OpenClaw 配置；本机 bridge
+命令、短期 capability 文件路径和撤销语义见
+[OpenClaw 接入说明](openclaw-ingest.md#local-mcp-bridge-configuration)。
+
 ## 无 Developer ID 签名的 macOS 分发
 
 KnowledgeHub 当前以不使用 Developer ID 签名或 Apple 公证的 Apple Silicon DMG 正常发布。每个 GitHub Release 都会提供对应的 SHA-256 校验值；下载后请先核对校验值，再安装和打开应用。

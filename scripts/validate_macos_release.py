@@ -15,7 +15,6 @@ import time
 import urllib.request
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_JSON = ROOT / "frontend" / "package.json"
 EXPECTED_BUNDLE_ID = "com.knowledgehub.desktop"
@@ -77,8 +76,7 @@ def validate_no_developer_id(app: Path) -> str:
     result = subprocess.run(
         ["codesign", "-dv", "--verbose=4", str(app)],
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
     details = f"{result.stdout}\n{result.stderr}"
@@ -162,6 +160,13 @@ def smoke_test_backend(executable: Path) -> dict[str, object]:
                     process.wait(timeout=5)
 
 
+def smoke_test_mcp_entry(executable: Path) -> dict[str, object]:
+    """Exercise the frozen stdio entry and its scoped backend capability end to end."""
+    from smoke_macos_mcp import run_smoke
+
+    return run_smoke(command=str(executable), prefix_args=[], cwd=executable.parent)
+
+
 def validate_app(volume: Path, expected_version: str) -> dict[str, object]:
     app = volume / "KnowledgeHub.app"
     if not app.is_dir():
@@ -226,6 +231,7 @@ def validate_app(volume: Path, expected_version: str) -> dict[str, object]:
         "developer_id": validate_no_developer_id(app),
         "backend_mib": round(backend_bytes / 1024 / 1024, 1),
         "backend_smoke": smoke_test_backend(backend_executable),
+        "mcp_entry_smoke": smoke_test_mcp_entry(backend_executable),
     }
 
 

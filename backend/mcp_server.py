@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import date, datetime
 from enum import Enum
 from typing import Any
@@ -9,9 +8,13 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
-
-
-API_BASE = os.environ.get("KNOWLEDGEHUB_API_BASE", "http://127.0.0.1:8000/api").rstrip("/")
+from services.mcp_bridge_security import (
+    MCP_TOKEN_HEADER,
+    McpBridgeUnavailable,
+    is_mcp_api_request_allowed,
+    read_mcp_bridge_api_base,
+    read_mcp_bridge_token,
+)
 
 mcp = FastMCP("knowledgehub_mcp")
 
@@ -205,13 +208,25 @@ class CreateGroupReportDraftInput(BaseModel):
 
 
 async def _request(method: str, path: str, **kwargs: Any) -> httpx.Response:
-    url = f"{API_BASE}{path}"
+    api_path = f"/api{path}"
+    if not is_mcp_api_request_allowed(method, api_path):
+        raise RuntimeError("KnowledgeHub MCP 工具请求超出本机授权范围")
+    try:
+        api_base = read_mcp_bridge_api_base()
+        bridge_token = read_mcp_bridge_token()
+    except McpBridgeUnavailable as exc:
+        raise RuntimeError(str(exc)) from exc
+    request_headers = dict(kwargs.pop("headers", {}))
+    if any(key.casefold() in {"x-knowledgehub-token", MCP_TOKEN_HEADER.casefold()} for key in request_headers):
+        raise RuntimeError("KnowledgeHub MCP 工具不得覆盖本机授权头")
+    request_headers[MCP_TOKEN_HEADER] = bridge_token
+    url = f"{api_base}{path}"
     try:
         # This server is launched by OpenClaw's LaunchAgent, which does not
         # inherit NO_PROXY.  Do not let macOS proxy settings intercept calls
         # to the local KnowledgeHub API and turn them into opaque 502 errors.
-        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-            response = await client.request(method, url, **kwargs)
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False, follow_redirects=False) as client:
+            response = await client.request(method, url, headers=request_headers, **kwargs)
             response.raise_for_status()
             return response
     except httpx.ConnectError as exc:
@@ -222,10 +237,17 @@ async def _request(method: str, path: str, **kwargs: Any) -> httpx.Response:
         detail = exc.response.text[:500]
         try:
             parsed = exc.response.json()
-            detail = parsed.get("detail", detail) if isinstance(parsed, dict) else detail
-        except Exception:
-            pass
-        raise RuntimeError(f"KnowledgeHub API 返回错误 {exc.response.status_code}: {detail}") from exc
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            detail = parsed.get("detail", detail)
+        safe_detail = str(detail).replace(bridge_token, "[redacted]")
+        raise RuntimeError(f"KnowledgeHub API 返回错误 {exc.response.status_code}: {safe_detail}") from exc
+
+
+def run_stdio() -> None:
+    """Run only the MCP stdio transport; stdout remains reserved for the protocol."""
+    mcp.run(transport="stdio")
 
 
 def _json(data: Any) -> str:
@@ -853,4 +875,4 @@ async def knowledgehub_read_wechat_article(params: ReadWeChatArticleInput) -> st
 
 
 if __name__ == "__main__":
-    mcp.run()
+    run_stdio()

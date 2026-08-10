@@ -12,6 +12,12 @@ const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
 const { backendSpawnOptions, terminateBackendProcess } = require('./backend-process.cjs')
 const { shouldInjectBackendToken, withBackendToken } = require('./backend-request-auth.cjs')
+const {
+  LEASE_HEARTBEAT_MS,
+  createMcpBridgeSession,
+  refreshMcpBridgeLease,
+  removeMcpBridgeSession,
+} = require('./mcp-bridge-session.cjs')
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..')
 const BACKEND_URL = 'http://127.0.0.1:8000'
@@ -39,6 +45,8 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 let backendProcess = null
+let mcpBridgeSession = null
+let mcpBridgeLeaseTimer = null
 let mainWindow = null
 let campusWebVpn = null
 let platformAuth = null
@@ -379,6 +387,7 @@ function backendRuntime() {
       dataDir,
       envFile: path.join(ROOT_DIR, 'backend', '.env'),
       logDir: path.join(dataDir, 'logs'),
+      runDir: path.join(dataDir, 'run'),
     }
   }
 
@@ -391,7 +400,40 @@ function backendRuntime() {
     dataDir,
     envFile: path.join(app.getPath('userData'), 'settings.env'),
     logDir: path.join(dataDir, 'logs'),
+    runDir: path.join(app.getPath('userData'), 'run'),
   }
+}
+
+function stopMcpBridgeSession({ ignoreErrors = false } = {}) {
+  if (mcpBridgeLeaseTimer) clearInterval(mcpBridgeLeaseTimer)
+  mcpBridgeLeaseTimer = null
+  if (!mcpBridgeSession) return
+  const session = mcpBridgeSession
+  mcpBridgeSession = null
+  try {
+    removeMcpBridgeSession(session)
+  } catch (error) {
+    if (!ignoreErrors) throw error
+  }
+}
+
+function startMcpBridgeSession(runDir) {
+  stopMcpBridgeSession()
+  mcpBridgeSession = createMcpBridgeSession(runDir, `${BACKEND_URL}/api`)
+  mcpBridgeLeaseTimer = setInterval(() => {
+    try {
+      if (!mcpBridgeSession) return
+      refreshMcpBridgeLease(mcpBridgeSession)
+    } catch (error) {
+      stopMcpBridgeSession({ ignoreErrors: true })
+      const failedBackend = backendProcess
+      backendProcess = null
+      terminateBackendProcess(failedBackend)
+      if (!isQuitting) dialog.showErrorBox('KnowledgeHub MCP 已停止', error.message)
+    }
+  }, LEASE_HEARTBEAT_MS)
+  mcpBridgeLeaseTimer.unref?.()
+  return mcpBridgeSession
 }
 
 async function ensureBackend() {
@@ -403,8 +445,9 @@ async function ensureBackend() {
 
   const runtime = backendRuntime()
   fs.mkdirSync(runtime.logDir, { recursive: true })
+  const bridgeSession = startMcpBridgeSession(runtime.runDir)
   const backendLog = path.join(runtime.logDir, 'desktop-backend.log')
-  const log = fs.openSync(backendLog, 'a')
+  let log = null
   const pathEntries = process.platform === 'darwin'
     ? ['/opt/miniconda3/bin', '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '']
     : [process.env.PATH || '']
@@ -418,25 +461,42 @@ async function ensureBackend() {
     KNOWLEDGEHUB_BACKEND_HOST: '127.0.0.1',
     KNOWLEDGEHUB_BACKEND_PORT: '8000',
     KNOWLEDGEHUB_INSTANCE_TOKEN: BACKEND_INSTANCE_TOKEN,
+    KNOWLEDGEHUB_MCP_BRIDGE_TOKEN: bridgeSession.token,
+    KNOWLEDGEHUB_MCP_BRIDGE_SESSION_ID: bridgeSession.sessionId,
+    KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE: bridgeSession.tokenFile,
+    KNOWLEDGEHUB_MCP_BRIDGE_LEASE_FILE: bridgeSession.leaseFile,
     APP_VERSION: app.getVersion(),
   }
 
-  backendProcess = spawn(
-    runtime.command,
-    runtime.args,
-    {
-      cwd: runtime.cwd,
-      env,
-      stdio: ['ignore', log, log],
-      ...backendSpawnOptions(),
-    },
-  )
+  try {
+    log = fs.openSync(backendLog, 'a')
+    backendProcess = spawn(
+      runtime.command,
+      runtime.args,
+      {
+        cwd: runtime.cwd,
+        env,
+        stdio: ['ignore', log, log],
+        ...backendSpawnOptions(),
+      },
+    )
+    fs.closeSync(log)
+    log = null
 
-  backendProcess.on('exit', () => {
+    backendProcess.on('exit', () => {
+      backendProcess = null
+      stopMcpBridgeSession({ ignoreErrors: true })
+    })
+
+    await waitForHealth(HEALTH_URL)
+  } catch (error) {
+    if (log !== null) fs.closeSync(log)
+    const failedBackend = backendProcess
     backendProcess = null
-  })
-
-  await waitForHealth(HEALTH_URL)
+    terminateBackendProcess(failedBackend)
+    stopMcpBridgeSession({ ignoreErrors: true })
+    throw error
+  }
 }
 
 function createWindow(entryPath = 'index.html') {
@@ -621,6 +681,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  stopMcpBridgeSession({ ignoreErrors: true })
   terminateBackendProcess(backendProcess)
 })
 

@@ -207,7 +207,7 @@ B站和抖音内容会在常规处理时保存可用的作者、发布时间、�
 - `GET /api/wechat-feed/subscriptions.json`：导出订阅配置（不含微信 Cookie、token 等凭据）。
 - `GET /api/wechat-feed/rss.xml`：所有已发现文章的聚合 RSS；`GET /api/wechat-feed/rss/{subscription_id}.xml`：单公众号 RSS。
 
-本项目的 MCP 服务也提供公众号搜索、订阅、列出订阅、读取最新文章和导出单篇文章 Markdown 工具；它们只使用本机 API，微信凭据仍保存在 macOS Keychain。
+本项目的 MCP 服务也提供公众号搜索、订阅、列出订阅、读取最新文章和导出单篇文章 Markdown 工具；它们只使用本机 API，微信凭据仍保存在 macOS Keychain。MCP 需要按 [OpenClaw 接入说明](docs/openclaw-ingest.md#local-mcp-bridge-configuration) 完成一次不含令牌的本机命令配置，并仅在 KnowledgeHub 正在运行、短期 bridge lease 有效时可用。
 
 #### 正文清洗规则
 

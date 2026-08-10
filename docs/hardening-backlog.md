@@ -34,7 +34,7 @@ lines.
   cross-platform runtime lock files exist.
 - [ ] Run MCP/OpenClaw contract tests and a packaged MCP tool smoke without real
   accounts, external gateways or production credentials. Base desktop smoke
-  remains independent of optional OpenClaw and WeChat integrations. The missing
+  remains independent of optional OpenClaw and WeChat integrations.
   `scripts/smoke_macos_mcp.py` must write JSON evidence for valid, missing and
   incorrect capabilities without placing a capability in a URL, log, command
   argument or OpenClaw configuration.

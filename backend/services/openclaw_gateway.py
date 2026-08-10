@@ -1,14 +1,27 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import hmac
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
-from threading import Lock
+import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
+from threading import Lock
 from typing import Any
+
+from services.mcp_bridge_security import (
+    MCP_TOKEN_ENV,
+    MCP_TOKEN_FILE_ENV,
+    McpBridgeUnavailable,
+    expected_backend_api_base,
+    mcp_bridge_lease_is_valid,
+    read_mcp_bridge_api_base,
+    read_mcp_bridge_token,
+    validated_mcp_api_base,
+)
 
 
 class OpenClawGatewayError(RuntimeError):
@@ -19,6 +32,10 @@ _STATUS_CACHE_SECONDS = 20.0
 _status_cache: dict[str, Any] | None = None
 _status_cache_expires_at = 0.0
 _status_cache_lock = Lock()
+_mcp_probe_lock = Lock()
+_mcp_probe_key: tuple[Any, ...] | None = None
+_mcp_probe_result = False
+_mcp_probe_retry_at = 0.0
 
 
 def _openclaw_path() -> str | None:
@@ -84,13 +101,188 @@ def _openclaw_config() -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _probe_mcp_stdio(
+    command: str,
+    arguments: list[str],
+    environment: dict[str, str],
+) -> bool:
+    """Prove the configured entry can initialize and list tools without using an API tool."""
+    from mcp.types import LATEST_PROTOCOL_VERSION
+
+    messages = (
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": LATEST_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "knowledgehub-status", "version": "1"},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    )
+    payload = "".join(json.dumps(message, separators=(",", ":")) + "\n" for message in messages)
+    runtime_environment_keys = {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "CONDA_PREFIX",
+        "VIRTUAL_ENV",
+        "SYSTEMROOT",
+        "WINDIR",
+    }
+    child_environment = {
+        key: value for key, value in os.environ.items() if key in runtime_environment_keys
+    }
+    child_environment.update(environment)
+    try:
+        result = subprocess.run(
+            [command, *arguments],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+            env=child_environment,
+            cwd=(Path(arguments[0]).parent if len(arguments) > 1 else Path(command).parent),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    responses: dict[int, dict[str, Any]] = {}
+    for line in result.stdout.splitlines():
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError:
+            return False
+        if isinstance(response, dict) and isinstance(response.get("id"), int):
+            responses[response["id"]] = response
+    initialized = isinstance((responses.get(1) or {}).get("result"), dict)
+    tools_result = (responses.get(2) or {}).get("result")
+    tools = tools_result.get("tools") if isinstance(tools_result, dict) else None
+    return result.returncode == 0 and initialized and isinstance(tools, list) and bool(tools)
+
+
+def _mcp_stdio_probe_cached(
+    command: str,
+    arguments: list[str],
+    environment: dict[str, str],
+) -> bool:
+    global _mcp_probe_key, _mcp_probe_result, _mcp_probe_retry_at
+    try:
+        command_stat = Path(command).stat()
+        command_identity = (command_stat.st_size, command_stat.st_mtime_ns)
+    except OSError:
+        return False
+    key = (
+        command,
+        tuple(arguments),
+        tuple(sorted(environment.items())),
+        command_identity,
+    )
+    now = time.monotonic()
+    with _mcp_probe_lock:
+        if key == _mcp_probe_key and (_mcp_probe_result or now < _mcp_probe_retry_at):
+            return _mcp_probe_result
+        result = _probe_mcp_stdio(command, arguments, environment)
+        _mcp_probe_key = key
+        _mcp_probe_result = result
+        _mcp_probe_retry_at = 0.0 if result else now + 60.0
+        return result
+
+
 def _mcp_status() -> dict[str, Any]:
     servers = ((_openclaw_config().get("mcp") or {}).get("servers") or {})
-    configured = isinstance(servers, dict) and "knowledgehub" in servers
+    descriptor = servers.get("knowledgehub") if isinstance(servers, dict) else None
+    if not isinstance(descriptor, dict):
+        return {
+            "state": "missing",
+            "configured": False,
+            "detail": "尚未配置 KnowledgeHub MCP",
+        }
+    command = str(descriptor.get("command") or "").strip()
+    arguments = descriptor.get("args")
+    environment = descriptor.get("env")
+    resolved_command = ""
+    if command:
+        candidate = Path(command).expanduser()
+        if candidate.is_absolute() or "/" in command:
+            resolved_command = (
+                str(candidate.resolve())
+                if candidate.is_file() and os.access(candidate, os.X_OK)
+                else ""
+            )
+        else:
+            discovered = shutil.which(command) or ""
+            resolved_command = str(Path(discovered).resolve()) if discovered else ""
+    expected_command = str(Path(sys.executable).resolve())
+    expected_arguments = ["--mcp-stdio"]
+    if not getattr(sys, "frozen", False):
+        desktop_server = Path(__file__).resolve().parents[1] / "desktop_server.py"
+        expected_arguments.insert(0, str(desktop_server))
+    valid_command = resolved_command == expected_command
+    valid_arguments = arguments == expected_arguments
+    allowed_environment_keys = {MCP_TOKEN_FILE_ENV, "KNOWLEDGEHUB_API_BASE"}
+    valid_environment = (
+        isinstance(environment, dict)
+        and all(isinstance(key, str) and isinstance(value, str) for key, value in environment.items())
+        and set(environment).issubset(allowed_environment_keys)
+    )
+    expected_token_file = os.environ.get(MCP_TOKEN_FILE_ENV, "").strip()
+    configured_token_file = (
+        str(environment.get(MCP_TOKEN_FILE_ENV) or "").strip()
+        if isinstance(environment, dict)
+        else ""
+    )
+    expected_token = os.environ.get(MCP_TOKEN_ENV, "").strip()
+    try:
+        configured_api_base = (
+            str(environment.get("KNOWLEDGEHUB_API_BASE") or "").strip()
+            if isinstance(environment, dict)
+            else ""
+        )
+        issued_api_base = read_mcp_bridge_api_base(configured_token_file)
+        api_base_ready = issued_api_base == expected_backend_api_base()
+        if configured_api_base:
+            api_base_ready = (
+                validated_mcp_api_base(configured_api_base) == issued_api_base
+                and api_base_ready
+            )
+        file_token = read_mcp_bridge_token(configured_token_file)
+        capability_ready = bool(
+            expected_token_file
+            and configured_token_file == expected_token_file
+            and expected_token
+            and hmac.compare_digest(file_token, expected_token)
+            and api_base_ready
+            and mcp_bridge_lease_is_valid()
+        )
+    except McpBridgeUnavailable:
+        capability_ready = False
+    static_ready = bool(valid_command and valid_arguments and valid_environment and capability_ready)
+    callable_ready = bool(
+        static_ready
+        and _mcp_stdio_probe_cached(
+            resolved_command,
+            list(arguments),
+            {MCP_TOKEN_FILE_ENV: configured_token_file},
+        )
+    )
+    configured = callable_ready
     return {
-        "state": "configured" if configured else "missing",
+        "state": "configured" if configured else "invalid",
         "configured": configured,
-        "detail": "KnowledgeHub MCP 已配置" if configured else "尚未配置 KnowledgeHub MCP",
+        "detail": (
+            "KnowledgeHub MCP 已通过本机 stdio 握手与 bridge capability 检查"
+            if configured
+            else "KnowledgeHub MCP 配置存在，但命令或 bridge capability 无效"
+        ),
     }
 
 
@@ -211,7 +403,10 @@ def get_openclaw_status(*, force_refresh: bool = False) -> dict[str, Any]:
         "detail": "需要先安装 OpenClaw 才能连接微信",
     }
     backend = _backend_status()
-    from services.openclaw_conversations import get_conversation_settings, list_conversations
+    from services.openclaw_conversations import (
+        get_conversation_settings,
+        list_conversations,
+    )
 
     conversation_settings = get_conversation_settings()
     conversations = list_conversations(limit=100)

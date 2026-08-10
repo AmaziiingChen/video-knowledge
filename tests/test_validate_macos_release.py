@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "validate_macos_release.py"
 SPEC = importlib.util.spec_from_file_location("validate_macos_release", SCRIPT_PATH)
@@ -39,6 +38,11 @@ def test_validate_app_accepts_the_expected_unsigned_arm64_layout(tmp_path, monke
     monkeypatch.setattr(release, "executable_architectures", lambda _path: {"arm64"})
     monkeypatch.setattr(release, "validate_no_developer_id", lambda _path: "ad-hoc-or-unsigned")
     monkeypatch.setattr(release, "smoke_test_backend", lambda _path: {"status": "ok"})
+    monkeypatch.setattr(
+        release,
+        "smoke_test_mcp_entry",
+        lambda _path: {"status": "ok", "transport": "stdio"},
+    )
 
     report = release.validate_app(tmp_path, "0.1.0")
 
@@ -50,6 +54,7 @@ def test_validate_app_accepts_the_expected_unsigned_arm64_layout(tmp_path, monke
         "developer_id": "ad-hoc-or-unsigned",
         "backend_mib": 0.0,
         "backend_smoke": {"status": "ok"},
+        "mcp_entry_smoke": {"status": "ok", "transport": "stdio"},
     }
     assert app.is_dir()
 

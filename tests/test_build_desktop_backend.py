@@ -4,7 +4,6 @@ import importlib.util
 import os
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "build_desktop_backend.py"
 SPEC = importlib.util.spec_from_file_location("build_desktop_backend", SCRIPT_PATH)
@@ -80,6 +79,7 @@ def test_build_backend_uses_project_cache_and_excludes_optional_model_stacks(tmp
     assert command[:4] == [builder.sys.executable, "-m", "PyInstaller", "--noconfirm"]
     assert command[command.index("--distpath") + 1] == str(output)
     assert command[command.index("--paths") + 1] == str(backend)
+    assert command[command.index("--hidden-import") + 1] == "mcp_server"
     assert command[command.index("--add-data") + 1] == f"{native}{os.pathsep}native"
     assert command[command.index("--add-binary") + 1] == f"{helper}{os.pathsep}native_tools"
     excluded = [command[index + 1] for index, value in enumerate(command) if value == "--exclude-module"]

@@ -1,14 +1,44 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
+import httpx
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 import mcp_server
+
+
+def _secure_token_file(
+    tmp_path: Path,
+    token: str,
+    *,
+    api_base: str = "http://127.0.0.1:8000/api",
+) -> Path:
+    run_dir = tmp_path / "mcp-run"
+    run_dir.mkdir(mode=0o700)
+    run_dir.chmod(0o700)
+    token_file = run_dir / "token"
+    token_file.write_text(token, encoding="utf-8")
+    token_file.chmod(0o600)
+    lease_file = run_dir / "mcp-bridge-lease.json"
+    lease_file.write_text(
+        json.dumps(
+            {
+                "session_id": "session-1",
+                "updated_at": 100.0,
+                "api_base": api_base,
+            }
+        ),
+        encoding="utf-8",
+    )
+    lease_file.chmod(0o600)
+    return token_file
 
 
 class StubResponse:
@@ -18,6 +48,68 @@ class StubResponse:
 
     def json(self):
         return self._payload
+
+
+def test_mcp_request_attaches_only_the_scoped_capability(monkeypatch, tmp_path):
+    token = "mcp-request-token-value-1234567890"
+    token_file = _secure_token_file(tmp_path, token)
+    monkeypatch.setenv("KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE", str(token_file))
+    real_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == httpx.URL("http://127.0.0.1:8000/api/tasks")
+        assert request.headers["X-KnowledgeHub-MCP-Token"] == token
+        assert "X-KnowledgeHub-Token" not in request.headers
+        assert token not in str(request.url)
+        return httpx.Response(200, json=[])
+
+    def client_factory(**kwargs):
+        assert kwargs["follow_redirects"] is False
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(mcp_server.httpx, "AsyncClient", client_factory)
+    response = asyncio.run(mcp_server._request("GET", "/tasks"))
+
+    assert response.json() == []
+
+
+def test_mcp_request_rejects_remote_api_before_reading_or_sending_capability(monkeypatch, tmp_path):
+    token_file = _secure_token_file(
+        tmp_path,
+        "mcp-request-token-value-1234567890",
+        api_base="https://attacker.invalid/api",
+    )
+    monkeypatch.setenv("KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE", str(token_file))
+    monkeypatch.setattr(
+        mcp_server.httpx,
+        "AsyncClient",
+        lambda **_kwargs: pytest.fail("remote client must not be created"),
+    )
+
+    with pytest.raises(RuntimeError, match="回环"):
+        asyncio.run(mcp_server._request("GET", "/tasks"))
+
+
+def test_mcp_http_error_never_reflects_the_capability(monkeypatch, tmp_path):
+    token = "mcp-request-token-value-1234567890"
+    token_file = _secure_token_file(tmp_path, token)
+    monkeypatch.setenv("KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE", str(token_file))
+    real_client = httpx.AsyncClient
+
+    def client_factory(**kwargs):
+        return real_client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(401, json={"detail": f"reflected {token}"})
+            ),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(mcp_server.httpx, "AsyncClient", client_factory)
+    with pytest.raises(RuntimeError) as captured:
+        asyncio.run(mcp_server._request("GET", "/tasks"))
+
+    assert token not in str(captured.value)
+    assert "[redacted]" in str(captured.value)
 
 
 def test_search_wechat_mcp_tool_uses_local_subscription_api(monkeypatch):
