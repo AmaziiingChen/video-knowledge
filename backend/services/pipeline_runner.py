@@ -59,6 +59,7 @@ from services.pipeline_local_media_policy import (
 )
 from services.pipeline_media_download import download_media_with_live_logs
 from services.pipeline_run_reporter import PipelineRunReporter
+from services.pipeline_source_context import refresh_pipeline_source_context
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
 from services.content_source_text import (
     _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
@@ -70,7 +71,6 @@ from services.downloader import DownloadProgress, download_video, get_video_info
 from services.douyin_context import fetch_douyin_source_context
 from services.markdown_sync import replace_content_summary_and_sync, save_markdown_draft_and_sync
 from services.search_index import upsert_search_document
-from services.source_context import source_context_is_fresh
 from services.source_context_store import save_source_context
 from services.summarizer import generate_article_markdown, generate_markdown, summarize, summarize_stream
 from services.subtitles import SUBTITLE_EXTENSIONS, fetch_bilibili_subtitle, parse_subtitle_text
@@ -1007,37 +1007,18 @@ def run_pipeline_sync(
 
         if isinstance((video_info or {}).get("source_context"), dict):
             source_context = dict(video_info["source_context"])
-        if parsed.platform == "bilibili" and not source_context_is_fresh(source_context):
-            check_cancel()
-            try:
-                source_context = fetch_bilibili_source_context(parsed.url)
-                if use_cache and cache_dir:
-                    write_cache_meta(cache_dir, {"source_context": source_context})
-                sample_count = int(source_context.get("comment_sample_count") or 0)
-                add_log("info", f"已采集互动指标与 {sample_count} 条评论样本", "success")
-            except Exception as exc:
-                add_log("info", f"互动与评论采集失败，继续使用正文总结：{exc}", "warn")
-            check_cancel()
-        elif parsed.platform == "douyin" and not source_context_is_fresh(source_context):
-            check_cancel()
-            try:
-                source_context = fetch_douyin_source_context(parsed.url)
-                if use_cache and cache_dir:
-                    write_cache_meta(cache_dir, {"source_context": source_context})
-                sample_count = int(source_context.get("comment_sample_count") or 0)
-                add_log("info", f"已采集互动指标与 {sample_count} 条评论样本", "success")
-            except Exception as exc:
-                add_log("info", f"互动与评论采集失败，继续使用正文总结：{exc}", "warn")
-            check_cancel()
-        elif source_context and use_cache and cache_dir:
-            write_cache_meta(cache_dir, {"source_context": source_context})
-        if source_context and content_item_id:
-            try:
-                with connect() as connection:
-                    context_item = ContentRepository(connection).get_content_item(content_item_id)
-                save_source_context(context_item, source_context)
-            except Exception as exc:
-                add_log("info", f"互动数据持久化失败，继续生成总结：{exc}", "warn")
+        source_context = refresh_pipeline_source_context(
+            platform=parsed.platform,
+            url=parsed.url,
+            source_context=source_context,
+            use_cache=use_cache,
+            cache_dir=cache_dir,
+            content_item_id=content_item_id,
+            add_log=add_log,
+            check_cancel=check_cancel,
+            fetch_bilibili=fetch_bilibili_source_context,
+            fetch_douyin=fetch_douyin_source_context,
+        )
 
         check_cancel()
         if not settings.deepseek_api_key:

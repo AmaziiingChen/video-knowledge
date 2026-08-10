@@ -310,6 +310,9 @@ lines.
   and live provider-log de-duplication now live in
   `services/pipeline_media_download.py`; the runner retains its injectable
   downloader seam for existing integrations and tests.
+  Best-effort Bilibili/Douyin interaction refresh, cache reuse and durable
+  content attachment now share `services/pipeline_source_context.py`; provider
+  failures remain non-fatal and the runner keeps both fetchers injectable.
 - [ ] Split `downloader.py` by platform transport and pure media policy.
   Douyin URL classification, strict media-host ownership, credential-free
   browser header forwarding, signed-URL refresh decisions, payload lookup and
