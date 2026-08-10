@@ -186,6 +186,10 @@ lines.
   queue log merging, clear boundaries, latest-event token totals, persistence
   failures and deterministic deduplication now live in
   `features/logs/useProcessLogProjectionController.js`;
+  creator-sync content reveal, queue registration and first-task activation now
+  live in `features/creator/useCreatorSyncTaskMonitorController.js`; three
+  unreturned form/link helpers with no repository caller were removed instead
+  of being moved;
   queue transport and durable task mutation remain in their existing
   controllers. Workspace
   tab opening, selection hydration, close selection,

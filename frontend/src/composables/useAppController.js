@@ -53,6 +53,7 @@ import { useWorkspaceTabProjectionController } from '../features/workspace/useWo
 import { useClipboardController } from '../features/integrations/useClipboardController.js'
 import { useContentReadState } from '../features/library/useContentReadState.js'
 import { useContentReadinessController } from '../features/library/useContentReadinessController.js'
+import { useCreatorSyncTaskMonitorController } from '../features/creator/useCreatorSyncTaskMonitorController.js'
 import { useLibraryContentController } from '../features/library/useLibraryContentController.js'
 import { useLibraryFolderController } from '../features/library/useLibraryFolderController.js'
 import { useLibrarySearchController } from '../features/library/useLibrarySearchController.js'
@@ -834,6 +835,24 @@ export function useAppController() {
     recordTelemetry,
   })
 
+  const { monitorCreatorSyncTasks } = useCreatorSyncTaskMonitorController({
+    allContentItems,
+    batchTaskIds,
+    batchTaskNames,
+    running,
+    terminalStatuses,
+    loadContentItems,
+    openContentTab,
+    mergeBatchTasks,
+    resetRunState,
+    applyTaskData,
+    addLog,
+    batchTaskName,
+    pollTask,
+    pollBatchTasks,
+    notify: ElMessage,
+  })
+
   const totalElapsed = computed(() => {
     const value = result.timings?.total
     return typeof value === 'number' ? value : null
@@ -1049,22 +1068,6 @@ export function useAppController() {
     disposeLibrarySearchController()
   })
 
-  function shortLink(link) {
-    return link.replace(/^https?:\/\//, '').replace(/^www\./, '').slice(0, 42)
-  }
-
-  function appendAsrFormData(formData) {
-    Object.entries(asrRequestOptions()).forEach(([key, value]) => {
-      formData.append(key, String(value))
-    })
-  }
-
-  function appendAiFormData(formData) {
-    Object.entries(aiRequestOptions()).forEach(([key, value]) => {
-      formData.append(key, String(value))
-    })
-  }
-
   async function selectContentItem(item, { awaitPrimaryPreview = false } = {}) {
     const changed = String(selectedContentItem.value?.id || '') !== String(item.id || '')
     selectedContentItem.value = item
@@ -1112,46 +1115,6 @@ export function useAppController() {
     const format = String(item?.source_metadata?.file_format || '').toUpperCase()
     const filename = String(item?.source_metadata?.file_name || '')
     return ['HTML', 'HTM', 'XHTML'].includes(format) || /\.x?html?$/i.test(filename)
-  }
-
-  async function monitorCreatorSyncTasks({ taskIds = [], contentItemIds = [] } = {}) {
-    const ids = [...new Set(taskIds.filter(Boolean))]
-    const itemIds = new Set(contentItemIds.filter(Boolean))
-
-    // Creator sync creates normal pipeline tasks on the server. Bring those
-    // tasks into the same process dock as a manually submitted video, and
-    // open the first item so its processing state is visible immediately.
-    await loadContentItems()
-    const firstItem = allContentItems.value.find((item) => itemIds.has(item.id))
-    if (firstItem) await openContentTab(firstItem)
-    if (!ids.length) return
-
-    try {
-      const response = await axios.get(`${API}/tasks`, {
-        params: { task_ids: ids.slice(0, 200).join(',') },
-        timeout: 10000,
-      })
-      const byId = new Map((response.data || []).map((task) => [task.task_id, task]))
-      const tasks = ids.map((id) => byId.get(id)).filter(Boolean)
-      tasks.forEach((task) => {
-        batchTaskNames.value[task.task_id] = task.display_title || task.source_title || task.url || `任务 ${task.task_id}`
-      })
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, ...ids])]
-      mergeBatchTasks(tasks)
-
-      const firstTask = tasks[0]
-      if (firstTask) {
-        resetRunState()
-        running.value = !terminalStatuses.has(firstTask.status)
-        applyTaskData(firstTask)
-        addLog(`创作者同步已加入处理队列：${batchTaskName(firstTask)}`, 'info')
-        if (!terminalStatuses.has(firstTask.status)) void pollTask(firstTask.task_id)
-      }
-      await pollBatchTasks()
-    } catch (error) {
-      const message = error.response?.data?.detail || error.message || '无法读取创作者处理任务'
-      ElMessage.error(typeof message === 'string' ? message : '无法读取创作者处理任务')
-    }
   }
 
   function copyQaExchange(item) {
