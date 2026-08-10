@@ -202,7 +202,11 @@ lines.
   `services/campus_document_rendering.py`; `campus_sources.py` retains its
   public renderer import and private caller alias for compatibility. Article
   HTML URL normalization, attachment de-duplication/scope selection and list
-  node de-duplication now live in `services/campus_html_content.py`.
+  node de-duplication now live in `services/campus_html_content.py`. Procurement
+  feed mapping, provider document-path validation, CMS-fragment preservation,
+  OCR status metadata and escaped fallback bodies now live in
+  `services/campus_procurement_payloads.py`; network requests, provider-host
+  enforcement and OCR execution remain in the orchestration service.
 - [ ] Split `pipeline_runner.py` into stable transport contracts, media/source
   execution and persistence boundaries. Request/response/log models, durable
   error taxonomy and cancellation marker now live in

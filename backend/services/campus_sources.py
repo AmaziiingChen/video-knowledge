@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
-import html
+from datetime import date
 import logging
 import re
 import time
@@ -33,11 +32,24 @@ from services.campus_list_parsing import (
     extract_date as _extract_date,
     parse_campus_list,
 )
+from services.campus_procurement_payloads import (
+    PROCUREMENT_SECTION_PARAMS as _PROCUREMENT_SECTION_PARAMS,
+    procurement_cms_content,
+    procurement_detail_url as _procurement_detail_url,  # noqa: F401 - compatibility alias
+    procurement_document_ocr_metadata as _procurement_document_ocr_metadata,
+    procurement_fallback_article as _procurement_fallback_article,
+    procurement_pdf_unavailable_text as _procurement_pdf_unavailable_text,
+    procurement_provider_document_url as _procurement_provider_document_url,
+    procurement_publish_id as _procurement_publish_id,
+    procurement_publish_id_from_fragment as _procurement_publish_id_from_fragment,  # noqa: F401 - compatibility alias
+    procurement_record_to_article as _procurement_record_to_article,
+    provider_datetime as _provider_datetime,
+)
 from services.campus_document_rendering import (
     render_document_markdown_html,  # noqa: F401 - public compatibility re-export
     text_to_article_html as _text_to_article_html,
 )
-from services.paddle_ocr import OcrImageResult, recognize_document_bytes
+from services.paddle_ocr import recognize_document_bytes
 
 
 logger = logging.getLogger(__name__)
@@ -66,38 +78,8 @@ _ARTICLE_CONTENT_SELECTORS = (
     "div.content",
 )
 _PROCUREMENT_API_URL = "https://ztb.sztu.edu.cn/sfw_cms/e"
-_PROCUREMENT_LIST_BASE_URL = "https://ztb.sztu.edu.cn/sfw_cms/e?page=cms.psms.gglist"
 _PROCUREMENT_PROVIDER_API_BASE_URL = "https://provider.yuncaitong.cn/api/publish/"
-_PROCUREMENT_PROVIDER_PUBLISH_BASE_URL = "https://provider.yuncaitong.cn/publish/"
 _PROCUREMENT_PROVIDER_HOST = "provider.yuncaitong.cn"
-_PROCUREMENT_PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9]{8,80}$")
-_PROCUREMENT_PUBLISH_FRAGMENT_RE = re.compile(r"(?:^|/)publish/([A-Za-z0-9]{8,80})(?:$|/)")
-_CHINA_TIMEZONE = timezone(timedelta(hours=8))
-_PROCUREMENT_SECTION_PARAMS: dict[str, dict[str, object]] = {
-    "采购公告": {
-        "type": ("ZCXQ", "YQXQ", "BYXQ", "CSXQ"),
-        "notCollectType": "orient",
-        "categoryId": "104791",
-        "ggType": "XQ",
-        "sort": "sync_time desc",
-    },
-    "成交公告": {
-        "type": ("ZCGG", "ZCGS", "FBGG", "BGGG"),
-        "categoryId": "104910",
-        "ggType": "GG",
-        "sort": "sync_time desc",
-    },
-    "采购意向": {
-        "type": ("YXGK",),
-        "categoryId": "103980",
-        "sort": "begin_time desc",
-    },
-    "合同公示": {
-        "type": ("HTGS", "HTBG"),
-        "categoryId": "104557",
-        "sort": "is_top desc,pdate desc",
-    },
-}
 
 
 
@@ -250,55 +232,6 @@ def _query_sztu_procurement(
     if not isinstance(data, dict):
         raise ValueError("采购站公开接口返回了非对象数据")
     return data
-
-
-def _procurement_record_to_article(
-    record: dict[str, object],
-    *,
-    source: CampusSource,
-    section: str,
-) -> CampusArticle | None:
-    record_id = str(record.get("id") or "").strip()
-    title = _clean_title(str(record.get("subject") or ""))
-    if not record_id or len(title) < 4:
-        return None
-    published_at = _extract_date(str(record.get("beginTime") or record.get("syncTime") or record.get("pdate") or ""))
-    keyword = str(record.get("tenderNo") or title).strip()
-    detail_url = _procurement_detail_url(
-        record_id=record_id,
-        keyword=keyword,
-        section=section,
-        sync_id=str(record.get("syncId") or "").strip(),
-        new_type=str(record.get("newType") or "").strip(),
-        catalog=str(record.get("catalog") or "").strip(),
-    )
-    return CampusArticle(
-        title=title,
-        url=detail_url,
-        published_at=published_at,
-        section=section,
-        source_slug=source.slug,
-        source_name=source.name,
-    )
-
-
-def _procurement_detail_url(
-    *,
-    record_id: str,
-    keyword: str,
-    section: str,
-    sync_id: str,
-    new_type: str,
-    catalog: str,
-) -> str:
-    extra = urlencode({"record_id": record_id, "keyword": keyword, "section": section})
-    if sync_id:
-        return f"https://ztb.sztu.edu.cn/provider/?{extra}#/publish/{sync_id}"
-    if section == "合同公示":
-        return f"https://ztb.sztu.edu.cn/sfw_cms/e?page=cms.cgtext&id={record_id}&{extra}"
-    if new_type == "1" and catalog:
-        return f"https://ztb.sztu.edu.cn/sfw_cms/e?page=cms.detail&cid={catalog}&aid={record_id}&{extra}"
-    return f"{_PROCUREMENT_LIST_BASE_URL}&{extra}"
 
 
 def _discover_college_section(
@@ -588,26 +521,7 @@ def _fetch_sztu_procurement_article(
 
 
 def _procurement_cms_content(content_html: object) -> Tag | None:
-    """Return inline CMS content even when it is an HTML fragment.
-
-    The procurement API usually supplies a page container, but correction
-    notices also arrive as bare ``h2/p/table`` siblings.  Looking only for a
-    ``div`` or ``body`` used to discard those valid notices and incorrectly
-    send them to the provider/PDF fallback.  Wrap fragment siblings in a
-    neutral section so they share the normal sanitation, attachment and table
-    handling path.
-    """
-    raw_html = str(content_html or "").strip()
-    if not raw_html:
-        return None
-    soup = BeautifulSoup(raw_html, "html.parser")
-    content = _first_node(soup, (*_ARTICLE_CONTENT_SELECTORS, "body", "div"))
-    if content is not None:
-        return content
-    fragment = soup.new_tag("section", attrs={"class": "procurement-cms-content"})
-    for node in list(soup.contents):
-        fragment.append(node.extract())
-    return fragment if fragment.contents else None
+    return procurement_cms_content(content_html, content_selectors=_ARTICLE_CONTENT_SELECTORS)
 
 
 def _fetch_sztu_procurement_provider_article(
@@ -659,18 +573,6 @@ def _fetch_sztu_procurement_provider_article(
     return None
 
 
-def _procurement_publish_id(url: str, record: dict[str, object]) -> str:
-    candidate = str(record.get("syncId") or "").strip()
-    if not candidate:
-        candidate = _procurement_publish_id_from_fragment(urlparse(url).fragment)
-    return candidate if _PROCUREMENT_PROVIDER_ID_RE.fullmatch(candidate) else ""
-
-
-def _procurement_publish_id_from_fragment(fragment: str) -> str:
-    match = _PROCUREMENT_PUBLISH_FRAGMENT_RE.search(str(fragment or "").lstrip("#"))
-    return match.group(1) if match else ""
-
-
 def _fetch_procurement_provider_json(
     session: requests.Session,
     publish_id: str,
@@ -686,31 +588,6 @@ def _fetch_procurement_provider_json(
     if not isinstance(payload, dict) or str(payload.get("id") or "") != publish_id:
         return None
     return payload
-
-
-def _procurement_provider_document_url(detail: dict[str, object], publish_id: str) -> str:
-    created_at = _provider_datetime(detail.get("createTime"))
-    if not created_at:
-        return ""
-    try:
-        timestamp = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return ""
-    content_type = str(detail.get("contentType") or "").upper()
-    filename = "content.pdf" if content_type == "PDF" else "content.html" if content_type == "HTML" else ""
-    if not filename:
-        return ""
-    return f"{_PROCUREMENT_PROVIDER_PUBLISH_BASE_URL}{timestamp:%Y/%m/%d}/{publish_id}/{filename}"
-
-
-def _provider_datetime(value: object) -> str:
-    try:
-        milliseconds = int(value)
-    except (TypeError, ValueError):
-        return ""
-    if milliseconds <= 0:
-        return ""
-    return datetime.fromtimestamp(milliseconds / 1000, _CHINA_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _fetch_procurement_provider_pdf(
@@ -802,56 +679,6 @@ def _safe_get_procurement_provider(session: requests.Session, url: str) -> reque
     )
     response.raise_for_status()
     return response
-
-
-def _procurement_pdf_unavailable_text(ocr: OcrImageResult) -> str:
-    if ocr.status == "not_configured":
-        return "公告正文以 PDF 形式发布；尚未配置 PaddleOCR，已保留原 PDF 附件。"
-    if ocr.status == "empty":
-        return "公告正文以 PDF 形式发布；PaddleOCR 未识别出可用文字，可能为扫描件，已保留原 PDF 附件。"
-    return "公告正文以 PDF 形式发布；PaddleOCR 识别失败，已保留原 PDF 附件。"
-
-
-def _procurement_document_ocr_metadata(ocr: OcrImageResult) -> dict[str, object]:
-    return {
-        "attempted": ocr.status != "not_configured",
-        "status": ocr.status,
-        "cloud_submitted": ocr.cloud_submitted,
-        "error": ocr.error,
-    }
-
-
-def _procurement_fallback_article(
-    url: str,
-    params: dict[str, str],
-    *,
-    record: dict[str, object] | None = None,
-) -> dict[str, object]:
-    source = get_campus_source(_PROCUREMENT_SOURCE_SLUG)
-    title = _clean_title(str((record or {}).get("subject") or params.get("keyword") or "采购公告"))
-    published_at = _extract_date(str((record or {}).get("beginTime") or (record or {}).get("syncTime") or ""))
-    lines = [
-        f"公告类别：{params.get('section') or '采购信息'}",
-        f"公告标题：{title}",
-    ]
-    tender_no = str((record or {}).get("tenderNo") or "").strip()
-    if tender_no:
-        lines.append(f"项目编号：{tender_no}")
-    if published_at:
-        lines.append(f"发布时间：{published_at}")
-    lines.append("正文暂未由该公开接口返回，请通过原始链接查看。")
-    body_text = "\n".join(lines)
-    return {
-        "url": url,
-        "platform": "campus",
-        "title": title or "采购公告",
-        "body_text": body_text,
-        "body_html": "<section><p>" + "</p><p>".join(html.escape(line) for line in lines) + "</p></section>",
-        "author": source.name,
-        "published_at": published_at,
-        "images": [],
-        "attachments": [],
-    }
 
 
 def _extract_article_title(soup: BeautifulSoup, *, source: CampusSource | None) -> str:
