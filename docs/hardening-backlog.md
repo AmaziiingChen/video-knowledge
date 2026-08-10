@@ -189,7 +189,10 @@ lines.
   `routers/content_preview.py`; background capture remains a separate
   follow-up cut.
 - [ ] Split `campus_sources.py` by source catalog, list discovery, procurement
-  adapters and article extraction. OCR-document Markdown rendering, math-token
+  adapters and article extraction. Source models, the campus source registry,
+  canonical section URLs and campus-host ownership checks now live in
+  `services/campus_source_catalog.py`; `campus_sources.py` retains the same
+  public imports for compatibility. OCR-document Markdown rendering, math-token
   marking and table-header promotion now live in
   `services/campus_document_rendering.py`; `campus_sources.py` retains its
   public renderer import and private caller alias for compatibility. Article
