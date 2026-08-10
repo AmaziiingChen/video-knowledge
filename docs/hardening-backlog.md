@@ -259,6 +259,11 @@ lines.
   Audio/video players, cover/loading/expired-cache states and the seek/playback
   facade now live in mounted-tested `workbench/TimedMediaPreviewSurface.vue`;
   transcript layout and timing state remain in their existing controller.
+  The matching splitter, generation state and transcript rows now render
+  through mounted-tested `workbench/MediaTranscriptSurface.vue`; segment refs,
+  seek intent and auto-follow events still terminate at that controller.
+  Remote Electron WebViews deliberately remain outside the keyed content
+  transition so their authenticated sessions survive local tab switches.
   Report title, date-window and generated-time presentation now live in
   `workbench/editorReportPresentation.js` with pure formatting tests. Article
   outline filtering and visual hierarchy now live in

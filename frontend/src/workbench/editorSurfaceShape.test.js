@@ -111,6 +111,20 @@ test('exposes only a mounted timed-media player to the transcript controller', (
   assert.match(timedMediaSource, /seek,[\s\S]*?togglePlayback,/)
 })
 
+test('keeps the transcript surface wired to the existing controller state', () => {
+  assert.match(editorHostSource, /<MediaTranscriptSurface[\s\S]*?v-if="hasMediaTranscriptWorkspace\(activeContentTab\.id\)"/)
+  assert.match(editorHostSource, /@resize-start="startMediaTranscriptResize"/)
+  assert.match(editorHostSource, /@pause-auto-follow="pauseTranscriptAutoFollow"/)
+  assert.match(
+    editorHostSource,
+    /@segment-ref="setTimelineSegmentRef\(activeContentTab\.id, \$event\.segment, \$event\.element\)"/,
+  )
+  assert.match(
+    editorHostSource,
+    /@select-segment="handleTimelineSegmentClick\(activeContentTab\.id, \$event\.start_seconds\)"/,
+  )
+})
+
 test('keeps capture metadata separators with the report reader surface', () => {
   assert.match(
     reportReaderStyles,

@@ -277,76 +277,23 @@
                     </template>
                   </div>
                 </section>
-              <div
+              <MediaTranscriptSurface
                 v-if="hasMediaTranscriptWorkspace(activeContentTab.id)"
-                class="media-transcript-splitter"
-                role="separator"
-                tabindex="0"
-                aria-orientation="horizontal"
-                aria-label="调整视频与字幕高度"
-                :aria-valuemin="Math.round(verticalContentBounds().min)"
-                :aria-valuemax="Math.round(verticalContentBounds().max)"
-                :aria-valuenow="mediaTranscriptHeight"
-                @pointerdown="startMediaTranscriptResize"
-                @keydown="handleMediaTranscriptKeydown"
-              ></div>
-              <section
-                v-if="hasMediaTranscriptWorkspace(activeContentTab.id)"
-                class="transcript-timeline"
-                :class="{ 'is-generating': shouldShowTranscriptGeneration(activeContentTab.id) }"
-                :aria-busy="shouldShowTranscriptGeneration(activeContentTab.id)"
-                @wheel.passive="pauseTranscriptAutoFollow"
-                @touchstart.passive="pauseTranscriptAutoFollow"
-              >
-                <div
-                  v-if="shouldShowTranscriptGeneration(activeContentTab.id)"
-                  class="transcript-generation"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <div class="transcript-generation-heading">
-                    <span class="transcript-generation-pulse" aria-hidden="true"></span>
-                    <div>
-                      <strong>{{ transcriptGenerationLabel(activeContentTab.id) }}</strong>
-                      <small>{{ transcriptGenerationDescription(activeContentTab.id) }}</small>
-                    </div>
-                  </div>
-                  <div class="transcript-generation-lines" aria-hidden="true">
-                    <div class="transcript-generation-line is-wide"><span>··:··</span><i></i></div>
-                    <div class="transcript-generation-line is-medium"><span>··:··</span><i></i></div>
-                    <div class="transcript-generation-line is-long"><span>··:··</span><i></i></div>
-                    <div class="transcript-generation-line is-short"><span>··:··</span><i></i></div>
-                  </div>
-                </div>
-                <template v-else>
-                  <button
-                    v-if="!transcriptAutoFollow"
-                    class="transcript-follow-button"
-                    type="button"
-                    title="回到当前进度"
-                    aria-label="回到当前进度"
-                    @click="resumeTranscriptAutoFollow"
-                  >
-                    <el-icon><Aim /></el-icon>
-                  </button>
-                  <button
-                    v-for="segment in timelineSegmentsForTab(activeContentTab.id)"
-                    :key="segment.position"
-                    :ref="(el) => setTimelineSegmentRef(activeContentTab.id, segment, el)"
-                    class="timeline-segment"
-                    type="button"
-                    :class="{
-                      approximate: segment.approximate,
-                      'is-active': isTimelineSegmentActive(activeContentTab.id, segment)
-                    }"
-                    :data-start-seconds="segment.start_seconds"
-                    @click="handleTimelineSegmentClick(activeContentTab.id, segment.start_seconds)"
-                  >
-                    <span class="timeline-time">{{ formatTimelineTime(segment.start_seconds) }}</span>
-                    <span class="timeline-text">{{ segment.text }}</span>
-                  </button>
-                </template>
-              </section>
+                :height="mediaTranscriptHeight"
+                :bounds="verticalContentBounds()"
+                :generating="shouldShowTranscriptGeneration(activeContentTab.id)"
+                :generation-label="transcriptGenerationLabel(activeContentTab.id)"
+                :generation-description="transcriptGenerationDescription(activeContentTab.id)"
+                :auto-follow="transcriptAutoFollow"
+                :segments="timelineSegmentsForTab(activeContentTab.id)"
+                :segment-active="(segment) => isTimelineSegmentActive(activeContentTab.id, segment)"
+                @resize-start="startMediaTranscriptResize"
+                @resize-keydown="handleMediaTranscriptKeydown"
+                @pause-auto-follow="pauseTranscriptAutoFollow"
+                @resume-auto-follow="resumeTranscriptAutoFollow"
+                @segment-ref="setTimelineSegmentRef(activeContentTab.id, $event.segment, $event.element)"
+                @select-segment="handleTimelineSegmentClick(activeContentTab.id, $event.start_seconds)"
+              />
             </div>
             <div v-else key="empty-content" class="content-hero">
               <div class="content-media-frame empty-frame">
@@ -447,7 +394,6 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  Aim,
   ArrowLeft,
   ArrowRight,
 } from '@element-plus/icons-vue'
@@ -463,6 +409,7 @@ import { shouldShowArticlePreviewLoader } from '../features/library/articlePrevi
 import ArticlePreviewFrame from './ArticlePreviewFrame.vue'
 import ArticleReaderSurface from './ArticleReaderSurface.vue'
 import LocalFileReaderSurface from './LocalFileReaderSurface.vue'
+import MediaTranscriptSurface from './MediaTranscriptSurface.vue'
 import PreviewFindBar from './PreviewFindBar.vue'
 import PromptEditorSurface from './PromptEditorSurface.vue'
 import ReadingProgressControl from './ReadingProgressControl.vue'
@@ -477,7 +424,6 @@ import { useReaderSelectionController } from './useReaderSelectionController.js'
 import { useRemoteArticlePreviewController } from './useRemoteArticlePreviewController.js'
 import { useEditorContentActionMenuController } from './useEditorContentActionMenuController.js'
 import { createEditorContentKind } from './editorContentKind.js'
-import { formatTimelineTime } from './mediaTranscriptModel.js'
 import {
   readerMetadataText,
 } from './editorReaderMetadata.js'
