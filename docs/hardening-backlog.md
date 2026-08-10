@@ -290,7 +290,10 @@ lines.
   import surface. Codec probing, playable-H.264 conversion, media validation
   and optional storage compression now live in
   `services/download_media_processing.py`, with partial-output cleanup and the
-  former private imports preserved;
+  former private imports preserved. Bilibili yt-dlp execution, bounded
+  inactivity detection, native progressive fallback and cancellation now live
+  in `services/bilibili_download.py`; the public downloader dispatcher and its
+  former private imports remain stable;
   browser execution, cookies, downloads, cancellation and retries remain in
   the downloader orchestrator.
 - [x] Add direct tests for public-tree, DMG validation and backend packaging

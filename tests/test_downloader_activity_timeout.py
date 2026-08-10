@@ -49,7 +49,7 @@ def test_bilibili_yt_dlp_path_receives_the_task_cancel_callback(monkeypatch, tmp
     captured = {}
 
     monkeypatch.setattr(
-        "services.downloader.bilibili_yt_dlp_cookie_args",
+        "services.bilibili_download.bilibili_yt_dlp_cookie_args",
         lambda: nullcontext([]),
     )
 
@@ -58,7 +58,7 @@ def test_bilibili_yt_dlp_path_receives_the_task_cancel_callback(monkeypatch, tmp
         return DownloadResult(success=True)
 
     monkeypatch.setattr(
-        "services.downloader._download_bilibili_with_cookie_args",
+        "services.bilibili_download.download_bilibili_with_cookie_args",
         download_with_ytdlp,
     )
 
@@ -74,15 +74,15 @@ def test_bilibili_yt_dlp_path_receives_the_task_cancel_callback(monkeypatch, tmp
 
 def test_cancelled_yt_dlp_download_does_not_start_a_fallback_request(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        "services.downloader.bilibili_yt_dlp_cookie_args",
+        "services.bilibili_download.bilibili_yt_dlp_cookie_args",
         lambda: nullcontext([]),
     )
     monkeypatch.setattr(
-        "services.downloader._download_bilibili_with_cookie_args",
+        "services.bilibili_download.download_bilibili_with_cookie_args",
         lambda *_args, **_kwargs: DownloadResult(success=False, error="下载已取消"),
     )
     monkeypatch.setattr(
-        "services.downloader._download_bilibili_progressive",
+        "services.bilibili_download.download_bilibili_progressive",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("不应启动兜底下载")),
     )
 
@@ -114,8 +114,8 @@ def test_yt_dlp_process_can_run_past_the_stall_window_while_output_advances(monk
             bufsize=1,
         )
 
-    monkeypatch.setattr("services.downloader.subprocess.Popen", launch_progress_process)
-    monkeypatch.setattr("services.downloader.YTDLP_ACTIVITY_TIMEOUT_SECONDS", 0.25)
+    monkeypatch.setattr("services.bilibili_download.subprocess.Popen", launch_progress_process)
+    monkeypatch.setattr("services.bilibili_download.YTDLP_ACTIVITY_TIMEOUT_SECONDS", 0.25)
 
     result = _download_bilibili_with_cookie_args(
         "https://www.bilibili.com/video/BV1test",
@@ -148,8 +148,8 @@ def test_yt_dlp_process_can_run_silently_while_its_output_file_advances(monkeypa
             bufsize=1,
         )
 
-    monkeypatch.setattr("services.downloader.subprocess.Popen", launch_silent_writer)
-    monkeypatch.setattr("services.downloader.YTDLP_ACTIVITY_TIMEOUT_SECONDS", 0.25)
+    monkeypatch.setattr("services.bilibili_download.subprocess.Popen", launch_silent_writer)
+    monkeypatch.setattr("services.bilibili_download.YTDLP_ACTIVITY_TIMEOUT_SECONDS", 0.25)
 
     result = _download_bilibili_with_cookie_args(
         "https://www.bilibili.com/video/BV1test",
@@ -174,8 +174,8 @@ def test_yt_dlp_process_is_stopped_after_real_inactivity(monkeypatch, tmp_path):
             bufsize=1,
         )
 
-    monkeypatch.setattr("services.downloader.subprocess.Popen", launch_stalled_process)
-    monkeypatch.setattr("services.downloader.YTDLP_ACTIVITY_TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setattr("services.bilibili_download.subprocess.Popen", launch_stalled_process)
+    monkeypatch.setattr("services.bilibili_download.YTDLP_ACTIVITY_TIMEOUT_SECONDS", 0.1)
     started = time.monotonic()
 
     result = _download_bilibili_with_cookie_args(

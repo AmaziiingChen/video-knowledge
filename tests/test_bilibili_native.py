@@ -80,15 +80,14 @@ def test_native_download_uses_the_shared_transfer_service(tmp_path: Path, monkey
     source = BilibiliProgressiveMedia("BV1xx411c7mD", 12, "测试视频", "https://cdn.example/video.mp4", {"Referer": "x"})
     target = tmp_path / "BV1xx411c7mD.native.part"
 
-    monkeypatch.setattr("services.downloader.resolve_progressive_media", lambda _url: source)
+    monkeypatch.setattr("services.bilibili_download.resolve_progressive_media", lambda _url: source)
 
     def download(_url, path, **_kwargs):
         path.write_bytes(b"video")
         return HttpMediaDownloadResult(True, path, 5, 5)
 
-    monkeypatch.setattr("services.downloader.download_http_media", download)
-    monkeypatch.setattr("services.downloader._is_valid_video_file", lambda _path: True)
-    monkeypatch.setattr("services.downloader._compress_video_for_storage", lambda path, _logs, **_kwargs: path)
+    monkeypatch.setattr("services.bilibili_download.download_http_media", download)
+    monkeypatch.setattr("services.bilibili_download.is_valid_video_file", lambda _path: True)
 
     result = _download_bilibili_progressive("https://www.bilibili.com/video/BV1xx411c7mD", tmp_path, None)
 
