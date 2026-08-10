@@ -223,7 +223,10 @@ lines.
   fallback, in-page find, bounded outline/progress messages and selection
   forwarding. Shared content-type, local-import preview and remote-source
   classification now lives in `workbench/editorContentKind.js` with pure
-  boundary tests. Menu-action dispatch and detail-row presentation now live in
+  boundary tests, including local PDF, image and durable Markdown readers.
+  Readable-body extraction, character counts and current-document size
+  selection now live in `workbench/editorReaderMetadata.js` with behavior
+  tests. Menu-action dispatch and detail-row presentation now live in
   `workbench/editorContentActions.js` and `workbench/editorContentDetails.js`.
   Report title, date-window and generated-time presentation now live in
   `workbench/editorReportPresentation.js` with pure formatting tests. Article

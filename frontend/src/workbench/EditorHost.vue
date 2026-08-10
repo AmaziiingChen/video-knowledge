@@ -644,10 +644,6 @@ const questionPageIcon = 'questionmark.text.page'
 const playFillIcon = 'play.fill'
 const pauseFillIcon = 'pause.fill'
 const ellipsisIcon = 'ellipsis'
-import {
-  readableCharacterCount,
-  reportBodyHtmlForCharacterCount,
-} from '../utils/reportReadingStats'
 import { remainingReadingMinutes } from './readingProgress.js'
 import { shouldShowArticlePreviewLoader } from '../features/library/articlePreviewLoadState.js'
 import PreviewFindBar from './PreviewFindBar.vue'
@@ -666,6 +662,11 @@ import { articleOutlineHeadingSelector, createArticleOutlineModel } from './arti
 import { dispatchEditorContentAction } from './editorContentActions.js'
 import { editorContentDetailRows } from './editorContentDetails.js'
 import { createEditorContentKind } from './editorContentKind.js'
+import {
+  formatReadableCharacterCount,
+  formatReaderDocumentSize,
+  readerMetadataText,
+} from './editorReaderMetadata.js'
 import { createEditorReportPresentation } from './editorReportPresentation.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
@@ -780,10 +781,15 @@ const {
   hasRemoteSource,
   isArticleTab,
   isAudioTab,
+  isExternalImageTab,
+  isExternalMarkdownTab,
+  isExternalPdfTab,
   isLocalHtmlArticleTab,
+  isMiniProgramCaptureTab,
   isReportTab,
   isTimedMediaTab,
   isVideoTab,
+  readerKindForTab,
   sourceUrlForTab,
 } = createEditorContentKind({
   contentForTab: props.contentForTab,
@@ -1073,7 +1079,7 @@ function contentDetailRows(tabId) {
   const markdownPath = isCurrentDocument
     ? String(props.selectedMarkdownPath || content?.markdown_draft_path || '')
     : String(content?.markdown_draft_path || '')
-  return editorContentDetailRows({ content, tab, sourceUrl: hasRemoteSource(tabId) ? sourceUrl : '', readableText, markdownPath, isTimedMedia, format: { sourceProvider: props.sourceProviderLabel, characters: formatReadableCharacterCount, documentSize: formatDocumentSize, duration: props.formatDuration, bytes: props.formatBytes, dateTime: props.formatDateTime } })
+  return editorContentDetailRows({ content, tab, sourceUrl: hasRemoteSource(tabId) ? sourceUrl : '', readableText, markdownPath, isTimedMedia, format: { sourceProvider: props.sourceProviderLabel, characters: formatReadableCharacterCount, documentSize: (item) => formatReaderDocumentSize(item, { selectedContentId: props.selectedContentItem?.id, selectedMarkdownSizeBytes: props.selectedMarkdownSizeBytes, formatBytes: props.formatBytes }), duration: props.formatDuration, bytes: props.formatBytes, dateTime: props.formatDateTime } })
 }
 
 const activeContentActionMenuModel = computed(() => {
@@ -1230,26 +1236,6 @@ function isWechatArticleTab(tabId) {
 }
 
 
-function isExternalMarkdownTab(tabId) {
-  const content = props.contentForTab(tabId)
-  return ['local_markdown', 'local_file'].includes(content?.source_provider)
-    && content?.content_type === 'document'
-    && !isLocalHtmlArticleTab(tabId)
-    && !isExternalPdfTab(tabId)
-}
-
-function isExternalPdfTab(tabId) {
-  const content = props.contentForTab(tabId)
-  if (content?.source_provider !== 'local_file' || content?.content_type !== 'document') return false
-  return String(content?.source_name || '').includes('PDF')
-    || /\.pdf$/iu.test(String(content?.original_file_path || ''))
-}
-
-function isExternalImageTab(tabId) {
-  const content = props.contentForTab(tabId)
-  return content?.source_provider === 'local_file' && content?.content_type === 'image'
-}
-
 function externalImportKindLabel(tabId) {
   const label = String(props.contentForTab(tabId)?.source_name || '').replace(/^外部\s*/u, '').trim()
   return label || 'Markdown 文档'
@@ -1284,12 +1270,6 @@ function requestWechatCoverGeneration(tabId) {
   const content = props.contentForTab(tabId)
   if (!content) return
   emit(content.cover_url ? 'regenerate-wechat-cover' : 'generate-wechat-cover', content)
-}
-
-function isMiniProgramCaptureTab(tabId) {
-  const content = props.contentForTab(tabId)
-  return content?.source_provider === 'wechat_miniprogram'
-    && ['forum_capture', 'report'].includes(content?.content_type)
 }
 
 function articleTextForTab(tabId) {
@@ -1443,52 +1423,16 @@ function handleArticlePreviewFrameKeydown(event) {
 function readerTextForMetadata(tabId) {
   const content = props.contentForTab(tabId)
   if (!content) return ''
-
-  if (isTimedMediaTab(tabId)) {
-    return sourceBodyForCharacterCount(
-      timelineSegmentsForTab(tabId).map((segment) => segment.text).join('\n')
-        || props.transcriptForTab(tabId),
-      ['视频字幕或转写', '原始转写文本', '字幕', '转写'],
-    )
-  }
-
-  if (isExternalImageTab(tabId)) {
-    return sourceBodyForCharacterCount(props.transcriptForTab(tabId), ['原文内容', 'OCR 正文'])
-  }
-
-  if (isArticleTab(tabId)) {
-    const parsedBody = sourceBodyForCharacterCount(
-      props.transcriptForTab(tabId),
-      ['原文内容', '文章正文', '正文内容'],
-    )
-    if (parsedBody) return parsedBody
-    return activeArticlePreviewFrame.value?.contentDocument?.body?.innerText || ''
-  }
-
-  if (isReportTab(tabId) || isExternalMarkdownTab(tabId)) {
-    return plainTextFromHtml(
-      reportBodyHtmlForCharacterCount(props.selectedMarkdownPreview)
-    )
-  }
-
-  if (isMiniProgramCaptureTab(tabId)) {
-    return reportMarkdown.value?.innerText || plainTextFromHtml(props.selectedMarkdownPreview)
-  }
-
-  return props.transcriptForTab(tabId)
-}
-
-function sourceBodyForCharacterCount(markdown, headings) {
-  const source = String(markdown || '').replace(/^---\s*\n[\s\S]*?\n---\s*\n?/u, '')
-  const section = headings
-    .map((heading) => heading.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))
-    .join('|')
-  if (!section) return source
-  const matched = new RegExp(`^##\\s+(?:${section})\\s*$\\n([\\s\\S]*?)(?=^##\\s+|(?![\\s\\S]))`, 'imu').exec(source)
-  return (matched?.[1] || source)
-    .replace(/^>\s*外部导入.*$/gmu, '')
-    .replace(/^\[打开原始文件\]\([^\n]+\)$/gmu, '')
-    .trim()
+  return readerMetadataText({
+    content,
+    kind: readerKindForTab(tabId),
+    timelineSegments: timelineSegmentsForTab(tabId),
+    transcript: props.transcriptForTab(tabId),
+    selectedMarkdownPreview: props.selectedMarkdownPreview,
+    articlePreviewText: activeArticlePreviewFrame.value?.contentDocument?.body?.innerText || '',
+    captureText: reportMarkdown.value?.innerText || '',
+    htmlToText: plainTextFromHtml,
+  })
 }
 
 function plainTextFromHtml(html) {
@@ -1496,19 +1440,6 @@ function plainTextFromHtml(html) {
   const template = document.createElement('template')
   template.innerHTML = html
   return template.content.textContent || ''
-}
-
-function formatReadableCharacterCount(value) {
-  const count = readableCharacterCount(value)
-  return count ? `${count.toLocaleString('zh-CN')} 字` : '—'
-}
-
-function formatDocumentSize(content) {
-  const isCurrentDocument = String(content?.id || '') === String(props.selectedContentItem?.id || '')
-  const liveMarkdownSize = isCurrentDocument ? Number(props.selectedMarkdownSizeBytes || 0) : 0
-  const storedMarkdownSize = Number(content?.markdown_size_bytes || 0)
-  const markdownSize = liveMarkdownSize || storedMarkdownSize
-  return markdownSize > 0 ? props.formatBytes(markdownSize) : '—'
 }
 
 function focusSourceReader() {

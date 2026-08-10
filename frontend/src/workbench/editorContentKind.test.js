@@ -8,6 +8,9 @@ test('classifies local HTML, media, reports, and trusted source URLs without alt
     video: { content_type: 'video', source_url: 'https://video.example.com/a' },
     report: { source_provider: 'wechat_report', content_type: 'report' },
     capture: { source_provider: 'wechat_miniprogram', content_type: 'report' },
+    markdown: { source_provider: 'local_markdown', content_type: 'document' },
+    pdf: { source_provider: 'local_file', content_type: 'document', original_file_path: '/tmp/source.pdf' },
+    image: { source_provider: 'local_file', content_type: 'image' },
     unsafe: { content_type: 'article', source_url: 'javascript:alert(1)', source_metadata: { original_source_url: 'file:///tmp/a' } },
   }
   const kinds = createEditorContentKind({ contentForTab: (id) => rows[id], articlePreviewForTab: (id) => id === 'html' ? { source_html: '<p>saved</p>' } : { html: '<p>body</p>' } })
@@ -15,6 +18,14 @@ test('classifies local HTML, media, reports, and trusted source URLs without alt
   assert.equal(kinds.isTimedMediaTab('video'), true)
   assert.equal(kinds.isReportTab('report'), true)
   assert.equal(kinds.isReportTab('capture'), false)
+  assert.equal(kinds.isMiniProgramCaptureTab('capture'), true)
+  assert.equal(kinds.readerKindForTab('capture'), 'mini-program-capture')
+  assert.equal(kinds.isExternalMarkdownTab('markdown'), true)
+  assert.equal(kinds.readerKindForTab('markdown'), 'external-markdown')
+  assert.equal(kinds.isExternalPdfTab('pdf'), true)
+  assert.equal(kinds.isExternalMarkdownTab('pdf'), false)
+  assert.equal(kinds.isExternalImageTab('image'), true)
+  assert.equal(kinds.readerKindForTab('image'), 'external-image')
   assert.equal(kinds.articlePreviewHtml('html'), '<p>saved</p>')
   assert.equal(kinds.sourceUrlForTab('html'), 'https://example.com/original')
   assert.equal(kinds.hasRemoteSource('unsafe'), false)
