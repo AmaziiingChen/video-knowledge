@@ -86,6 +86,7 @@ import { useCompletionNotificationController } from '../features/notifications/u
 import { useAppSettingsController } from '../features/settings/useAppSettingsController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
+import { useConversationMarkdownExportController } from '../features/assistant/useConversationMarkdownExportController.js'
 import { usePromptTemplateController } from '../features/prompts/usePromptTemplateController.js'
 import { useActiveTaskEventStreamController } from '../features/tasks/useActiveTaskEventStreamController.js'
 import { useTaskQueueController } from '../features/tasks/useTaskQueueController.js'
@@ -457,7 +458,6 @@ export function useAppController() {
   const loadingMarkdown = ref(false)
   const savingMarkdown = ref(false)
   const syncingMarkdown = ref(false)
-  const exportingConversationMarkdown = ref(false)
   const batchTasks = ref([])
   const batchTaskIds = ref([])
   const batchTaskNames = ref({})
@@ -863,6 +863,20 @@ export function useAppController() {
     }
     if (isGeneratedReportDocument(selectedContentItem.value)) return ''
     return result.summary || assistantSummaryFromMarkdown(markdownState.markdown)
+  })
+
+  const {
+    exportingConversationMarkdown,
+    exportConversationMarkdown,
+  } = useConversationMarkdownExportController({
+    getConversation: () => ({
+      content: activeWorkspaceContent.value,
+      fallbackTitle: result.source_title,
+      fallbackSourceUrl: result.url,
+      summary: currentSummaryText.value,
+      history: qaHistory.value,
+    }),
+    recordTelemetry,
   })
 
   const contentStatusCounts = computed(() => {
@@ -2557,50 +2571,6 @@ export function useAppController() {
       session.asking = false
       session.generatingSummary = false
       syncQaSessionIfActive(item.id, session)
-    }
-  }
-
-  async function exportConversationMarkdown() {
-    if (exportingConversationMarkdown.value) return
-    const content = activeWorkspaceContent.value
-    const title = String(content?.title || result.source_title || 'AI 对话').replace(/\r?\n/g, ' ').trim()
-    const sourceUrl = content?.source_url || result.url || ''
-    const sections = [`# ${title}`]
-    if (sourceUrl) sections.push(`来源：${sourceUrl}`)
-    const summary = String(currentSummaryText.value || '').trim()
-    if (summary) sections.push(`## AI 总结\n\n${summary}`)
-    const exchanges = qaHistory.value
-      .filter((item) => String(item.question || '').trim() || String(item.answer || '').trim())
-      .map((item) => {
-        const question = String(item.question || '').trim()
-        const answer = String(item.answer || '').trim() || '（尚未生成回答）'
-        return `### 我\n\n${question}\n\n### AI\n\n${answer}`
-      })
-    if (exchanges.length) sections.push(`## 对话\n\n${exchanges.join('\n\n---\n\n')}`)
-    if (!summary && !exchanges.length) {
-      ElMessage.warning('当前没有可导出的 AI 总结或对话')
-      return
-    }
-
-    exportingConversationMarkdown.value = true
-    try {
-      const exportTitle = `${title}-AI对话`
-      const markdown = `${sections.join('\n\n')}\n`
-      const desktopExport = window.knowledgeHubDesktop?.exportMarkdown
-      const exported = desktopExport
-        ? await desktopExport(exportTitle, markdown)
-        : (await axios.post(`${API}/markdown/export`, {
-            title: exportTitle,
-            markdown
-          }, { timeout: 15000 })).data
-      ElMessage.success(`Markdown 已导出到 ${exported.path}`)
-      void recordTelemetry('export_completed', { export_kind: 'markdown', result: 'succeeded' })
-    } catch (error) {
-      const message = error.response?.data?.detail || error.message || '导出 Markdown 失败'
-      ElMessage.error(typeof message === 'string' ? message : '导出 Markdown 失败')
-      void recordTelemetry('export_completed', { export_kind: 'markdown', result: 'failed' })
-    } finally {
-      exportingConversationMarkdown.value = false
     }
   }
 

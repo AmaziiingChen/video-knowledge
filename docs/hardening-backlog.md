@@ -125,7 +125,9 @@ lines.
   guarded new-conversation archive and reset transaction; question and summary
   request creation remain in the facade. Deterministic shortcut insertion,
   explicit expansion and local intent composition now live in the pure
-  `features/assistant/qaPromptComposer.js` boundary.
+  `features/assistant/qaPromptComposer.js` boundary. Conversation Markdown
+  assembly, desktop export and local-API fallback now live in
+  `features/assistant/useConversationMarkdownExportController.js`.
   Content recovery actions (source text, reprocessing, retranscription,
   subtitles and redownloads) now live in
   `features/library/useContentRecoveryController.js` while reusing the durable
