@@ -154,8 +154,11 @@ lines.
   now live in `features/tasks/taskDisplayPresentation.js` with pure boundary
   tests. The active task result projection, reset transaction, task-identity QA
   isolation, persistence-error reporting and visible step state now live in
-  `features/tasks/useActiveTaskStateController.js`; queue transport, polling
-  and durable task mutation remain in their existing controllers. Workspace
+  `features/tasks/useActiveTaskStateController.js`. Single-task polling,
+  progressive hydration, terminal feedback, bounded retry backoff and timer
+  cleanup now live in `features/tasks/useActiveTaskPollingController.js`;
+  queue transport and durable task mutation remain in their existing
+  controllers. Workspace
   tab opening, selection hydration, close selection,
   reveal and recycle-bin dispatch now live in
   `features/workspace/useWorkspaceTabController.js`; task runtime remains the

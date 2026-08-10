@@ -90,6 +90,7 @@ import { useConversationMarkdownExportController } from '../features/assistant/u
 import { useAiSummaryGenerationController } from '../features/assistant/useAiSummaryGenerationController.js'
 import { useQaRequestController } from '../features/assistant/useQaRequestController.js'
 import { usePromptTemplateController } from '../features/prompts/usePromptTemplateController.js'
+import { useActiveTaskPollingController } from '../features/tasks/useActiveTaskPollingController.js'
 import { useActiveTaskStateController } from '../features/tasks/useActiveTaskStateController.js'
 import { useActiveTaskEventStreamController } from '../features/tasks/useActiveTaskEventStreamController.js'
 import { useTaskQueueController } from '../features/tasks/useTaskQueueController.js'
@@ -226,7 +227,6 @@ export function useAppController() {
   const logContainer = ref(null)
   const backendLogCount = ref(0)
   const logClearedAt = ref(Number(localStorage.getItem(PROCESS_LOG_CLEARED_AT_KEY) || 0))
-  const pollTimer = ref(null)
   const selectedModel = ref('small')
   const availableModels = ref(['tiny', 'base', 'small'])
   const selectedAsrBackend = ref('auto')
@@ -431,7 +431,6 @@ export function useAppController() {
   const batchTasks = ref([])
   const batchTaskIds = ref([])
   const batchTaskNames = ref({})
-  const taskPollFailureCount = ref(0)
   const progressiveTaskSnapshots = new Map()
   const progressiveTaskHydratingIds = new Set()
   const backendLogCountsByTaskId = new Map()
@@ -535,6 +534,27 @@ export function useAppController() {
     progressiveTaskSnapshots,
     terminalStatuses,
     isActiveTask,
+  })
+  const {
+    stopPolling,
+    pollTask,
+  } = useActiveTaskPollingController({
+    running,
+    cancelling,
+    openSections,
+    progressiveTaskSnapshots,
+    terminalStatuses,
+    applyTaskData,
+    startTaskEventStream,
+    stopTaskEventStream,
+    hydrateProgressiveTask: (...args) => hydrateProgressiveTask(...args),
+    revealWechatArticleSnapshot: (...args) => revealWechatArticleSnapshot(...args),
+    revealVideoSnapshot: (...args) => revealVideoSnapshot(...args),
+    revealTranscriptSnapshot: (...args) => revealTranscriptSnapshot(...args),
+    syncCompletedTaskContent,
+    addLog: (...args) => addLog(...args),
+    isPipelineSummaryGenerating: () => isPipelineSummaryGenerating.value,
+    notify: ElMessage,
   })
   const {
     retryingContentId,
@@ -1384,15 +1404,6 @@ export function useAppController() {
     disposeLibrarySearchController()
   })
 
-  function stopPolling() {
-    if (pollTimer.value) {
-      clearTimeout(pollTimer.value)
-      pollTimer.value = null
-    }
-    stopTaskEventStream()
-    taskPollFailureCount.value = 0
-  }
-
   function shortLink(link) {
     return link.replace(/^https?:\/\//, '').replace(/^www\./, '').slice(0, 42)
   }
@@ -1447,57 +1458,6 @@ export function useAppController() {
     Object.entries(aiRequestOptions()).forEach(([key, value]) => {
       formData.append(key, String(value))
     })
-  }
-
-  async function pollTask(taskId) {
-    try {
-      const res = await axios.get(`${API}/tasks/${taskId}`, { timeout: 10000 })
-      taskPollFailureCount.value = 0
-      const data = res.data
-      applyTaskData(data)
-      if (!terminalStatuses.has(data.status)) startTaskEventStream(taskId)
-      const previousSnapshot = progressiveTaskSnapshots.get(data.task_id)
-      await hydrateProgressiveTask(data, previousSnapshot)
-      await revealWechatArticleSnapshot(data)
-      await revealVideoSnapshot(data)
-      await revealTranscriptSnapshot(data)
-
-      if (terminalStatuses.has(data.status)) {
-        running.value = false
-        cancelling.value = false
-        stopPolling()
-        if (data.status === 'succeeded' && data.persistence_error) {
-          addLog('处理结果已生成，但任务状态未能保存；重启后任务记录可能不完整', 'error')
-          openSections.value = ['logs']
-          await syncCompletedTaskContent(data.content_item_id)
-          ElMessage.error('处理已完成，但任务状态未保存')
-        } else if (data.status === 'succeeded') {
-          addLog('全流程完成！', 'success')
-          await syncCompletedTaskContent(data.content_item_id)
-          ElMessage.success('处理完成')
-        } else if (data.status === 'cancelled') {
-          addLog('任务已取消', 'warn')
-          openSections.value = ['logs']
-          ElMessage.warning('任务已取消')
-        } else {
-          addLog(`失败: ${data.error || '任务失败'}`, 'error')
-          openSections.value = ['logs']
-          ElMessage.error(data.error || '任务失败')
-        }
-        return
-      }
-
-      pollTimer.value = setTimeout(() => pollTask(taskId), isPipelineSummaryGenerating.value ? 220 : 1500)
-    } catch (e) {
-      taskPollFailureCount.value += 1
-      const msg = e.message || '查询任务状态失败'
-      const retryDelay = Math.min(10000, 1500 * taskPollFailureCount.value)
-      if (taskPollFailureCount.value === 1 || taskPollFailureCount.value % 5 === 0) {
-        addLog(`任务状态暂时不可达：${msg}；${Math.round(retryDelay / 1000)} 秒后重试`, 'warn')
-        openSections.value = ['logs']
-      }
-      pollTimer.value = setTimeout(() => pollTask(taskId), retryDelay)
-    }
   }
 
   function applyMarkdownState(data) {
