@@ -290,6 +290,7 @@ import PromptFileTree from './PromptFileTree.vue'
 import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 import { useLibraryGroupLayoutController } from './useLibraryGroupLayoutController.js'
+import { useLibraryTreeInteractionController } from './useLibraryTreeInteractionController.js'
 import { useLibraryTreeDragController } from './useLibraryTreeDragController.js'
 import { useLibraryNodeEditingController } from './useLibraryNodeEditingController.js'
 import { useLibraryOpenFolderController } from './useLibraryOpenFolderController.js'
@@ -453,8 +454,6 @@ const libraryContentLoadLabel = computed(() => {
 
 const librarySearchInput = ref(null)
 const searchScope = computed(() => props.searchScope)
-const selectedKeys = ref(new Set())
-const anchorKey = ref(null)
 const contentContextMenu = ref(null)
 const TREE_ROW_HEIGHT = 26
 const searchScopeOptions = [
@@ -558,11 +557,29 @@ const {
   searchActive,
 })
 
-const selectedNodes = computed(() => {
-  const selected = selectedKeys.value
-  return visibleLibraryNodes.value.filter((node) => selected.has(nodeKey(node)))
+const {
+  selectedKeys,
+  selectedNodes,
+  selectedContentNodes,
+  isContentNode,
+  isFolderHistoryNode,
+  nodeKey,
+  isNodeSelected,
+  setSelectedKeys,
+  setAnchorKey,
+  activateNode,
+  ensureContextSelection,
+  markFolderViewed,
+  markAllUnreadViewed,
+} = useLibraryTreeInteractionController({
+  visibleLibraryNodes,
+  libraryFolders: computed(() => props.libraryFolders),
+  libraryContentItems: computed(() => props.libraryContentItems),
+  unreadContentItems,
+  toggleVirtualRoot,
+  toggleFolder,
+  emit,
 })
-const selectedContentNodes = computed(() => selectedNodes.value.filter(isContentNode))
 const {
   editingNode,
   editingInput,
@@ -629,7 +646,7 @@ const {
   treeRef,
   selectedKeys,
   setSelectedKeys,
-  setAnchorKey: (key) => { anchorKey.value = key || anchorKey.value },
+  setAnchorKey: (key) => { if (key) setAnchorKey(key) },
 })
 
 const {
@@ -645,7 +662,7 @@ const {
   selectedKeys,
   nodeKey,
   setSelectedKeys,
-  setAnchorKey: (key) => { anchorKey.value = key },
+  setAnchorKey,
   libraryFolders: computed(() => props.libraryFolders),
   isMutableLibraryNode,
   sortOrderNearSeparator,
@@ -680,66 +697,8 @@ function isGroupSeparatorNode(node) {
   return node?.type === 'group-separator' || node?.type === 'user-group-separator'
 }
 
-function isContentNode(node) {
-  return ['content', 'unread-content'].includes(node?.type)
-}
-
-function isFolderHistoryNode(node) {
-  return node?.type === 'folder-history-more'
-}
-
 function isMutableLibraryNode(node) {
   return node?.type === 'folder' || node?.type === 'content'
-}
-
-function nodeKey(node) {
-  if (node.type === 'draft-folder') return node.id
-  return `${node.type}:${node.id}`
-}
-
-function isNodeSelected(node) {
-  return selectedKeys.value.has(nodeKey(node))
-}
-
-function setSelectedKeys(keys) {
-  selectedKeys.value = new Set(keys)
-}
-
-function activateNode(event, node) {
-  if (toggleVirtualRoot(node)) return
-  if (node.type === 'unread-content') {
-    updateSelection(event, node)
-    emit('open-content', node.raw)
-    return
-  }
-  if (isFolderHistoryNode(node)) {
-    if (!node.loading) emit('load-folder-history', { folderId: node.parentId, append: true })
-    return
-  }
-  updateSelection(event, node)
-  if (node.type === 'folder') {
-    toggleFolder(node.id)
-    return
-  }
-  emit('open-content', node.raw)
-}
-
-function updateSelection(event, node) {
-  const key = nodeKey(node)
-  if (event?.shiftKey && anchorKey.value) {
-    selectRange(anchorKey.value, key)
-    return
-  }
-  if (event?.metaKey || event?.ctrlKey) {
-    const next = new Set(selectedKeys.value)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    setSelectedKeys(next)
-    anchorKey.value = key
-    return
-  }
-  setSelectedKeys([key])
-  anchorKey.value = key
 }
 
 function contextMenuPosition(event, trigger) {
@@ -782,11 +741,7 @@ function openLibraryContextMenu(event, node) {
     }, event)
     return
   }
-  const key = nodeKey(node)
-  if (!selectedKeys.value.has(key)) {
-    setSelectedKeys([key])
-    anchorKey.value = key
-  }
+  ensureContextSelection(node)
   openContentContextMenu({
     kind: 'node',
     node,
@@ -856,44 +811,6 @@ function handleContextMenuSelect({ id, payload } = {}) {
     case 'set-viewed': setSelectedContentViewed(Boolean(payload)); break
     case 'delete': deleteContextMenuNode(); break
   }
-}
-
-function markFolderViewed(folderNode) {
-  const folderIds = new Set([String(folderNode.id)])
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const folder of props.libraryFolders) {
-      const parentId = folder.parent_folder_id ? String(folder.parent_folder_id) : ''
-      if (parentId && folderIds.has(parentId) && !folderIds.has(String(folder.id))) {
-        folderIds.add(String(folder.id))
-        changed = true
-      }
-    }
-  }
-  const contentItemIds = props.libraryContentItems
-    .filter((item) => folderIds.has(String(item?.library_folder_id || '')))
-    .map((item) => item.id)
-    .filter(Boolean)
-  if (contentItemIds.length) emit('set-content-viewed', { contentItemIds, viewed: true })
-}
-
-function markAllUnreadViewed() {
-  const contentItemIds = unreadContentItems.value.map((item) => item.id).filter(Boolean)
-  if (contentItemIds.length) emit('set-content-viewed', { contentItemIds, viewed: true })
-}
-
-function selectRange(fromKey, toKey) {
-  const keys = visibleLibraryNodes.value.map(nodeKey)
-  const from = keys.indexOf(fromKey)
-  const to = keys.indexOf(toKey)
-  if (from === -1 || to === -1) {
-    setSelectedKeys([toKey])
-    anchorKey.value = toKey
-    return
-  }
-  const [start, end] = from < to ? [from, to] : [to, from]
-  setSelectedKeys(keys.slice(start, end + 1))
 }
 
 </script>

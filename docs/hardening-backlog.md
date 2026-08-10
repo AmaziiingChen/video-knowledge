@@ -264,7 +264,10 @@ lines.
   parent scoped stylesheet. User separator initialization, legacy-anchor
   migration, rendered placement, drag ordering and v2 preference persistence
   now share `workbench/useLibraryGroupLayoutController.js` instead of being
-  distributed across the sidebar component.
+  distributed across the sidebar component. Row activation, ordinary and
+  range selection, context-selection preservation, and read-state projection
+  now share `workbench/useLibraryTreeInteractionController.js`; box selection,
+  drag policy, context menus and folder persistence remain separate owners.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
   backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network
