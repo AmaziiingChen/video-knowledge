@@ -67,7 +67,10 @@ lines.
   dedicated cache after a completed batch. Source hashing, parameterized chunk
   inserts and searchable-text projection now live in
   `services/knowledge_index_storage.py`; `knowledge_v2.py` retains only the
-  index rebuild orchestration and public chunker-version entry point.
+  index rebuild orchestration and public chunker-version entry point. Embedding
+  API transport, vector normalization and source-hash-guarded persistence now
+  live in `services/knowledge_embedding_runtime.py`, while the embedding batch
+  budget and API-facing entry point remain in the index orchestrator.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity

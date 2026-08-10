@@ -6,7 +6,6 @@ smaller child chunks used for retrieval.
 """
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +51,12 @@ from services.knowledge_index_storage import (
     searchable as _searchable,
     source_hash as _source_hash,
 )
+from services.knowledge_embedding_runtime import (
+    EMBEDDING_REQUEST_TIMEOUT_SECONDS,  # noqa: F401 - compatibility re-export
+    embed as _embed,
+    embedding_text as _embedding_text,
+    save_embedding_batch as _save_embedding_batch,
+)
 from services.knowledge_vector_index import (
     dense_ranks as _dense_ranks,
     invalidate_vector_cache,
@@ -83,7 +88,6 @@ from services.prompt_templates import (
 from services.repository import new_id
 
 EMBEDDING_BATCH_SIZE = 10
-EMBEDDING_REQUEST_TIMEOUT_SECONDS = 45.0
 # Flash Thinking spends part of the completion budget on reasoning. Keep enough
 # room for both reasoning and the final structured response; this is charged
 # only when the user asks a question, not while indexing a knowledge set.
@@ -923,64 +927,3 @@ def embed_pending(
         budgeted_input_tokens += budgeted_batch_tokens
     invalidate_vector_cache()
     return EmbeddingProgress(embedded, estimated_input_tokens, budgeted_input_tokens, len(rows) - embedded)
-
-
-def _embedding_text(row) -> str:
-    return f"标题：{row['title'] or '未命名内容'}\n章节：{row['heading_path'] or '正文'}\n内容：{row['text']}"
-
-
-def _embed(texts: list[str]) -> list[list[float]]:
-    from openai import OpenAI
-
-    timeout = max(10.0, min(EMBEDDING_REQUEST_TIMEOUT_SECONDS, float(settings.llm_request_timeout_seconds)))
-    client = OpenAI(api_key=settings.campus_embedding_api_key, base_url=settings.campus_embedding_api_base_url, timeout=timeout, max_retries=0)
-    started = perf_counter()
-    try:
-        response = client.embeddings.create(
-            model=settings.campus_embedding_api_model,
-            input=texts,
-            dimensions=int(settings.campus_embedding_api_dimensions),
-            encoding_format="float",
-        )
-    except Exception as exc:
-        record_ai_call(call_type="knowledge_v2_embedding", provider_response=None, input_chars=sum(map(len, texts)), elapsed_seconds=perf_counter() - started, error=str(exc))
-        raise RuntimeError(f"Embedding API 调用失败: {exc}") from exc
-    usage = getattr(response, "usage", None)
-    prompt_tokens = getattr(usage, "prompt_tokens", None)
-    total_tokens = getattr(usage, "total_tokens", None)
-    record_ai_call(
-        call_type="knowledge_v2_embedding",
-        provider_response=LLMResponse(content="", provider="qwen_embedding", model=settings.campus_embedding_api_model, usage=LLMUsage(prompt_tokens=int(prompt_tokens), completion_tokens=0, total_tokens=int(total_tokens or prompt_tokens)) if prompt_tokens is not None else None),
-        input_chars=sum(map(len, texts)),
-        elapsed_seconds=perf_counter() - started,
-    )
-    rows = sorted(response.data, key=lambda item: item.index)
-    if len(rows) != len(texts):
-        raise ValueError("Embedding API 返回数量与输入不一致")
-    return [_normalize([float(value) for value in row.embedding]) for row in rows]
-
-
-def _save_embedding_batch(rows, vectors: list[list[float]]) -> None:
-    now = utc_now_iso()
-    with connect() as db:
-        db.execute("BEGIN IMMEDIATE")
-        for row, vector in zip(rows, vectors, strict=True):
-            current = db.execute("SELECT source_hash FROM knowledge_v2_chunks WHERE id=?", (row["id"],)).fetchone()
-            if not current or current["source_hash"] != row["source_hash"]:
-                continue
-            db.execute(
-                """INSERT INTO knowledge_v2_embeddings
-                   (chunk_id,embedding_model,dimensions,vector_json,source_hash,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?)
-                   ON CONFLICT(chunk_id) DO UPDATE SET
-                     embedding_model=excluded.embedding_model, dimensions=excluded.dimensions,
-                     vector_json=excluded.vector_json, source_hash=excluded.source_hash,
-                     updated_at=excluded.updated_at""",
-                (row["id"], settings.campus_embedding_api_model, len(vector), json.dumps(vector, separators=(",", ":")), row["source_hash"], now, now),
-            )
-        db.commit()
-
-
-def _normalize(vector: list[float]) -> list[float]:
-    norm = math.sqrt(sum(value * value for value in vector)) or 1.0
-    return [value / norm for value in vector]
