@@ -125,7 +125,9 @@ lines.
   guarded new-conversation archive and reset transaction. Protected QA request
   creation, selected-text context, completion notification and answer
   regeneration now live in `features/assistant/useQaRequestController.js`;
-  summary request creation remains in the facade. Deterministic shortcut insertion,
+  manual summary streaming, delayed progress feedback and failure logging now
+  live in `features/assistant/useAiSummaryGenerationController.js`.
+  Deterministic shortcut insertion,
   explicit expansion and local intent composition now live in the pure
   `features/assistant/qaPromptComposer.js` boundary. Conversation Markdown
   assembly, desktop export and local-API fallback now live in
