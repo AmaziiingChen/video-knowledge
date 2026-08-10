@@ -261,7 +261,10 @@ lines.
   flush cannot enqueue the same branch twice. Unread-list bulk deletion now
   normalizes its projection to the existing `content` mutation contract, and
   obsolete file-row/trash-transition selectors have been removed from the
-  parent scoped stylesheet.
+  parent scoped stylesheet. User separator initialization, legacy-anchor
+  migration, rendered placement, drag ordering and v2 preference persistence
+  now share `workbench/useLibraryGroupLayoutController.js` instead of being
+  distributed across the sidebar component.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
   backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network

@@ -282,17 +282,6 @@ import {
   sortLibraryNodes,
   unreadFolderCounts,
 } from '../features/library/libraryTreeModel.js'
-import { loadLibraryTreePreferences, saveLibraryTreePreferences } from '../features/library/libraryTreePreferences.js'
-import {
-  createDefaultSeparators,
-  isRootLayoutNode,
-  layoutSortOrder,
-  migrateUserGroupSeparators,
-  presentLibraryNodesWithSeparators,
-  rootFolderNodes,
-  separatorSortOrder,
-  sortOrderBetween,
-} from './libraryGroupLayout.js'
 import { CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import LibraryTrashPanel from './LibraryTrashPanel.vue'
@@ -300,6 +289,7 @@ import LibraryContextMenu from './LibraryContextMenu.vue'
 import PromptFileTree from './PromptFileTree.vue'
 import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
+import { useLibraryGroupLayoutController } from './useLibraryGroupLayoutController.js'
 import { useLibraryTreeDragController } from './useLibraryTreeDragController.js'
 import { useLibraryNodeEditingController } from './useLibraryNodeEditingController.js'
 import { useLibraryOpenFolderController } from './useLibraryOpenFolderController.js'
@@ -461,19 +451,11 @@ const libraryContentLoadLabel = computed(() => {
     : `正在整理资料 · 已载入 ${loadedLabel}`
 })
 
-// v2 starts from a collapsed tree. The former eager tree restored every open
-// branch and expected all article rows to be present at startup; that state is
-// not compatible with the lazy per-folder loader below.
-function loadUserGroupSeparators() { return loadLibraryTreePreferences() }
-function saveUserGroupSeparators(groups) { saveLibraryTreePreferences(groups) }
 const librarySearchInput = ref(null)
 const searchScope = computed(() => props.searchScope)
 const selectedKeys = ref(new Set())
 const anchorKey = ref(null)
 const contentContextMenu = ref(null)
-const separatorLayoutState = loadUserGroupSeparators()
-const userGroupSeparators = ref(separatorLayoutState.separators)
-const separatorLayoutInitialized = ref(separatorLayoutState.initialized)
 const TREE_ROW_HEIGHT = 26
 const searchScopeOptions = [
   { value: 'all', label: '全部内容', description: '标题、摘要与正文' },
@@ -563,9 +545,17 @@ const visibleLibraryNodes = computed(() => buildLibraryTreeNodes({
   folderUnreadCounts: folderUnreadCounts.value,
 }))
 
-const presentationLibraryNodes = computed(() => {
-  if (searchActive.value || !userGroupSeparators.value.length) return visibleLibraryNodes.value
-  return presentLibraryNodesWithSeparators(visibleLibraryNodes.value, userGroupSeparators.value)
+const {
+  presentationLibraryNodes,
+  separatorSortOrderAt,
+  sortOrderNearSeparator,
+  moveUserSeparator,
+  addUserGroupSeparator,
+  removeUserGroupSeparator,
+} = useLibraryGroupLayoutController({
+  libraryFolders: computed(() => props.libraryFolders),
+  visibleLibraryNodes,
+  searchActive,
 })
 
 const selectedNodes = computed(() => {
@@ -663,81 +653,6 @@ const {
   emit,
   cancelBoxSelection,
 })
-
-function rootLayoutEntries({ excludeFolderIds = new Set(), excludeSeparatorIds = new Set() } = {}) {
-  const folders = visibleLibraryNodes.value.filter((node) => (
-    node.type === 'folder' && node.depth === 0 && !excludeFolderIds.has(String(node.id))
-  ))
-  const separators = userGroupSeparators.value
-    .filter((separator) => !excludeSeparatorIds.has(String(separator.id)))
-    .map((separator) => ({
-      type: 'user-group-separator',
-      id: separator.id,
-      sortOrder: separatorSortOrder(separator, rootFolderNodes(props.libraryFolders)),
-      raw: separator,
-    }))
-  return [...folders, ...separators].sort((left, right) => (
-    layoutSortOrder(left) - layoutSortOrder(right)
-    || (left.type === right.type ? String(left.id).localeCompare(String(right.id)) : left.type === 'user-group-separator' ? -1 : 1)
-  ))
-}
-
-function separatorSortOrderAt(startIndex) {
-  const nodes = renderedLibraryNodes.value
-  const previous = [...nodes.slice(0, startIndex)].reverse().find(isRootLayoutNode)
-  const next = nodes.slice(startIndex).find(isRootLayoutNode)
-  return sortOrderBetween(previous, next)
-}
-
-function nextSeparatorSortOrder() {
-  return sortOrderBetween(rootLayoutEntries().at(-1), null)
-}
-
-function sortOrderNearSeparator(separator, position, drags = []) {
-  const excludedFolderIds = new Set(drags.filter((node) => node?.type === 'folder').map((node) => String(node.id)))
-  const entries = rootLayoutEntries({ excludeFolderIds: excludedFolderIds })
-  const index = entries.findIndex((entry) => entry.type === 'user-group-separator' && entry.id === separator.id)
-  if (index === -1) return nextSeparatorSortOrder()
-  return position === 'before'
-    ? sortOrderBetween(entries[index - 1], entries[index])
-    : sortOrderBetween(entries[index], entries[index + 1])
-}
-
-function moveUserSeparator(separatorId, target, position) {
-  const entries = rootLayoutEntries({ excludeSeparatorIds: new Set([String(separatorId)]) })
-  const index = entries.findIndex((entry) => entry.type === target.type && entry.id === target.id)
-  if (index === -1) return
-  const sortOrder = position === 'before'
-    ? sortOrderBetween(entries[index - 1], entries[index])
-    : sortOrderBetween(entries[index], entries[index + 1])
-  const separators = userGroupSeparators.value.map((separator) => (
-    String(separator.id) === String(separatorId)
-      ? { ...separator, sortOrder, beforeFolderId: undefined }
-      : separator
-  ))
-  userGroupSeparators.value = separators
-  saveUserGroupSeparators(separators)
-}
-
-watch(
-  () => props.libraryFolders.map((folder) => `${folder.id}:${folder.parent_folder_id || ''}:${folder.sort_order}:${folder.is_pinned ? 1 : 0}`).join('|'),
-  () => {
-    const roots = rootFolderNodes(props.libraryFolders)
-    if (!roots.length) return
-    if (!separatorLayoutInitialized.value) {
-      userGroupSeparators.value = createDefaultSeparators(props.libraryFolders)
-      separatorLayoutInitialized.value = true
-      saveUserGroupSeparators(userGroupSeparators.value)
-      return
-    }
-    const migrated = migrateUserGroupSeparators(userGroupSeparators.value, props.libraryFolders)
-    if (migrated.some((separator, index) => separator.sortOrder !== userGroupSeparators.value[index]?.sortOrder || userGroupSeparators.value[index]?.beforeFolderId)) {
-      userGroupSeparators.value = migrated
-      saveUserGroupSeparators(migrated)
-    }
-  },
-  { immediate: true },
-)
 
 function contentNodeTitle(node) {
   if (!isContentNode(node)) return node?.name || ''
@@ -853,7 +768,7 @@ function openTreeContextMenu(event) {
   const start = Math.max(0, Math.floor(offset / TREE_ROW_HEIGHT))
   openContentContextMenu({
     kind: 'blank',
-    sortOrder: separatorSortOrderAt(start),
+    sortOrder: separatorSortOrderAt(start, renderedLibraryNodes.value),
   }, event)
 }
 
@@ -922,22 +837,13 @@ function contextMenuMutableNode() {
 function createUserGroupSeparator() {
   const sortOrder = Number(contentContextMenu.value?.sortOrder)
   closeContentContextMenu()
-  const id = window.crypto?.randomUUID?.() || `user-group-${Date.now()}`
-  const groups = [...userGroupSeparators.value, {
-    id,
-    sortOrder: Number.isFinite(sortOrder) ? sortOrder : nextSeparatorSortOrder(),
-  }]
-  userGroupSeparators.value = groups
-  saveUserGroupSeparators(groups)
+  addUserGroupSeparator(sortOrder)
 }
 
 function deleteUserGroupSeparator() {
   const groupId = contentContextMenu.value?.node?.raw?.id
   closeContentContextMenu()
-  if (!groupId) return
-  const groups = userGroupSeparators.value.filter((group) => group.id !== groupId)
-  userGroupSeparators.value = groups
-  saveUserGroupSeparators(groups)
+  removeUserGroupSeparator(groupId)
 }
 
 function handleContextMenuSelect({ id, payload } = {}) {
