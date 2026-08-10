@@ -194,7 +194,10 @@ lines.
   adapters and article extraction. Source models, the campus source registry,
   canonical section URLs and campus-host ownership checks now live in
   `services/campus_source_catalog.py`; `campus_sources.py` retains the same
-  public imports for compatibility. OCR-document Markdown rendering, math-token
+  public imports for compatibility. Source-specific DOM selection, title/date
+  normalization, list-row validation and de-duplication now live in
+  `services/campus_list_parsing.py`, with the public parser still re-exported
+  by the original service. OCR-document Markdown rendering, math-token
   marking and table-header promotion now live in
   `services/campus_document_rendering.py`; `campus_sources.py` retains its
   public renderer import and private caller alias for compatibility. Article
