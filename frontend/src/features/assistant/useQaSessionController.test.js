@@ -13,6 +13,101 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
+function notificationRecorder() {
+  const messages = { success: [], error: [] }
+  return {
+    messages,
+    notify: {
+      success: (message) => messages.success.push(message),
+      error: (message) => messages.error.push(message)
+    }
+  }
+}
+
+test('starts a local empty conversation without making an API request', async () => {
+  const { messages, notify } = notificationRecorder()
+  const controller = useQaSessionController({
+    getActiveContentId: () => null,
+    notify,
+    request: {
+      post() {
+        throw new Error('unexpected request')
+      }
+    }
+  })
+  const session = controller.activateQaSession(null)
+  session.history = [{ question: '临时问题', answer: '临时回答' }]
+  session.draft = '临时草稿'
+
+  await controller.startNewChat()
+
+  assert.deepEqual(session.history, [])
+  assert.equal(session.draft, '')
+  assert.equal(session.historyLoaded, true)
+  assert.deepEqual(messages.success, ['已开启新对话'])
+  assert.deepEqual(messages.error, [])
+})
+
+test('archives the active conversation with the established request contract', async () => {
+  const calls = []
+  const { messages, notify } = notificationRecorder()
+  const controller = useQaSessionController({
+    apiBase: '/api',
+    getActiveContentId: () => 'article-chat',
+    notify,
+    request: {
+      async post(url, body, options) {
+        calls.push({ url, body, options })
+        return { data: { archived: true } }
+      }
+    }
+  })
+  const session = controller.activateQaSession('article-chat')
+  session.history = [{ question: '原问题', answer: '原回答' }]
+  session.draft = '未发送草稿'
+
+  await controller.startNewChat()
+
+  assert.deepEqual(calls, [{
+    url: '/api/content/article-chat/qa/new-conversation',
+    body: {},
+    options: { timeout: 10000 }
+  }])
+  assert.deepEqual(session.history, [])
+  assert.equal(session.draft, '')
+  assert.equal(controller.startingNewChat.value, false)
+  assert.deepEqual(messages.success, ['已开启新对话；上一轮追问已归档到 Markdown'])
+})
+
+test('a failed or busy new-conversation request preserves the current session', async () => {
+  let callCount = 0
+  const { messages, notify } = notificationRecorder()
+  const controller = useQaSessionController({
+    getActiveContentId: () => 'article-failure',
+    notify,
+    request: {
+      async post() {
+        callCount += 1
+        throw { response: { data: { detail: '无法归档当前对话' } } }
+      }
+    }
+  })
+  const session = controller.activateQaSession('article-failure')
+  session.history = [{ question: '保留问题', answer: '保留回答' }]
+
+  session.asking = true
+  await controller.startNewChat()
+  assert.equal(callCount, 0)
+  session.asking = false
+
+  await controller.startNewChat()
+
+  assert.equal(callCount, 1)
+  assert.deepEqual(session.history, [{ question: '保留问题', answer: '保留回答' }])
+  assert.equal(controller.startingNewChat.value, false)
+  assert.deepEqual(messages.error, ['无法归档当前对话'])
+})
+
 test('loads saved history without replacing a pending local turn', async () => {
   const response = deferred()
   const calls = []

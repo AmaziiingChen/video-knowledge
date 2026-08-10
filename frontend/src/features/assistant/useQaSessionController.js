@@ -1,5 +1,6 @@
 import { reactive, ref, watch } from 'vue'
 import axios from 'axios'
+import { ElMessage } from 'element-plus'
 
 import { API_BASE as API } from '../../utils/localApiAuth.js'
 import { savedQaHistoryItems } from './qaHistory.js'
@@ -9,6 +10,7 @@ export function useQaSessionController({
   request = axios,
   apiBase = API,
   getActiveContentId = () => null,
+  notify = ElMessage,
   wait = (milliseconds) => new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds)),
 } = {}) {
   const questionInput = ref('')
@@ -96,6 +98,37 @@ export function useQaSessionController({
       return
     }
     clearQaSession(activeQaSessionId.value, session)
+  }
+
+  async function startNewChat() {
+    const contentItemId = getActiveContentId()
+    const session = ensureQaSession(contentItemId)
+    if (session.asking || session.generatingSummary || startingNewChat.value) return
+    if (!contentItemId) {
+      clearQaSession(contentItemId, session)
+      notify.success('已开启新对话')
+      return
+    }
+
+    startingNewChat.value = true
+    try {
+      const response = await request.post(
+        `${apiBase}/content/${contentItemId}/qa/new-conversation`,
+        {},
+        { timeout: 10000 },
+      )
+      clearQaSession(contentItemId, session)
+      if (response.data?.archived) {
+        notify.success('已开启新对话；上一轮追问已归档到 Markdown')
+      } else {
+        notify.success('已开启新对话')
+      }
+    } catch (error) {
+      const message = error?.response?.data?.detail || error?.message || '开启新对话失败'
+      notify.error(typeof message === 'string' ? message : '开启新对话失败')
+    } finally {
+      startingNewChat.value = false
+    }
   }
 
   async function loadContentQaHistory(contentItemId, session = ensureQaSession(contentItemId)) {
@@ -210,6 +243,7 @@ export function useQaSessionController({
     refreshQaSessionHistory,
     clearQaSession,
     resetActiveQaSession,
+    startNewChat,
     loadContentQaHistory,
     loadMoreContentQaHistory,
     retryContentQaHistory,

@@ -145,6 +145,7 @@ export function useAppController() {
     refreshQaSessionHistory,
     clearQaSession,
     resetActiveQaSession: resetQaState,
+    startNewChat,
     loadContentQaHistory,
     loadMoreContentQaHistory,
     retryContentQaHistory,
@@ -2102,33 +2103,6 @@ export function useAppController() {
     } catch (error) {
       // The manifest is optional and update checks must not interrupt startup.
       if (error !== 'cancel' && error?.message !== 'cancel') return
-    }
-  }
-
-  async function startNewChat() {
-    const contentItemId = activeWorkspaceContent.value?.id || result.content_item_id || null
-    const session = ensureQaSession(contentItemId)
-    if (session.asking || session.generatingSummary || startingNewChat.value) return
-    if (!contentItemId) {
-      clearQaSession(contentItemId, session)
-      ElMessage.success('已开启新对话')
-      return
-    }
-
-    startingNewChat.value = true
-    try {
-      const response = await axios.post(`${API}/content/${contentItemId}/qa/new-conversation`, {}, { timeout: 10000 })
-      clearQaSession(contentItemId, session)
-      if (response.data?.archived) {
-        ElMessage.success('已开启新对话；上一轮追问已归档到 Markdown')
-      } else {
-        ElMessage.success('已开启新对话')
-      }
-    } catch (error) {
-      const message = error.response?.data?.detail || error.message || '开启新对话失败'
-      ElMessage.error(typeof message === 'string' ? message : '开启新对话失败')
-    } finally {
-      startingNewChat.value = false
     }
   }
 

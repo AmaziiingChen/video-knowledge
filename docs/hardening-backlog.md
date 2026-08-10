@@ -121,8 +121,9 @@ lines.
   answer state reconciliation now live in
   `features/assistant/createQaResponseStreamController.js`. Initial QA-history
   loading, bounded retry, cursor pagination and stale-request invalidation now
-  belong to `features/assistant/useQaSessionController.js`; request creation
-  remains in the facade.
+  belong to `features/assistant/useQaSessionController.js`, together with the
+  guarded new-conversation archive and reset transaction; question and summary
+  request creation remain in the facade.
   Content recovery actions (source text, reprocessing, retranscription,
   subtitles and redownloads) now live in
   `features/library/useContentRecoveryController.js` while reusing the durable
