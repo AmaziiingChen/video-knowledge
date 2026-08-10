@@ -327,6 +327,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
+import { useConversationScrollController } from './useConversationScrollController.js'
 import {
   assistantAiModelOptions,
   assistantQuestionPlaceholder,
@@ -547,13 +548,8 @@ const shortcutMenuOpen = ref(false)
 const modelMenuRef = ref(null)
 const shortcutMenuRef = ref(null)
 const shortcutSuggestionsRef = ref(null)
-const conversationRef = ref(null)
 const questionInputRef = ref(null)
-const conversationAutoFollow = ref(true)
 const sendLaunchActive = ref(false)
-const CONVERSATION_BOTTOM_THRESHOLD = 56
-let conversationScrollFrame = null
-let historyRestorePosition = null
 let sendLaunchTimer = null
 const aiModelOptions = computed(() => {
   return assistantAiModelOptions(props.selectedAiModel, props.availableAiModels)
@@ -607,6 +603,12 @@ const questionPlaceholder = computed(() => {
     currentQaEnabled: props.currentQaEnabled,
   })
 })
+const {
+  conversationRef,
+  handleConversationScroll,
+  handleConversationWheel,
+  handleTimestampLinkClick,
+} = useConversationScrollController({ props, emit })
 
 function selectAiModel(model) {
   emit('update:selectedAiModel', model)
@@ -702,105 +704,6 @@ watch(() => props.questionInput, () => {
   nextTick(() => resizeQuestionInput())
 })
 
-function conversationDistanceFromBottom(container) {
-  return Math.max(0, container.scrollHeight - container.clientHeight - container.scrollTop)
-}
-
-function handleConversationWheel(event) {
-  if (event.deltaY < 0) conversationAutoFollow.value = false
-}
-
-function handleTimestampLinkClick(event) {
-  const target = event.target instanceof Element ? event.target.closest('a[href^="#video-t="]') : null
-  if (!target) return
-  const seconds = Number(new URL(target.href).hash.replace(/^#video-t=/, ''))
-  if (!Number.isFinite(seconds) || seconds < 0) return
-  event.preventDefault()
-  emit('seek-video', seconds)
-}
-
-function handleConversationScroll() {
-  const container = conversationRef.value
-  if (!container) return
-  if (
-    container.scrollTop <= 48
-    && props.qaHistoryHasMore
-    && !props.qaHistoryLoading
-    && !props.qaHistoryLoadingMore
-    && historyRestorePosition === null
-  ) {
-    historyRestorePosition = {
-      height: container.scrollHeight,
-      top: container.scrollTop,
-      historyLength: props.qaHistory.length
-    }
-    emit('load-more-qa-history')
-  }
-  conversationAutoFollow.value = conversationDistanceFromBottom(container) <= CONVERSATION_BOTTOM_THRESHOLD
-}
-
-function scrollConversationToBottom({ force = false } = {}) {
-  if (!force && !conversationAutoFollow.value) return
-  if (conversationScrollFrame !== null) cancelAnimationFrame(conversationScrollFrame)
-  conversationScrollFrame = requestAnimationFrame(() => {
-    conversationScrollFrame = null
-    const container = conversationRef.value
-    if (!container || (!force && !conversationAutoFollow.value)) return
-    container.scrollTo({ top: container.scrollHeight, behavior: 'auto' })
-  })
-}
-
-function resumeConversationAutoFollow() {
-  conversationAutoFollow.value = true
-  nextTick(() => scrollConversationToBottom({ force: true }))
-}
-
-watch(
-  () => props.conversationKey,
-  () => resumeConversationAutoFollow()
-)
-
-watch(
-  () => [props.qaHistory.length, props.qaHistoryLoadingMore],
-  ([historyLength, loadingMore]) => {
-    const restore = historyRestorePosition
-    if (!restore || loadingMore || historyLength <= restore.historyLength) return
-    nextTick(() => {
-      const container = conversationRef.value
-      if (container) container.scrollTop = restore.top + container.scrollHeight - restore.height
-      historyRestorePosition = null
-    })
-  }
-)
-
-watch(
-  () => [props.qaHistoryLoadingMore, props.qaHistoryHasMore],
-  ([loadingMore, hasMore]) => {
-    if (!loadingMore && !hasMore) historyRestorePosition = null
-  }
-)
-
-watch(
-  () => props.askingQuestion,
-  (asking) => {
-    if (asking) resumeConversationAutoFollow()
-  }
-)
-
-watch(
-  () => [
-    props.qaHistory.length,
-    props.qaHistory.at(-1)?.answer?.length || 0,
-    props.qaHistory.at(-1)?.pending || false,
-    props.currentInsightHtml.length,
-    props.generatingAiSummary,
-    props.generatingSummaryText.length,
-  ],
-  () => {
-    if (!conversationAutoFollow.value) return
-    nextTick(() => scrollConversationToBottom())
-  }
-)
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleOutsidePointerDown)
@@ -810,7 +713,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleOutsidePointerDown)
-  if (conversationScrollFrame !== null) cancelAnimationFrame(conversationScrollFrame)
   if (sendLaunchTimer !== null) clearTimeout(sendLaunchTimer)
 })
 </script>

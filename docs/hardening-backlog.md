@@ -138,8 +138,10 @@ lines.
   surfaces. Its model normalization, shortcut filtering, empty state, external
   citation, OCR hint and text-preview rules now live in
   `features/assistant/assistantPresentation.js` with pure boundary tests;
-  menus, composer focus/resize and conversation scrolling remain local UI
-  behavior.
+  conversation follow mode, history prepend position restoration and timestamp
+  jumps now live in `features/assistant/useConversationScrollController.js`
+  with injected-scheduler behavior tests; menus and composer focus/resize
+  remain local UI behavior.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it
