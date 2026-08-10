@@ -87,6 +87,9 @@ lines.
   source splitting now live in `services/campus_digest_payloads.py`. The
   SQLite fact-card cache now lives in `services/campus_digest_fact_cache.py`,
   validating source hashes and card schema before returning cached projections.
+  Candidate material construction, deterministic pair rules and cluster-member
+  similarity now live in `services/campus_digest_cluster_rules.py`; model
+  relation review and SQLite cluster persistence remain in the generator.
   The remaining generation and persistence flow will be separated in
   behavior-preserving slices.
 - [ ] Split `useAppController.js` by library, task-runtime, import and

@@ -1,33 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-import hashlib
-import json
-import re
 from time import perf_counter
 from typing import Any
 
+from services import campus_digest_cluster_rules as _cluster_rules
 from services.ai_call_logger import tracked_llm_provider
 from services.campus_digest_embeddings import (
     CampusEventEmbedder,
     campus_event_embedder,
-    cosine_similarity as _cosine,
     embedding_cache_model_name as _embedding_cache_model_name,
-)
-from services.campus_digest_progress import DigestProgressCallback, emit_progress as _emit_progress
-from services.campus_digest_payloads import (
-    one_line as _one_line,
-    parse_event_brief as _parse_event_brief_payload,
-    parse_fact_card as _parse_fact_card_payload,
-    parse_json_object as _parse_json_object,
-    split_text_in_order as _split_text_in_order,
-    string_list as _string_list,
-)
-from services.campus_digest_fact_cache import (
-    load_cached_facts as _load_cached_fact_cards,
-    save_fact_cards as _save_cached_fact_cards,
 )
 from services.campus_digest_editorial import (
     CITATION_RE as _CITATION_RE,
@@ -37,14 +23,23 @@ from services.campus_digest_editorial import (
     write_category_section as _write_category_section,
     write_overview as _write_overview,
 )
-from services.campus_digest_identity import canonical_url as _canonical_url
-from services.campus_digest_identity import normalize_identity as _normalize_identity
+from services.campus_digest_fact_cache import (
+    load_cached_facts as _load_cached_fact_cards,
+    save_fact_cards as _save_cached_fact_cards,
+)
 from services.campus_digest_identity import source_hash as _source_hash
-from services.campus_digest_identity import text_shingle_similarity as _text_shingle_similarity
+from services.campus_digest_payloads import (
+    one_line as _one_line,
+    parse_event_brief as _parse_event_brief_payload,
+    parse_fact_card as _parse_fact_card_payload,
+    parse_json_object as _parse_json_object,
+    split_text_in_order as _split_text_in_order,
+    string_list as _string_list,
+)
+from services.campus_digest_progress import DigestProgressCallback, emit_progress as _emit_progress
 from services.database import connect, utc_now_iso
 from services.llm_provider import LLMMessage, LLMProvider, default_llm_provider
 from services.prompt_file_store import managed_prompt_text
-
 
 FACT_PROMPT_VERSION = "campus-publishing-card-v2"
 RELATION_PROMPT_VERSION = "campus-event-relation-v1"
@@ -103,8 +98,11 @@ RELATION_TYPES = {
     "different_event",
 }
 _INCLUDE_DECISIONS = {"include", "mixed"}
-_DATE_TOKEN_RE = re.compile(r"(?<!\d)(20\d{2})[-年/.](\d{1,2})[-月/.](\d{1,2})")
-_ORDINAL_RE = re.compile(r"(?:第?[一二三四五六七八九十百千万0-9]+(?:届|期|批|轮|季)|20\d{2}届)")
+
+# Preserve the established private test seam while the deterministic policy
+# itself lives in its own module.
+_hard_conflict = _cluster_rules.hard_conflict
+_rule_pair_decision = _cluster_rules.rule_pair_decision
 
 
 FACT_CARD_SCHEMA = """{
@@ -190,15 +188,6 @@ class CampusDigestGenerationResult:
     cluster_count: int
     embedding_model: str
     source_coverage: tuple[dict[str, str], ...]
-
-
-@dataclass(frozen=True)
-class _PairDecision:
-    relation: str
-    same_event: bool
-    confidence: float
-    method: str
-    contradictions: tuple[str, ...] = ()
 
 
 def generate_campus_digest(
@@ -833,7 +822,7 @@ def _cluster_profiles(sources: list[CampusDigestSource]) -> list[dict[str, Any]]
     for source in sources:
         profiles.append(
             {
-                "summary": _cluster_material(source),
+                "summary": _cluster_rules.cluster_material(source),
                 "content_decision": "include",
                 "decision_reason": "聚类候选不作内容取舍",
                 "category": "其他动态",
@@ -847,11 +836,6 @@ def _cluster_profiles(sources: list[CampusDigestSource]) -> list[dict[str, Any]]
             }
         )
     return profiles
-
-
-def _cluster_material(source: CampusDigestSource) -> str:
-    text = re.sub(r"\s+", " ", source.material or "").strip()
-    return f"标题：{source.title}\n来源：{source.publisher}\n正文：{text}"[:7_500]
 
 
 def _select_report_cluster_primaries(
@@ -903,7 +887,7 @@ def _cluster_sources(
             continue
         ranked = sorted(
             (
-                (_cluster_similarity(embeddings[index], cluster, embeddings), cluster)
+                (_cluster_rules.cluster_similarity(embeddings[index], cluster, embeddings), cluster)
                 for cluster in clusters
             ),
             key=lambda item: item[0],
@@ -919,7 +903,7 @@ def _cluster_sources(
                 cards[representative],
                 similarity,
             )
-            if decision is None and _pair_is_worth_judging(source, sources[representative], similarity):
+            if decision is None and _cluster_rules.pair_is_worth_judging(source, sources[representative], similarity):
                 try:
                     decision = _judge_pair(
                         source,
@@ -932,7 +916,7 @@ def _cluster_sources(
                 except Exception as exc:
                     # A relation-judge outage must never produce a false merge.
                     # Keep the article independent and expose the degraded path.
-                    decision = _PairDecision("related_event", False, 0.0, "judge_error")
+                    decision = _cluster_rules.PairDecision("related_event", False, 0.0, "judge_error")
                     _emit_progress(
                         progress_callback,
                         "report_clustering",
@@ -970,37 +954,6 @@ def _cluster_sources(
     return clusters
 
 
-def _rule_pair_decision(
-    left_source: CampusDigestSource,
-    left: dict[str, Any],
-    right_source: CampusDigestSource,
-    right: dict[str, Any],
-    similarity: float,
-) -> _PairDecision | None:
-    left_url = _canonical_url(left_source.source_url)
-    right_url = _canonical_url(right_source.source_url)
-    if left_url and left_url == right_url:
-        return _PairDecision("same_content", True, 1.0, "canonical_url")
-    overlap = _text_shingle_similarity(left_source.material, right_source.material)
-    if overlap >= 0.78:
-        relation = "verbatim_repost" if overlap >= 0.92 else "rewritten_repost"
-        return _PairDecision(relation, True, min(0.99, overlap), "content_fingerprint")
-    if _hard_conflict(left, right):
-        return _PairDecision("different_event", False, 0.99, "hard_conflict")
-    left_title = _normalize_identity(left_source.title)
-    right_title = _normalize_identity(right_source.title)
-    shared = _shared_core_evidence(left, right)
-    if len(left_title) >= 8 and left_title == right_title and shared >= 1:
-        return _PairDecision("rewritten_repost", True, 0.96, "normalized_title")
-    subject_left = _normalize_identity(left.get("event_or_subject"))
-    subject_right = _normalize_identity(right.get("event_or_subject"))
-    if subject_left and subject_left == subject_right and shared >= 1:
-        return _PairDecision(_stage_relation(left, right), True, 0.94, "subject_and_core_fields")
-    if similarity >= 0.91 and shared >= 2:
-        return _PairDecision(_stage_relation(left, right), True, 0.92, "embedding_and_core_fields")
-    return None
-
-
 def _judge_pair(
     left_source: CampusDigestSource,
     left: dict[str, Any],
@@ -1009,7 +962,7 @@ def _judge_pair(
     *,
     similarity: float,
     provider: LLMProvider,
-) -> _PairDecision:
+) -> _cluster_rules.PairDecision:
     schema = {
         "relation": "same_content|verbatim_repost|rewritten_repost|same_event_update|same_event_result|same_event_report|same_event|related_event|different_event",
         "same_event": False,
@@ -1021,8 +974,8 @@ def _judge_pair(
     prompt = (
         f"提示：embedding 只用于候选召回，相似度为 {similarity:.4f}，不能据此直接合并。\n"
         f"返回结构：{json.dumps(schema, ensure_ascii=False)}\n\n"
-        f"<article_a>\n{json.dumps(_pair_payload(left_source, left), ensure_ascii=False)}\n</article_a>\n\n"
-        f"<article_b>\n{json.dumps(_pair_payload(right_source, right), ensure_ascii=False)}\n</article_b>"
+        f"<article_a>\n{json.dumps(_cluster_rules.pair_payload(left_source, left), ensure_ascii=False)}\n</article_a>\n\n"
+        f"<article_b>\n{json.dumps(_cluster_rules.pair_payload(right_source, right), ensure_ascii=False)}\n</article_b>"
     )
     data = _parse_json_object(_chat_json(provider, managed_prompt_text("campus_duplicate_relation", RELATION_SYSTEM_PROMPT), prompt, temperature=0.0))
     relation = str(data.get("relation") or "different_event")
@@ -1038,38 +991,13 @@ def _judge_pair(
     if same_event and confidence < 0.8:
         same_event = False
         relation = "related_event"
-    return _PairDecision(
+    return _cluster_rules.PairDecision(
         relation,
         same_event,
         confidence,
         "flash_relation_judge",
         tuple(_string_list(data.get("contradictions"), maximum=12)),
     )
-
-
-def _pair_payload(source: CampusDigestSource, card: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "title": source.title,
-        "publisher": source.publisher,
-        "published_at": source.published_at,
-        "source_url": source.source_url,
-        "article_excerpt": _cluster_material(source),
-        "fact_card": card,
-    }
-
-
-def _pair_is_worth_judging(
-    left: CampusDigestSource,
-    right: CampusDigestSource,
-    similarity: float,
-) -> bool:
-    if similarity >= 0.55:
-        return True
-    if _text_shingle_similarity(left.material, right.material) >= 0.2:
-        return True
-    left_title = _normalize_identity(left.title)
-    right_title = _normalize_identity(right.title)
-    return len(left_title) >= 8 and (left_title in right_title or right_title in left_title)
 
 
 def _event_brief(
@@ -1249,42 +1177,6 @@ def _facts_for_brief(card: dict[str, Any], source_id: str) -> list[dict[str, Any
     if not facts:
         facts.append({"text": card["summary"], "source_ids": [source_id]})
     return facts
-
-
-def _stage_relation(left: dict[str, Any], right: dict[str, Any]) -> str:
-    stages = {left.get("event_stage"), right.get("event_stage")}
-    if "result" in stages or "publication" in stages:
-        return "same_event_result"
-    if "recap" in stages:
-        return "same_event_report"
-    if stages & {"adjustment", "supplement"}:
-        return "same_event_update"
-    return "same_event"
-
-
-def _hard_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    left_terms = {_normalize_identity(value) for value in left.get("terms_or_batches") or [] if _ORDINAL_RE.search(value)}
-    right_terms = {_normalize_identity(value) for value in right.get("terms_or_batches") or [] if _ORDINAL_RE.search(value)}
-    if left_terms and right_terms and left_terms.isdisjoint(right_terms):
-        return True
-    # Codes and identifiers are optional article details rather than a global
-    # event identity: extraction formats vary and must never split reposts.
-    return False
-
-
-def _shared_core_evidence(left: dict[str, Any], right: dict[str, Any]) -> int:
-    fields = ("issuers", "organizers", "actors", "objects", "audiences", "locations", "terms_or_batches", "identifiers")
-    count = 0
-    for field_name in fields:
-        left_values = {_normalize_identity(value) for value in left.get(field_name) or [] if _normalize_identity(value)}
-        right_values = {_normalize_identity(value) for value in right.get(field_name) or [] if _normalize_identity(value)}
-        if left_values and right_values and left_values & right_values:
-            count += 1
-    return count
-
-
-def _cluster_similarity(vector: list[float], cluster: EventCluster, embeddings: list[list[float]]) -> float:
-    return max((_cosine(vector, embeddings[index]) for index in cluster.member_indexes), default=0.0)
 
 
 def _chat_json(
