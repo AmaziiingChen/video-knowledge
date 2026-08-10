@@ -107,6 +107,10 @@ lines.
   The independent trash transaction boundary now lives in
   `features/library/useLibraryTrashController.js`; history snapshots, undo/redo
   and shortcut handling now live in `features/library/useLibraryHistoryController.js`.
+  Prompt-template loading, ordering, selection, editor drafts, create/update,
+  activation and soft deletion now live in
+  `features/prompts/usePromptTemplateController.js`; its facade preserves the
+  existing App and workbench contracts and rejects stale task-type responses.
   Article preparation, platform credential status, completion-notification
   synchronization, content-detail/text-readiness hydration, and folder
   loading/creation/renaming/pinning have their own controllers as well. AI

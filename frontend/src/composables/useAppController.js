@@ -13,7 +13,6 @@ import {
   terminalStatuses,
   timingOrder
 } from '../config/workbenchOptions'
-import { promptTemplateDisplayName, promptTemplatePersistedName } from '../config/promptInterface'
 import { qaHistoryForPrompt, savedQaHistoryItems } from '../features/assistant/qaHistory'
 import { matchQaShortcut } from '../features/assistant/qaShortcutMatcher'
 import {
@@ -88,6 +87,7 @@ import { useCompletionNotificationController } from '../features/notifications/u
 import { useAppSettingsController } from '../features/settings/useAppSettingsController.js'
 import { useAiUsageController } from '../features/usage/useAiUsageController.js'
 import { useContentAnalysisController } from '../features/assistant/useContentAnalysisController.js'
+import { usePromptTemplateController } from '../features/prompts/usePromptTemplateController.js'
 import { useActiveTaskEventStreamController } from '../features/tasks/useActiveTaskEventStreamController.js'
 import { useTaskQueueController } from '../features/tasks/useTaskQueueController.js'
 import { createTaskDisplayPresentation } from '../features/tasks/taskDisplayPresentation.js'
@@ -168,6 +168,28 @@ export function useAppController() {
     setLastQaSaved: (saved) => {
       lastQaSaved.value = saved
     },
+  })
+  const {
+    promptTaskType,
+    promptTemplates,
+    selectedPromptTemplateId,
+    qaShortcutTemplates,
+    loadingPrompts,
+    savingPromptTemplate,
+    activatingPromptTemplate,
+    promptEditorName,
+    promptEditorText,
+    sortPromptTemplates,
+    loadPromptTemplates,
+    loadQaShortcutTemplates,
+    selectPromptTemplate,
+    createPromptTemplate,
+    savePromptTemplate,
+    activatePromptTemplate,
+    deletePromptTemplate,
+  } = usePromptTemplateController({
+    confirmDelete: requestDestructiveConfirmation,
+    refreshContentAnalysisTemplates: () => loadContentAnalysisTemplates(),
   })
   const {
     contentAnalysisTemplates,
@@ -427,17 +449,6 @@ export function useAppController() {
   const savingMarkdown = ref(false)
   const syncingMarkdown = ref(false)
   const exportingConversationMarkdown = ref(false)
-  const promptTaskType = ref('summary')
-  const promptTemplates = ref([])
-  const selectedPromptTemplateId = ref('')
-  const qaShortcutTemplates = ref([])
-  const loadingPrompts = ref(false)
-  const savingPromptTemplate = ref(false)
-  const activatingPromptTemplate = ref(false)
-  const creatingPromptTemplate = ref(false)
-  const creatingPromptFolderId = ref(null)
-  const promptEditorName = ref('')
-  const promptEditorText = ref('')
   const batchTasks = ref([])
   const batchTaskIds = ref([])
   const batchTaskNames = ref({})
@@ -1031,13 +1042,6 @@ export function useAppController() {
 
   const selectedModelProfile = computed(() => {
     return modelProfiles.find((profile) => profile.model === selectedModel.value) || modelProfiles[2]
-  })
-
-  const activePromptTemplate = computed(() => {
-    return promptTemplates.value.find((template) => template.id === selectedPromptTemplateId.value)
-      || promptTemplates.value.find((template) => template.is_active)
-      || promptTemplates.value[0]
-      || null
   })
 
   const currentStageLabel = computed(() => {
@@ -2043,181 +2047,6 @@ export function useAppController() {
       ElMessage.error(typeof msg === 'string' ? msg : '写入 Markdown 失败')
     } finally {
       syncingMarkdown.value = false
-    }
-  }
-
-  async function loadPromptTemplates() {
-    const taskType = promptTaskType.value
-    loadingPrompts.value = true
-    try {
-      const res = await axios.get(`${API}/prompts`, {
-        params: { task_type: taskType },
-        timeout: 10000
-      })
-      if (taskType !== promptTaskType.value) return
-      promptTemplates.value = sortPromptTemplates(res.data || [])
-      if (!creatingPromptTemplate.value && !promptTemplates.value.some((template) => template.id === selectedPromptTemplateId.value)) {
-        selectedPromptTemplateId.value = activePromptTemplate.value?.id || ''
-      }
-      if (!creatingPromptTemplate.value) {
-        promptEditorName.value = promptTemplateDisplayName(activePromptTemplate.value)
-        promptEditorText.value = activePromptTemplate.value?.template || ''
-      }
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '读取 Prompt 失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '读取 Prompt 失败')
-    } finally {
-      loadingPrompts.value = false
-    }
-  }
-
-  async function loadQaShortcutTemplates() {
-    try {
-      const res = await axios.get(`${API}/prompts`, {
-        params: { task_type: 'qa_shortcut' },
-        timeout: 10000
-      })
-      qaShortcutTemplates.value = sortPromptTemplates(res.data || []).filter((template) => template.template?.trim())
-    } catch {
-      qaShortcutTemplates.value = []
-    }
-  }
-
-  function selectPromptTemplate(templateId) {
-    creatingPromptTemplate.value = false
-    creatingPromptFolderId.value = null
-    selectedPromptTemplateId.value = templateId
-    promptEditorName.value = promptTemplateDisplayName(activePromptTemplate.value)
-    promptEditorText.value = activePromptTemplate.value?.template || ''
-  }
-
-  function createPromptTemplate({ taskType = promptTaskType.value, name = '', folderId = null } = {}) {
-    promptTaskType.value = taskType
-    creatingPromptTemplate.value = true
-    creatingPromptFolderId.value = folderId
-    selectedPromptTemplateId.value = ''
-    promptEditorName.value = name
-    promptEditorText.value = ''
-  }
-
-  function sortPromptTemplates(templates) {
-    return [...templates].sort((a, b) => promptTemplateOrder(a) - promptTemplateOrder(b))
-  }
-
-  function promptTemplateOrder(template) {
-    try {
-      const schema = typeof template.variables_schema === 'string'
-        ? JSON.parse(template.variables_schema)
-        : template.variables_schema
-      const order = Number(schema?.order)
-      return Number.isFinite(order) ? order : 999
-    } catch {
-      return 999
-    }
-  }
-
-  async function savePromptTemplate() {
-    const editorName = promptEditorName.value.trim()
-    const template = promptEditorText.value.trim()
-    if (!editorName || !template) {
-      ElMessage.warning('请填写提示词名称和内容')
-      return
-    }
-
-    savingPromptTemplate.value = true
-    const taskType = promptTaskType.value
-    const baseTemplate = creatingPromptTemplate.value ? null : activePromptTemplate.value
-    const name = promptTemplatePersistedName(baseTemplate, editorName)
-    try {
-      if (baseTemplate?.id) {
-        await axios.patch(`${API}/prompts/${baseTemplate.id}`, {
-          name,
-          template,
-          variables_schema: baseTemplate.variables_schema
-        }, { timeout: 10000 })
-      } else {
-        const created = await axios.post(`${API}/prompts`, {
-          name,
-          task_type: taskType,
-          version: `v${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${Date.now().toString().slice(-4)}`,
-          template,
-          folder_id: creatingPromptFolderId.value,
-          is_active: taskType === 'qa_shortcut'
-        }, { timeout: 10000 })
-        selectedPromptTemplateId.value = created.data?.id || ''
-      }
-      creatingPromptTemplate.value = false
-      creatingPromptFolderId.value = null
-      await loadPromptTemplates()
-      if (taskType === 'qa_shortcut') {
-        await loadQaShortcutTemplates()
-      }
-      if (taskType === 'content_analysis') {
-        await loadContentAnalysisTemplates()
-      }
-      ElMessage.success(
-        baseTemplate
-          ? '提示词已保存'
-          : taskType === 'qa_shortcut'
-            ? '快捷追问已保存并启用'
-            : '提示词已保存，请设为当前使用'
-      )
-      return selectedPromptTemplateId.value
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '保存 Prompt 失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '保存 Prompt 失败')
-      return ''
-    } finally {
-      savingPromptTemplate.value = false
-    }
-  }
-
-  async function activatePromptTemplate(templateId) {
-    const template = promptTemplates.value.find((item) => item.id === templateId)
-    if (!template || template.is_active) return
-    activatingPromptTemplate.value = true
-    try {
-      await axios.post(`${API}/prompts/${templateId}/activate`, {}, { timeout: 10000 })
-      await loadPromptTemplates()
-      selectedPromptTemplateId.value = templateId
-      promptEditorName.value = promptTemplateDisplayName(promptTemplates.value.find((item) => item.id === templateId))
-      promptEditorText.value = promptTemplates.value.find((item) => item.id === templateId)?.template || ''
-      ElMessage.success(template.task_type === 'qa_shortcut' ? '快捷追问已启用' : '已设为当前使用')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '启用 Prompt 失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '启用 Prompt 失败')
-    } finally {
-      activatingPromptTemplate.value = false
-    }
-  }
-
-  async function deletePromptTemplate(templateId) {
-    const template = promptTemplates.value.find((item) => item.id === templateId)
-    if (!template) return
-    const confirmed = await requestDestructiveConfirmation({
-      title: '移入回收站',
-      message: `将“${template.name}”移入提示词回收站？`,
-      confirmLabel: '移入回收站',
-    })
-    if (!confirmed) return
-
-    try {
-      await axios.delete(`${API}/prompts/${templateId}`, { timeout: 10000 })
-      creatingPromptTemplate.value = false
-      selectedPromptTemplateId.value = ''
-      promptEditorName.value = ''
-      promptEditorText.value = ''
-      await loadPromptTemplates()
-      if (template.task_type === 'qa_shortcut') {
-        await loadQaShortcutTemplates()
-      }
-      if (template.task_type === 'content_analysis') {
-        await loadContentAnalysisTemplates()
-      }
-      ElMessage.success('提示词已移入回收站')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '删除提示词失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '删除提示词失败')
     }
   }
 
