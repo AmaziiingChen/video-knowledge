@@ -18,6 +18,14 @@ test('centres and enlarges file-tree toolbar actions without a top divider', () 
   )
 })
 
+test('keeps the empty library and search result state readable', () => {
+  assert.match(source, /<div v-else class="sidebar-empty">/)
+  assert.match(
+    source,
+    /\.sidebar-empty\s*\{[\s\S]*?padding:\s*8px 5px;[\s\S]*?color:\s*var\(--vk-muted\);[\s\S]*?font-size:\s*var\(--vk-type-label-size\);/,
+  )
+})
+
 test('expands the pasted-link composer from one to six lines', () => {
   assert.match(linkDockSource, /aria-label="粘贴待处理链接"[\s\S]*?:autosize="\{ minRows: 1, maxRows: 6 \}"/)
   assert.match(

@@ -85,8 +85,9 @@ test('uses the selected folder for picker and dropped imports without changing e
 test('retains single-delete payloads and clears selection after a multi-delete request', () => {
   const folder = { type: 'folder', id: 'folder-1', raw: { id: 'folder-1', name: '资料' } }
   const content = { type: 'content', id: 'content-1', raw: { id: 'content-1', title: '文章' } }
-  const { controller, events, selectedKeys } = createController({ nodes: [folder, content] })
-  selectedKeys.value = new Set(['folder:folder-1', 'content:content-1'])
+  const unreadContent = { type: 'unread-content', id: 'content-2', raw: { id: 'content-2', title: '未读文章' } }
+  const { controller, events, selectedKeys } = createController({ nodes: [folder, content, unreadContent] })
+  selectedKeys.value = new Set(['folder:folder-1', 'content:content-1', 'unread-content:content-2'])
 
   controller.requestDelete(folder)
   controller.requestDelete(content)
@@ -98,6 +99,7 @@ test('retains single-delete payloads and clears selection after a multi-delete r
     ['delete-selected', [
       { id: 'folder-1', name: '资料', type: 'folder' },
       { id: 'content-1', title: '文章', type: 'content' },
+      { id: 'content-2', title: '未读文章', type: 'content' },
     ]],
   ])
   assert.deepEqual([...selectedKeys.value], [])

@@ -256,6 +256,12 @@ lines.
   Folder/content editing, picker/drop imports and delete-request projection
   now live in `workbench/useLibraryNodeEditingController.js`; direct tests lock
   parent-folder expansion, focus timing and the existing event payloads.
+  Open-folder persistence, lazy branch hydration, ancestor reveal and unread
+  expansion now live in `workbench/useLibraryOpenFolderController.js`; one
+  flush cannot enqueue the same branch twice. Unread-list bulk deletion now
+  normalizes its projection to the existing `content` mutation contract, and
+  obsolete file-row/trash-transition selectors have been removed from the
+  parent scoped stylesheet.
 - [x] Replace the idle one-second Markdown scan with deterministic adaptive
   backoff: changes stay on a two-second cadence, while an unchanged library
   backs off through 4/8/16/32 to 60 seconds.  The scheduler has no network

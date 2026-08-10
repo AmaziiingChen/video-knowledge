@@ -111,7 +111,11 @@ export function useLibraryNodeEditingController({
 
   function requestDeleteSelected() {
     if (!selectedNodes.value.length) return
-    emit('delete-selected', selectedNodes.value.map((node) => node.raw ? { ...node.raw, type: node.type } : node))
+    emit('delete-selected', selectedNodes.value.map((node) => {
+      const type = node.type === 'unread-content' ? 'content' : node.type
+      if (node.raw) return { ...node.raw, type }
+      return type === node.type ? node : { ...node, type }
+    }))
     selectedKeys.value = new Set()
   }
 

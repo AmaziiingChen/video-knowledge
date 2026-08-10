@@ -282,7 +282,7 @@ import {
   sortLibraryNodes,
   unreadFolderCounts,
 } from '../features/library/libraryTreeModel.js'
-import { loadLibraryTreePreferences, loadOpenFolderIds as loadSavedOpenFolderIds, saveLibraryTreePreferences, saveOpenFolderIds as saveSavedOpenFolderIds } from '../features/library/libraryTreePreferences.js'
+import { loadLibraryTreePreferences, saveLibraryTreePreferences } from '../features/library/libraryTreePreferences.js'
 import {
   createDefaultSeparators,
   isRootLayoutNode,
@@ -302,6 +302,7 @@ import SidebarLinkDock from './SidebarLinkDock.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 import { useLibraryTreeDragController } from './useLibraryTreeDragController.js'
 import { useLibraryNodeEditingController } from './useLibraryNodeEditingController.js'
+import { useLibraryOpenFolderController } from './useLibraryOpenFolderController.js'
 import { useTreeBoxSelectionController } from './useTreeBoxSelectionController.js'
 import { useVirtualLibraryTreeController } from './useVirtualLibraryTreeController.js'
 const folderIcon = 'folder'
@@ -465,11 +466,6 @@ const libraryContentLoadLabel = computed(() => {
 // not compatible with the lazy per-folder loader below.
 function loadUserGroupSeparators() { return loadLibraryTreePreferences() }
 function saveUserGroupSeparators(groups) { saveLibraryTreePreferences(groups) }
-function loadOpenFolderIds() { return loadSavedOpenFolderIds() }
-function saveOpenFolderIds(folderIds) { saveSavedOpenFolderIds(folderIds) }
-
-// An empty saved state deliberately means that every folder starts collapsed.
-const openFolderIds = ref(loadOpenFolderIds())
 const librarySearchInput = ref(null)
 const searchScope = computed(() => props.searchScope)
 const selectedKeys = ref(new Set())
@@ -478,8 +474,6 @@ const contentContextMenu = ref(null)
 const separatorLayoutState = loadUserGroupSeparators()
 const userGroupSeparators = ref(separatorLayoutState.separators)
 const separatorLayoutInitialized = ref(separatorLayoutState.initialized)
-const unreadRootOpen = ref(false)
-const pinnedRootOpen = ref(true)
 const TREE_ROW_HEIGHT = 26
 const searchScopeOptions = [
   { value: 'all', label: '全部内容', description: '标题、摘要与正文' },
@@ -502,18 +496,6 @@ defineExpose({
 const searchActive = computed(() => props.libraryMode === 'search' && Boolean(props.searchQuery.trim()))
 const viewedContentIdSet = computed(() => new Set(props.viewedContentIds.map(String)))
 const explicitlyUnreadContentIdSet = computed(() => new Set(props.explicitlyUnreadContentIds.map(String)))
-function folderHistoryState(folderId) {
-  return props.folderHistoryStates[String(folderId)] || null
-}
-
-function ensureFolderItemsLoaded(folderId) {
-  const id = String(folderId || '')
-  if (!id) return
-  const page = folderHistoryState(id)
-  if (!page?.loaded && !page?.loading) {
-    emit('load-folder-history', { folderId: id, append: false })
-  }
-}
 
 const folderContentCounts = computed(() => {
   // Counts come from the folder endpoint and include descendant folders. The
@@ -531,6 +513,23 @@ const folderUnreadCounts = computed(() => {
     libraryContentItems: props.libraryContentItems,
     isUnreadContent,
   })
+})
+
+const {
+  openFolderIds,
+  persistOpenFolderIds,
+  folderHistoryState,
+  isFolderOpen,
+  isNodeOpen,
+  toggleVirtualRoot,
+  toggleFolder,
+  expandUnreadInNode,
+} = useLibraryOpenFolderController({
+  libraryFolders: computed(() => props.libraryFolders),
+  folderHistoryStates: computed(() => props.folderHistoryStates),
+  revealedLibraryFolderIds: computed(() => props.revealedLibraryFolderIds),
+  folderUnreadCounts,
+  emit,
 })
 
 function isUnreadContent(item) {
@@ -592,7 +591,7 @@ const {
   openFolderIds,
   selectedKeys,
   selectedNodes,
-  saveOpenFolderIds,
+  saveOpenFolderIds: persistOpenFolderIds,
   emit,
 })
 
@@ -758,16 +757,6 @@ onBeforeUnmount(() => {
   disposeVirtualTree()
 })
 
-function isFolderOpen(id) {
-  return openFolderIds.value.has(String(id))
-}
-
-function folderNodeOpenKey(node) {
-  if (node.type === 'unread-root') return 'unread:root'
-  if (node.type === 'pinned-root') return 'pinned:root'
-  return String(node.id)
-}
-
 function isFolderNode(node) {
   return ['folder', 'draft-folder', 'unread-root', 'pinned-root'].includes(node?.type)
 }
@@ -788,102 +777,6 @@ function isMutableLibraryNode(node) {
   return node?.type === 'folder' || node?.type === 'content'
 }
 
-function isNodeOpen(node) {
-  if (node?.type === 'unread-root') return unreadRootOpen.value
-  if (node?.type === 'pinned-root') return pinnedRootOpen.value
-  return isFolderOpen(folderNodeOpenKey(node))
-}
-
-function toggleFolder(id) {
-  const folderId = String(id)
-  const open = new Set(openFolderIds.value)
-  if (open.has(folderId)) {
-    open.delete(folderId)
-  } else {
-    open.add(folderId)
-    ensureFolderItemsLoaded(folderId)
-  }
-  openFolderIds.value = open
-  saveOpenFolderIds(open)
-}
-
-function revealLibraryFolders(folderIds) {
-  const foldersById = new Map(props.libraryFolders.map((folder) => [String(folder.id), folder]))
-  const open = new Set(openFolderIds.value)
-  let changed = false
-  for (const rawId of folderIds || []) {
-    let folderId = String(rawId || '')
-    const visited = new Set()
-    while (folderId && foldersById.has(folderId) && !visited.has(folderId)) {
-      visited.add(folderId)
-      if (!open.has(folderId)) {
-        open.add(folderId)
-        changed = true
-      }
-      folderId = foldersById.get(folderId)?.parent_folder_id
-        ? String(foldersById.get(folderId).parent_folder_id)
-        : ''
-    }
-  }
-  if (changed) {
-    openFolderIds.value = open
-    saveOpenFolderIds(open)
-  }
-}
-
-watch(
-  () => props.revealedLibraryFolderIds,
-  (folderIds) => revealLibraryFolders(folderIds),
-  { immediate: true, deep: true },
-)
-
-function expandUnreadInNode(node) {
-  if (!node?.unreadCount) return
-  if (node.type === 'unread-root') {
-    unreadRootOpen.value = !unreadRootOpen.value
-    return
-  }
-  if (node.type !== 'folder') return
-  const open = new Set(openFolderIds.value)
-  const rootId = String(node.id)
-  const foldersById = new Map(props.libraryFolders.map((folder) => [String(folder.id), folder]))
-  for (const folder of props.libraryFolders) {
-    const folderId = String(folder.id)
-    if (!(folderUnreadCounts.value.get(folderId) || 0)) continue
-    let currentId = folderId
-    const visited = new Set()
-    while (currentId && !visited.has(currentId)) {
-      visited.add(currentId)
-      if (currentId === rootId) {
-        open.add(folderId)
-        break
-      }
-      currentId = foldersById.get(currentId)?.parent_folder_id
-        ? String(foldersById.get(currentId).parent_folder_id)
-        : ''
-    }
-  }
-  openFolderIds.value = open
-  saveOpenFolderIds(open)
-}
-
-// Re-opening the application should restore only the branches the user chose
-// to keep open, and hydrate those branches independently. This never asks for
-// a global article page.
-watch(
-  [
-    () => props.libraryFolders.map((folder) => String(folder.id)).join('|'),
-    () => [...openFolderIds.value].sort().join('|'),
-  ],
-  () => {
-    const knownFolderIds = new Set(props.libraryFolders.map((folder) => String(folder.id)))
-    for (const folderId of openFolderIds.value) {
-      if (knownFolderIds.has(String(folderId))) ensureFolderItemsLoaded(folderId)
-    }
-  },
-  { immediate: true },
-)
-
 function nodeKey(node) {
   if (node.type === 'draft-folder') return node.id
   return `${node.type}:${node.id}`
@@ -898,14 +791,7 @@ function setSelectedKeys(keys) {
 }
 
 function activateNode(event, node) {
-  if (node.type === 'unread-root') {
-    unreadRootOpen.value = !unreadRootOpen.value
-    return
-  }
-  if (node.type === 'pinned-root') {
-    pinnedRootOpen.value = !pinnedRootOpen.value
-    return
-  }
+  if (toggleVirtualRoot(node)) return
   if (node.type === 'unread-content') {
     updateSelection(event, node)
     emit('open-content', node.raw)
@@ -1472,93 +1358,31 @@ function selectRange(fromKey, toKey) {
   padding: 0 4px;
 }
 
-.sidebar-filter,
-.sidebar-file {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  border-radius: var(--vk-radius-control);
-  background: transparent;
-  color: var(--vk-text);
-  text-align: left;
-  cursor: pointer;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .sidebar-node-list-move,
   .sidebar-node-list-enter-active,
-  .sidebar-node-list-leave-active,
-  .sidebar-trash-arrow {
+  .sidebar-node-list-leave-active {
     transition: none;
   }
 
   .sidebar-selection-bar-enter-active,
-  .sidebar-selection-bar-leave-active,
-  .sidebar-trash-list-enter-active,
-  .sidebar-trash-list-leave-active {
+  .sidebar-selection-bar-leave-active {
     transition: opacity var(--vk-motion-fast) ease;
   }
 
   .sidebar-node-list-enter-from,
   .sidebar-node-list-leave-to,
   .sidebar-selection-bar-enter-from,
-  .sidebar-selection-bar-leave-to,
-  .sidebar-trash-list-enter-from,
-  .sidebar-trash-list-leave-to {
+  .sidebar-selection-bar-leave-to {
     transform: none;
   }
 }
 
-.sidebar-file:hover,
-.sidebar-file.active {
-  background: var(--vk-bg-hover);
-}
-
-.sidebar-file.active {
-  color: var(--vk-selected-fg);
-  background: var(--vk-selected-bg);
-}
-
-.sidebar-file {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  margin: 2px 8px 2px 0;
-  padding: 5px 10px;
-  border-radius: 6px;
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease;
-}
-
-.sidebar-file-with-icon {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sidebar-file span {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: inherit;
-  font-size: var(--vk-type-label-size);
-  font-weight: var(--vk-weight-regular);
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-file em,
 .sidebar-empty {
+  padding: 8px 5px;
   color: var(--vk-muted);
   font-size: var(--vk-type-label-size);
   font-style: normal;
-}
-
-.sidebar-empty {
-  padding: 8px 5px;
 }
 
 @media (max-width: 900px) {
