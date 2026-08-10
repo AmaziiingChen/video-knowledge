@@ -109,6 +109,11 @@ lines.
   `features/library/useLibraryContentController.js`. The unreachable legacy
   global recent-window pagination/fallback chain has been retired; the backend
   pagination contract remains unchanged for API compatibility.
+  Debounced link recognition, authenticated ingest submission, durable queue
+  registration, failure projection and input cleanup now live in
+  `features/imports/useLinkIngestController.js`; the former private current-task
+  cancellation path was unreachable and has been removed while queue-owned
+  cancellation remains unchanged.
   The independent trash transaction boundary now lives in
   `features/library/useLibraryTrashController.js`; history snapshots, undo/redo
   and shortcut handling now live in `features/library/useLibraryHistoryController.js`.
@@ -145,7 +150,7 @@ lines.
   mutation transactions (rename, move and recycle-bin deletion) now live in
   `features/library/useLibraryMutationController.js`, preserving optimistic
   updates, rollback, tab cleanup and durable history records. Task runtime,
-  link import and assistant sessions remain in the facade because
+  assistant sessions remain in the facade because
   they still share durable queue state. The active-reader
   EventSource lifecycle now lives in
   `features/tasks/useActiveTaskEventStreamController.js`, retaining task-ID

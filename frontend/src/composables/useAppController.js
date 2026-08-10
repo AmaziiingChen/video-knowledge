@@ -78,6 +78,7 @@ import { useLibraryTrashController } from '../features/library/useLibraryTrashCo
 import { useLibraryMutationController } from '../features/library/useLibraryMutationController.js'
 import { useArticlePreparationController } from '../features/library/useArticlePreparationController.js'
 import { useContentRecoveryController } from '../features/library/useContentRecoveryController.js'
+import { useLinkIngestController } from '../features/imports/useLinkIngestController.js'
 import { useLibraryHistoryController } from '../features/library/useLibraryHistoryController.js'
 import { useMarkdownOutputSettingsController } from '../features/library/useMarkdownOutputSettingsController.js'
 import { useCookieStatusController } from '../features/integrations/useCookieStatusController.js'
@@ -213,11 +214,7 @@ export function useAppController() {
     sortTemplates: sortPromptTemplates,
     askQuestion: (...args) => askQuestion(...args),
   })
-  let inputParseTimer = null
-  let inputParseRequestId = 0
   const openSections = ref(['source', 'timings'])
-  const shareText = ref('')
-  const parsedUrl = ref(null)
   const restoredReportLogs = loadReportLogHistory()
   const reconciledReportLogs = markInterruptedReportLogs(restoredReportLogs)
   if (reconciledReportLogs.length !== restoredReportLogs.length) {
@@ -458,6 +455,31 @@ export function useAppController() {
     addLog: (...args) => addLog(...args),
   })
   const {
+    shareText,
+    parsedUrl,
+    onInputChange,
+    runFullPipeline,
+    dispose: disposeLinkIngestController,
+  } = useLinkIngestController({
+    result,
+    activeStep,
+    running,
+    openSections,
+    useCache,
+    resetRunState,
+    applyTaskData,
+    addLog: (...args) => addLog(...args),
+    addBackendLogs: (...args) => addBackendLogs(...args),
+    recordTelemetry: (...args) => recordTelemetry(...args),
+    registerBatchTask: (...args) => registerBatchTask(...args),
+    hydrateProgressiveTask: (...args) => hydrateProgressiveTask(...args),
+    getProgressiveSnapshot: (taskId) => progressiveTaskSnapshots.get(taskId),
+    pollTask: (...args) => pollTask(...args),
+    getAsrRequestOptions: asrRequestOptions,
+    getAiRequestOptions: aiRequestOptions,
+    notify: ElMessage,
+  })
+  const {
     formatProcessLogTime,
     isActiveTask,
     logTypeFromMessage,
@@ -488,7 +510,7 @@ export function useAppController() {
   const {
     mergeBatchTasks,
     batchTaskName,
-    registerContentRecoveryBatchTask,
+    registerBatchTask,
     stopBatchPolling,
     startTaskQueuePolling,
     stopTaskQueuePolling,
@@ -574,7 +596,7 @@ export function useAppController() {
     loadArticlePreview,
     refreshContentTextReadiness,
     applyTaskData,
-    registerBatchTask: registerContentRecoveryBatchTask,
+    registerBatchTask,
     loadContentItems,
     pollTask,
     pollBatchTasks,
@@ -1397,6 +1419,7 @@ export function useAppController() {
     window.__knowledgeHubRemoveTrayNotificationListener?.()
     delete window.__knowledgeHubRemoveTrayNotificationListener
     disposeArticlePreviews()
+    disposeLinkIngestController()
     stopAiTokenUsagePolling()
     cancelDeferredCookieProbe()
     disposeLibraryContentController()
@@ -1726,116 +1749,6 @@ export function useAppController() {
     } catch (error) {
       // The manifest is optional and update checks must not interrupt startup.
       if (error !== 'cancel' && error?.message !== 'cancel') return
-    }
-  }
-
-  async function onInputChange() {
-    if (inputParseTimer) {
-      clearTimeout(inputParseTimer)
-    }
-    const text = shareText.value.trim()
-    if (!text) {
-      inputParseRequestId += 1
-      parsedUrl.value = null
-      return
-    }
-    inputParseTimer = setTimeout(() => {
-      inputParseTimer = null
-      parseShareText(text)
-    }, 260)
-  }
-
-  async function parseShareText(text) {
-    const requestId = ++inputParseRequestId
-    if (!shareText.value.trim()) {
-      parsedUrl.value = null
-      return
-    }
-    try {
-      const res = await axios.post(`${API}/parse`, { text })
-      if (requestId !== inputParseRequestId || text !== shareText.value.trim()) return
-      if (res.data.success) {
-        parsedUrl.value = { url: res.data.url, platform: res.data.platform }
-        result.url = res.data.url
-        result.platform = res.data.platform
-        activeStep.value = 1
-      } else {
-        parsedUrl.value = null
-      }
-    } catch {
-      parsedUrl.value = null
-    }
-  }
-
-  async function runFullPipeline() {
-    const text = shareText.value.trim()
-    if (!text) {
-      ElMessage.warning('请输入链接')
-      return
-    }
-
-    resetRunState()
-    running.value = true
-    void recordTelemetry('import_started', { input_kind: 'link' })
-
-    addLog('提交任务…', 'info')
-
-    try {
-      const res = await axios.post(`${API}/ingest/link`, {
-        text,
-        mode: 'process',
-        ...asrRequestOptions(),
-        ...aiRequestOptions(),
-        use_cache: useCache.value
-      }, { timeout: 10000 })
-      const data = res.data.task || res.data
-      if (!data?.task_id) throw new Error('链接已识别，但未能创建处理任务')
-      applyTaskData(data)
-      batchTaskNames.value[data.task_id] = res.data.item?.title || data.source_title || text
-      batchTaskIds.value = [...new Set([...batchTaskIds.value, data.task_id])]
-      mergeBatchTasks([data])
-      await hydrateProgressiveTask(data, progressiveTaskSnapshots.get(data.task_id))
-      inputParseRequestId += 1
-      shareText.value = ''
-      parsedUrl.value = null
-      addLog(`任务已创建: ${data.task_id}`, 'success')
-      void recordTelemetry('import_completed', { result: 'accepted' })
-      pollTask(data.task_id)
-    } catch (e) {
-      const detail = e.response?.data?.detail
-      if (detail && typeof detail === 'object') {
-        if (detail.logs) addBackendLogs(detail.logs)
-        if (detail.timings) result.timings = detail.timings
-        addLog(`失败: ${detail.error}`, 'error')
-        openSections.value = ['logs']
-        ElMessage.error(detail.error)
-      } else {
-        const msg = typeof detail === 'string' ? detail : (e.message || '请求失败')
-        addLog(`失败: ${msg}`, 'error')
-        openSections.value = ['logs']
-        ElMessage.error(msg)
-      }
-    } finally {
-      if (!result.task_id) {
-        running.value = false
-      }
-    }
-  }
-
-  async function cancelCurrentTask() {
-    if (!result.task_id) return
-    cancelling.value = true
-    try {
-      const res = await axios.post(`${API}/tasks/${result.task_id}/cancel`, {}, { timeout: 10000 })
-      applyTaskData(res.data)
-      ElMessage.warning('已请求取消')
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || '取消失败'
-      addLog(`取消失败: ${msg}`, 'error')
-      openSections.value = ['logs']
-      ElMessage.error(msg)
-    } finally {
-      cancelling.value = false
     }
   }
 

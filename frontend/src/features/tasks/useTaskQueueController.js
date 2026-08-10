@@ -86,7 +86,7 @@ export function useTaskQueueController({
       || `任务 ${task.task_id}`
   }
 
-  function registerContentRecoveryBatchTask(task, item, { merge = true, allowSourceUrlFallback = true } = {}) {
+  function registerBatchTask(task, item, { merge = true, allowSourceUrlFallback = true } = {}) {
     const taskId = task?.task_id
     if (!taskId) return
     batchTaskNames.value[taskId] = item?.title || (allowSourceUrlFallback ? item?.source_url : '') || `任务 ${taskId}`
@@ -290,7 +290,7 @@ export function useTaskQueueController({
   return {
     mergeBatchTasks,
     batchTaskName,
-    registerContentRecoveryBatchTask,
+    registerBatchTask,
     stopBatchPolling,
     startTaskQueuePolling,
     stopTaskQueuePolling,
