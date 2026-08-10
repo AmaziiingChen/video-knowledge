@@ -73,6 +73,9 @@ lines.
   budget and API-facing entry point remain in the index orchestrator. Source
   set listing, paged ready-document projection, strict selection validation and
   query-readiness statistics now live in `services/knowledge_source_catalog.py`.
+  Source-scoped, durable Markdown loading now lives in
+  `services/knowledge_source_loader.py` and reuses the canonical bound scope
+  predicate before reading any local file.
 - [ ] Split `campus_digest_generation.py` by source identity, event clustering,
   fact extraction and editorial-generation responsibilities. Pure source URL
   canonicalization, identity normalization, hashing and text-shingle similarity

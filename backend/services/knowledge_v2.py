@@ -8,21 +8,20 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Iterator
 
 from config import settings
 
 from services.ai_call_logger import record_ai_call
-from services.database import connect, ensure_database_initialized, utc_now_iso
+from services.database import connect, utc_now_iso
 from services.knowledge_chunking import (
     CHILD_MAX_TOKENS,  # noqa: F401 - compatibility re-export
     CHILD_TARGET_TOKENS,  # noqa: F401 - compatibility re-export
     PARENT_MAX_TOKENS,  # noqa: F401 - compatibility re-export
     ParentChunk,  # noqa: F401 - compatibility re-export
     SourceBlock,  # noqa: F401 - compatibility re-export
-    clean_source_markdown,
+    clean_source_markdown,  # noqa: F401 - compatibility re-export
     estimate_tokens,
     structural_chunks,
 )
@@ -53,6 +52,7 @@ from services.knowledge_source_catalog import (
     scope_readiness,
     validate_source_document_ids,  # noqa: F401 - compatibility re-export
 )
+from services.knowledge_source_loader import source_documents
 from services.knowledge_index_storage import (
     CHUNKER_VERSION,
     insert_chunk as _insert_chunk,
@@ -150,51 +150,6 @@ def _knowledge_llm_provider(model: str):
             return default_llm_provider()
         except TypeError:
             raise model_error
-
-
-def source_documents(
-    *,
-    source_specs: Iterable[tuple[str, str]] | None = None,
-    content_item_ids: Iterable[str] | None = None,
-) -> list[dict[str, object]]:
-    """Read only already materialized source Markdown, scoped before indexing."""
-    specs = [(provider.strip(), name.strip()) for provider, name in (source_specs or ()) if provider.strip() and name.strip()]
-    ids = [str(item).strip() for item in (content_item_ids or ()) if str(item).strip()]
-    clauses = ["content.deleted_at IS NULL"]
-    params: list[object] = []
-    if specs:
-        spec_clauses = []
-        for provider, name in specs:
-            spec_clauses.append("(content.source_provider=? AND content.source_name=?)")
-            params.extend((provider, name))
-        clauses.append("(" + " OR ".join(spec_clauses) + ")")
-    if ids:
-        clauses.append("content.id IN (" + ",".join("?" for _ in ids) + ")")
-        params.extend(ids)
-    ensure_database_initialized()
-    with connect() as db:
-        rows = db.execute(
-            f"""
-            SELECT content.id AS content_item_id, content.title, content.source_provider,
-                   content.source_name, content.source_url, content.published_at,
-                   content.created_at, document.markdown_path
-            FROM content_documents AS document
-            JOIN content_items AS content ON content.id = document.content_item_id
-            WHERE {' AND '.join(clauses)}
-            ORDER BY COALESCE(content.published_at, content.created_at) DESC, content.id
-            """,
-            params,
-        ).fetchall()
-    documents: list[dict[str, object]] = []
-    for row in rows:
-        path = Path(str(row["markdown_path"] or ""))
-        try:
-            markdown = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        if clean_source_markdown(markdown):
-            documents.append(dict(row) | {"markdown": markdown})
-    return documents
 
 
 def rebuild_documents(
