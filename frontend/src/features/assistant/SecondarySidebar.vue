@@ -365,17 +365,9 @@ const props = defineProps({
     type: Object,
     default: null
   },
-  currentObsidianPath: {
-    type: String,
-    default: ''
-  },
   conversationKey: {
     type: String,
     default: ''
-  },
-  markdownState: {
-    type: Object,
-    required: true
   },
   contentAnalysisTemplates: {
     type: Array,
@@ -453,30 +445,6 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  lastQaSaved: {
-    type: Boolean,
-    default: false
-  },
-  taskStatus: {
-    type: String,
-    default: 'idle'
-  },
-  hasTaskProgress: {
-    type: Boolean,
-    default: false
-  },
-  currentStageLabel: {
-    type: String,
-    default: ''
-  },
-  result: {
-    type: Object,
-    required: true
-  },
-  totalElapsed: {
-    type: Number,
-    default: null
-  },
   selectedAiModel: {
     type: String,
     default: 'deepseek-v4-flash:enabled'
@@ -488,49 +456,18 @@ const props = defineProps({
       { value: 'deepseek-v4-pro:enabled', label: 'V4 Pro Thinking' }
     ]
   },
-  markdownSyncLabel: {
-    type: Function,
-    required: true
-  },
   renderMarkdown: {
-    type: Function,
-    required: true
-  },
-  statusTagType: {
-    type: Function,
-    required: true
-  },
-  statusLabel: {
-    type: Function,
-    required: true
-  },
-  modelLabel: {
-    type: Function,
-    required: true
-  },
-  formatSeconds: {
-    type: Function,
-    required: true
-  },
-  roundedProgress: {
-    type: Function,
-    required: true
-  },
-  progressStatus: {
     type: Function,
     required: true
   }
 })
 
 const emit = defineEmits([
-  'open-markdown',
-  'copy-link',
   'update:questionInput',
   'update:selectedAiModel',
   'new-chat',
   'generate-ai-summary',
   'ask-question',
-  'clear-selected-text-context',
   'load-more-qa-history',
   'retry-qa-history',
   'insert-shortcut',
@@ -862,27 +799,6 @@ onBeforeUnmount(() => {
   transform: translateY(4px);
 }
 
-.assistant-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 22px;
-  color: var(--vk-text);
-  font-size: var(--vk-type-label-size);
-  font-weight: var(--vk-weight-strong);
-  letter-spacing: var(--vk-tracking-meta);
-}
-
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  color: var(--vk-muted);
-  font-size: var(--vk-type-label-size);
-  font-weight: var(--vk-weight-medium);
-}
-
 .insight-summary {
   color: var(--vk-text);
   font-size: var(--vk-type-body-size);
@@ -946,8 +862,7 @@ onBeforeUnmount(() => {
   line-height: var(--vk-leading-body);
 }
 
-.assistant-message-selection,
-.assistant-selected-context {
+.assistant-message-selection {
   display: flex;
   align-items: center;
   min-width: 0;
@@ -961,15 +876,13 @@ onBeforeUnmount(() => {
   margin-top: 6px;
 }
 
-.assistant-message-selection strong,
-.assistant-selected-context-label {
+.assistant-message-selection strong {
   flex: 0 0 auto;
   color: var(--vk-accent-strong);
   font-weight: var(--vk-weight-strong);
 }
 
-.assistant-message-selection span,
-.assistant-selected-context-copy {
+.assistant-message-selection span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1346,11 +1259,6 @@ onBeforeUnmount(() => {
 
 }
 
-@keyframes assistant-loading-fade {
-  from { opacity: 0.5; }
-  to { opacity: 0.85; }
-}
-
 .assistant-shortcut-suggestions {
   position: absolute;
   right: 8px;
@@ -1573,28 +1481,8 @@ onBeforeUnmount(() => {
   overflow-y: hidden;
 }
 
-.assistant-selected-context {
-  min-height: 18px;
-  padding: 0 2px;
-}
-
 .assistant-question-textarea::placeholder {
   color: color-mix(in srgb, var(--vk-muted) 68%, transparent);
-}
-
-.insight-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.insight-meta span {
-  padding: 5px 7px;
-  border: 1px solid var(--vk-border);
-  border-radius: var(--vk-radius-control);
-  color: var(--vk-muted);
-  background: var(--vk-bg-panel);
-  font-size: var(--vk-type-label-size);
 }
 
 @media (prefers-reduced-transparency: reduce) {

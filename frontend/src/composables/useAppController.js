@@ -122,7 +122,6 @@ export function useAppController() {
     applyMarkdownState,
     resetMarkdownState,
     loadMarkdownForItem,
-    openMarkdownDialog,
     saveMarkdownDraft,
     syncMarkdownDraft,
   } = useMarkdownDocumentController({
@@ -761,7 +760,6 @@ export function useAppController() {
 
   const {
     activeSelectedTextContext,
-    clearSelectedTextContext,
     removeSelectedTextContextToken,
     setSelectedTextContext,
   } = useSelectedTextContext({
@@ -1211,7 +1209,6 @@ export function useAppController() {
     loadContentAiCalls,
     loadAiTokenUsageSummary,
     runContentAnalysis,
-    openMarkdownDialog,
     saveMarkdownDraft,
     syncMarkdownDraft,
     loadPromptTemplates,
@@ -1239,7 +1236,6 @@ export function useAppController() {
     runFullPipeline,
     insertQaShortcut,
     setSelectedTextContext,
-    clearSelectedTextContext,
     askQuestion,
     copyQaExchange,
     regenerateQaAnswer,

@@ -214,8 +214,10 @@ lines.
   `features/assistant/assistantPresentation.js` with pure boundary tests;
   conversation follow mode, history prepend position restoration and timestamp
   jumps now live in `features/assistant/useConversationScrollController.js`
-  with injected-scheduler behavior tests; menus and composer focus/resize
-  remain local UI behavior.
+  with injected-scheduler behavior tests. Fifteen unused task/Markdown status
+  props, three never-emitted events and their dead scoped styles have been
+  retired from the sidebar and root-controller facade contracts; menus and
+  composer focus/resize remain local UI behavior.
 - [ ] Split `EditorHost.vue` into report, article, media/transcript and remote
   readers; each reader receives a mounted behavior test. Remote original-page
   lifecycle now lives in `workbench/useRemoteArticlePreviewController.js`: it

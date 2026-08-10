@@ -452,9 +452,7 @@
             :current-insight-html="currentInsightHtml"
             :current-insight-title="currentInsightTitle"
             :content-context="activeWorkspaceContent || selectedContentItem"
-            :current-obsidian-path="currentObsidianPath"
             :conversation-key="activeWorkspaceContent?.id || result.content_item_id || ''"
-            :markdown-state="markdownState"
             :content-analysis-templates="contentAnalysisTemplates"
             :qa-history="qaHistory"
             :qa-history-loading="qaHistoryLoading"
@@ -472,29 +470,13 @@
             :current-qa-hint="currentQaHint"
             :can-generate-ai-summary="canGenerateAiSummary"
             :exporting-markdown="exportingConversationMarkdown"
-            :last-qa-saved="lastQaSaved"
-            :task-status="taskStatus"
-            :has-task-progress="hasTaskProgress"
-            :current-stage-label="currentStageLabel"
-            :result="result"
-            :total-elapsed="totalElapsed"
             :selected-ai-model="assistantAiModel"
             :available-ai-models="availableAiModels"
-            :markdown-sync-label="markdownSyncLabel"
             :render-markdown="renderMarkdown"
-            :status-tag-type="statusTagType"
-            :status-label="statusLabel"
-            :model-label="modelLabel"
-            :format-seconds="formatSeconds"
-            :rounded-progress="roundedProgress"
-            :progress-status="progressStatus"
-            @open-markdown="openMarkdownDialog"
-            @copy-link="copyText($event, '链接已复制')"
             @update:selected-ai-model="assistantAiModel = $event"
             @new-chat="startNewChat"
             @generate-ai-summary="generateAiSummary"
             @ask-question="askQuestion"
-            @clear-selected-text-context="clearSelectedTextContext"
             @load-more-qa-history="loadMoreContentQaHistory"
             @retry-qa-history="retryContentQaHistory"
             @insert-shortcut="insertQaShortcut"
@@ -1084,7 +1066,6 @@ const {
   loadContentAiCalls,
   loadAiTokenUsageSummary,
   runContentAnalysis,
-  openMarkdownDialog,
   clearLogs,
   addLog,
   saveMarkdownDraft,
@@ -1116,7 +1097,6 @@ const {
   runFullPipeline,
   insertQaShortcut,
   setSelectedTextContext,
-  clearSelectedTextContext,
   prioritizeCurrentArticleOcr,
   askQuestion,
   copyQaExchange,
