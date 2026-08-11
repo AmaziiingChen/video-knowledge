@@ -3,7 +3,7 @@
     <a class="skip-link" href="#main-workspace">跳到主内容</a>
     <header v-if="isSinglePaneWorkspaceView(activeView)" class="topbar is-single-pane-topbar">
       <div class="brand">
-        <div class="brand-mark">KH</div>
+        <img class="brand-mark" :src="appIconUrl" width="22" height="22" alt="" aria-hidden="true" draggable="false" />
         <h1>KnowledgeHub</h1>
       </div>
 
@@ -827,6 +827,7 @@ import PanelToggleIcon from './components/PanelToggleIcon.vue'
 import StatusBreadcrumb from './components/StatusBreadcrumb.vue'
 import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
 import TelemetryConsentNotice from './components/TelemetryConsentNotice.vue'
+import appIconUrl from '../build/icon.svg?url'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
 const TELEMETRY_NOTICE_STORAGE_KEY = 'knowledgehub:telemetry-notice-version'

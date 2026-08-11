@@ -154,7 +154,7 @@
   --vk-reader-size: 0.9375rem;
   --vk-reader-leading: 1.78;
   --vk-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-  --vk-font-brand: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --vk-font-brand: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, monospace;
   --vk-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --vk-radius-structural: 12px;
   --vk-radius-compact: 4px;
@@ -1186,18 +1186,11 @@
 }
 
 .brand-mark {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
+  width: 22px;
+  height: 22px;
+  display: block;
   flex: 0 0 auto;
-  border-radius: 4px;
-  background: var(--vk-bg-hover);
-  color: var(--vk-text);
-  font-family: var(--vk-font-mono);
-  font-size: var(--vk-type-micro-size);
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  border-radius: var(--vk-radius-compact);
 }
 
 .brand h1 {
@@ -1207,10 +1200,10 @@
   color: var(--vk-text);
   font-family: var(--vk-font-brand);
   font-size: var(--vk-type-heading-size);
-  font-style: italic;
-  font-weight: 500;
+  font-style: normal;
+  font-weight: var(--vk-weight-medium);
   line-height: 1.05;
-  letter-spacing: var(--vk-tracking-heading);
+  letter-spacing: -0.03em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
