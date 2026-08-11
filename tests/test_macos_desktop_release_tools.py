@@ -109,6 +109,28 @@ def test_idle_process_tree_and_aggregation():
     assert summary["disk_read_bytes_per_second"] == {"average": 4.0, "peak": 6.0}
 
 
+def test_idle_process_rows_use_macos_supported_columns(monkeypatch):
+    calls: list[list[str]] = []
+
+    class Result:
+        stdout = " 10 1 1.5 256 /Applications/KnowledgeHub.app/Contents/MacOS/KnowledgeHub\n"
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return Result()
+
+    monkeypatch.setattr(idle.subprocess, "run", run)
+
+    assert idle.process_rows() == [{
+        "pid": 10,
+        "ppid": 1,
+        "cpu_percent": 1.5,
+        "rss_bytes": 256 * 1024,
+        "command": "/Applications/KnowledgeHub.app/Contents/MacOS/KnowledgeHub",
+    }]
+    assert calls == [["ps", "-axo", "pid=,ppid=,pcpu=,rss=,comm="]]
+
+
 def test_idle_rejects_invalid_sampling_parameters(tmp_path):
     with pytest.raises(ValueError, match="必须有效"):
         idle.run_measurement(tmp_path, warmup_seconds=0, sample_seconds=0, interval_seconds=5)

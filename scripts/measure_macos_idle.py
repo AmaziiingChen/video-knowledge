@@ -39,22 +39,36 @@ class RusageInfoV2(ctypes.Structure):
     ]
 
 
+class ProcTaskInfo(ctypes.Structure):
+    _fields_ = [
+        ("virtual_size", ctypes.c_uint64), ("resident_size", ctypes.c_uint64),
+        ("total_user", ctypes.c_uint64), ("total_system", ctypes.c_uint64),
+        ("threads_user", ctypes.c_uint64), ("threads_system", ctypes.c_uint64),
+        ("policy", ctypes.c_int32), ("faults", ctypes.c_int32),
+        ("pageins", ctypes.c_int32), ("cow_faults", ctypes.c_int32),
+        ("messages_sent", ctypes.c_int32), ("messages_received", ctypes.c_int32),
+        ("syscalls_mach", ctypes.c_int32), ("syscalls_unix", ctypes.c_int32),
+        ("csw", ctypes.c_int32), ("threadnum", ctypes.c_int32),
+        ("numrunning", ctypes.c_int32), ("priority", ctypes.c_int32),
+    ]
+
+
 def process_rows() -> list[dict[str, object]]:
     result = subprocess.run(
-        ["ps", "-axo", "pid=,ppid=,pcpu=,rss=,thcount=,comm="],
+        ["ps", "-axo", "pid=,ppid=,pcpu=,rss=,comm="],
         check=True,
         capture_output=True,
         text=True,
     )
     rows: list[dict[str, object]] = []
     for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=5)
-        if len(fields) != 6:
+        fields = line.split(maxsplit=4)
+        if len(fields) != 5:
             continue
         try:
             rows.append({
                 "pid": int(fields[0]), "ppid": int(fields[1]), "cpu_percent": float(fields[2]),
-                "rss_bytes": int(fields[3]) * 1024, "threads": int(fields[4]), "command": fields[5],
+                "rss_bytes": int(fields[3]) * 1024, "command": fields[4],
             })
         except ValueError:
             continue
@@ -90,6 +104,20 @@ def process_io(pid: int) -> tuple[int, int]:
     return int(usage.diskio_bytesread), int(usage.diskio_byteswritten)
 
 
+def process_thread_count(pid: int) -> int:
+    if platform.system() != "Darwin":
+        raise RuntimeError("待机资源采样只支持 macOS")
+    library = ctypes.CDLL("/usr/lib/libproc.dylib")
+    function = library.proc_pidinfo
+    function.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    function.restype = ctypes.c_int
+    task = ProcTaskInfo()
+    size = ctypes.sizeof(task)
+    if function(pid, 4, 0, ctypes.byref(task), size) != size:
+        raise OSError(ctypes.get_errno(), f"无法读取进程 {pid} 的线程数")
+    return int(task.threadnum)
+
+
 def sample(root_pid: int, previous_io: dict[int, tuple[int, int]]) -> tuple[dict[str, object], dict[int, tuple[int, int]]]:
     rows = descendant_rows(root_pid, process_rows())
     if not rows:
@@ -100,18 +128,31 @@ def sample(root_pid: int, previous_io: dict[int, tuple[int, int]]) -> tuple[dict
     process_entries: list[dict[str, object]] = []
     for row in rows:
         pid = int(row["pid"])
-        read, written = process_io(pid)
+        try:
+            threads = process_thread_count(pid)
+            read, written = process_io(pid)
+        except OSError:
+            # Chromium helper processes can exit between the process snapshot
+            # and libproc reads. Exclude that stale row from this sample.
+            continue
         previous_read, previous_written = previous_io.get(pid, (read, written))
         disk_read_delta += max(0, read - previous_read)
         disk_write_delta += max(0, written - previous_written)
         current_io[pid] = (read, written)
-        process_entries.append({**row, "disk_read_bytes": read, "disk_write_bytes": written})
+        process_entries.append({
+            **row,
+            "threads": threads,
+            "disk_read_bytes": read,
+            "disk_write_bytes": written,
+        })
+    if not process_entries:
+        raise RuntimeError("桌面进程树在待机采样期间消失")
     return ({
         "at": time.time(),
         "processes": process_entries,
-        "cpu_percent": round(sum(float(row["cpu_percent"]) for row in rows), 3),
-        "rss_bytes": sum(int(row["rss_bytes"]) for row in rows),
-        "threads": sum(int(row["threads"]) for row in rows),
+        "cpu_percent": round(sum(float(row["cpu_percent"]) for row in process_entries), 3),
+        "rss_bytes": sum(int(row["rss_bytes"]) for row in process_entries),
+        "threads": sum(int(row["threads"]) for row in process_entries),
         "disk_read_delta_bytes": disk_read_delta,
         "disk_write_delta_bytes": disk_write_delta,
     }, current_io)

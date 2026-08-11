@@ -47,7 +47,11 @@ lines.
   tree's CPU, RSS, thread count and disk read/write activity after fixed warm-up
   and sampling windows. `scripts/measure_macos_idle.py` records a first baseline
   only; it establishes no invented release threshold and still requires an RC
-  sample from a fresh packaged candidate.
+  sample from a fresh packaged candidate. The first physical RC attempt proved
+  that macOS 26 no longer exposes the assumed `ps thcount` keyword. Process
+  discovery now uses supported `ps` columns, while current thread counts come
+  from `libproc` task information; a direct macOS probe and behavior regression
+  cover that release-tool compatibility fix.
 
 ## RC verification required
 
