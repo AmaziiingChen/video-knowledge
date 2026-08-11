@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -172,6 +173,9 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     release_manifest_url: str = ""
     download_page_url: str = ""
+    # The public collector is compiled as an exact-host allowlist in
+    # telemetry_uploader. Empty keeps every release completely offline.
+    telemetry_collector_url: str = ""
 
 settings = Settings()
 ensure_private_data_directory(settings.data_dir)

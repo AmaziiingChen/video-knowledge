@@ -30,6 +30,13 @@ def test_telemetry_requires_the_current_notice_and_sanitizes_unknown_enum_values
             telemetry.record("task_finished", {"error": "a user URL must never be stored"})
         payloads = telemetry.event_payloads_for_upload()
         assert payloads[-1]["properties"] == {"result": "failed", "stage": "other"}
+        batch = telemetry.upload_batch()
+        assert batch is not None
+        assert batch["installation_id"]
+        assert all("installation_id" not in event for event in batch["events"])
+        first_event_id = str(batch["events"][0]["event_id"])
+        assert telemetry.acknowledge_uploaded_events([first_event_id, "missing-event"]) == 1
+        assert telemetry.status()["pending_events"] == 1
         assert telemetry.set_enabled(False) == {
             "enabled": False,
             "pending_events": 0,

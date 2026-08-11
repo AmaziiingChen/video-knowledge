@@ -27,7 +27,9 @@ test('accepts only the versioned, fixed telemetry schema and stores no request m
   assert.equal(response.status, 202)
   assert.deepEqual(await response.json(), { accepted: 1 })
   assert.equal(writes.length, 1)
-  assert.deepEqual(writes[0].blobs.slice(0, 4), ['workspace_opened', '0.1.0', 'macos', 'arm64'])
+  assert.deepEqual(writes[0].blobs.slice(0, 5), [
+    '66195774-659b-4c7e-9bd5-bebf8021e6f5', 'workspace_opened', '0.1.0', 'macos', 'arm64',
+  ])
   assert.match(writes[0].indexes[0], /^\d{4}-\d{2}:[0-9a-f]{24}$/)
 })
 

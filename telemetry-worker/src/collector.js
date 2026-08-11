@@ -80,7 +80,7 @@ export async function handleTelemetryRequest(request, env) {
   const index = await monthlyInstallationIndex(payload.installation_id, env.INSTALLATION_HMAC_KEY)
   for (const event of payload.events) {
     env.TELEMETRY.writeDataPoint({
-      blobs: [event.event_name, event.app_version, event.platform, String(event.architecture || 'other'), JSON.stringify(event.properties)],
+      blobs: [event.event_id, event.event_name, event.app_version, event.platform, String(event.architecture || 'other'), JSON.stringify(event.properties)],
       doubles: [Number(event.schema_version || SCHEMA_VERSION), Number(event.os_major || 0)],
       indexes: [index],
     })

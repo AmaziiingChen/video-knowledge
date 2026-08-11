@@ -31,6 +31,7 @@ def _patch_lifecycle_dependencies(monkeypatch):
     monkeypatch.setattr(application_lifecycle, "connect", lambda: nullcontext(Mock()))
     monkeypatch.setattr(application_lifecycle.telemetry_service, "record", Mock())
     monkeypatch.setattr(application_lifecycle.telemetry_service, "flush", Mock())
+    monkeypatch.setattr(application_lifecycle, "telemetry_uploader", Mock())
     monkeypatch.setattr(application_lifecycle.miniprogram_forum_collector, "recover_stale_runs", Mock())
     monkeypatch.setattr(application_lifecycle, "wechat_subscription_service", Mock(recover_interrupted_initial_syncs=Mock(return_value=[])))
     for name in (
@@ -71,6 +72,7 @@ def test_application_lifecycle_resumes_pending_article_preparation_once(monkeypa
 
     application_lifecycle.start_article_source_preparation.assert_called_once_with()
     application_lifecycle.enqueue_pending_article_preparation.assert_called_once_with()
+    application_lifecycle.telemetry_uploader.start.assert_called_once_with()
 
 
 def test_application_lifecycle_stops_article_preparation_after_producers(monkeypatch):
@@ -79,6 +81,7 @@ def test_application_lifecycle_stops_article_preparation_after_producers(monkeyp
     asyncio.run(application_lifecycle.stop_application())
 
     application_lifecycle.shutdown_article_source_preparation.assert_called_once_with(wait=True)
+    application_lifecycle.telemetry_uploader.stop.assert_called_once_with()
 
 
 def test_disabled_favorite_scheduler_never_creates_a_thread(monkeypatch):

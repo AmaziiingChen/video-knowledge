@@ -18,6 +18,9 @@ free-form properties.
    Deployment is intentionally not part of GitHub Actions.
 4. Configure the desktop collector URL only in a reviewed release build. A
    blank URL means the app keeps its local queue and sends no network request.
+   The same release commit must add that exact hostname to
+   `backend/services/telemetry_uploader.py`; an environment override alone
+   cannot enable a destination.
 5. Configure a Cloudflare WAF rate limit for this endpoint. Treat analytics
    only as diagnostic signals, never as billing, identity, security, or
    abuse-decision evidence.

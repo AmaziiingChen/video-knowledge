@@ -518,11 +518,23 @@ data-integrity, ownership-conflict or test-isolation blocker.
   orchestration. Further report normalization or writing splits are deferred
   unless stabilization evidence proves that they block correctness, testing or
   release work.
+- [x] Close the consented telemetry upload boundary without enabling a network
+  destination. The desktop uploader batches only the fixed local schema, accepts
+  only an exact HTTPS host compiled into the same reviewed release, disables
+  redirects and environment proxies, retains events after failures, deletes only
+  acknowledged event IDs and uses a 12-hour interval during healthy or empty
+  operation, with bounded exponential retry after failures.
+  With both the source allowlist and collector URL empty, arbitrary environment
+  overrides cannot create a thread or request. Direct backend and Worker tests,
+  the complete backend regression, dependency audits, architecture budget and
+  public-tree scan pass for this boundary.
 - [ ] Keep the telemetry collector undeployed until an approved HTTPS hostname,
   data-processing owner, retention notice and Cloudflare account authorization
-  are recorded. The checked-in Worker accepts only the fixed opt-in schema;
-  the desktop release keeps its collector URL blank and therefore makes no
-  telemetry network request.
+  are recorded. Domain selection, DNS, Worker deployment and production
+  allowlist/URL activation explicitly stop here for this release-candidate
+  cycle. The checked-in Worker accepts only the fixed opt-in schema; the desktop
+  release keeps its collector URL blank and therefore makes no telemetry network
+  request.
 
 ## Non-negotiable compatibility checks
 

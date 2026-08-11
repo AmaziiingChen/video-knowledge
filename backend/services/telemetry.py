@@ -260,7 +260,7 @@ def record(event_name: str, properties: dict[str, Any] | None = None) -> bool:
 
 
 def event_payloads_for_upload(limit: int = 100) -> list[dict[str, object]]:
-    """Expose sanitized queue payloads to a future official HTTPS uploader only."""
+    """Expose sanitized queue payloads to the official HTTPS uploader only."""
     if not _path().exists():
         return []
     flush()
@@ -287,3 +287,34 @@ def event_payloads_for_upload(limit: int = 100) -> list[dict[str, object]]:
         }
         for row in rows
     ]
+
+
+def upload_batch(limit: int = 100) -> dict[str, object] | None:
+    events = event_payloads_for_upload(limit=limit)
+    if not events:
+        return None
+    installation_id = str(events[0].pop("installation_id"))
+    for event in events[1:]:
+        event.pop("installation_id", None)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "privacy_notice_version": PRIVACY_NOTICE_VERSION,
+        "installation_id": installation_id,
+        "events": events,
+    }
+
+
+def acknowledge_uploaded_events(event_ids: list[str]) -> int:
+    """Delete only event IDs confirmed by the official collector."""
+    normalized = tuple(dict.fromkeys(str(event_id) for event_id in event_ids if event_id))
+    if not normalized:
+        return 0
+    placeholders = ",".join("?" for _ in normalized)
+    with _lock:
+        if not _path().exists():
+            return 0
+        with _connect() as connection:
+            if not _current_consent(connection):
+                return 0
+            cursor = connection.execute(f"DELETE FROM telemetry_events WHERE id IN ({placeholders})", normalized)
+            return max(0, int(cursor.rowcount))

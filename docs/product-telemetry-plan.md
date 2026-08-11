@@ -2,7 +2,7 @@
 
 版本：v1.0（方案）  
 日期：2026-07-25  
-状态：本机同意与队列已实现；Cloudflare 收集器待正式域名、数据处理方与部署授权确认
+状态：本机同意、队列和默认禁用的上传器已实现；Cloudflare 收集器待正式域名、数据处理方与部署授权确认
 
 ## 1. 决策摘要
 
@@ -10,7 +10,7 @@ KnowledgeHub 发布后应引入**隐私优先、用户可控、默认不开启�
 
 第一期不接入第三方行为分析 SDK。应用在本机先写入一个独立、可删除的遥测队列；只有用户主动允许“发送匿名使用数据”后，才通过 HTTPS 批量发送已脱敏事件到官方收集端。这样既保留本机优先的产品承诺，也能得到发布后最有价值的质量与使用信号。
 
-当前代码已经实现固定事件目录、严格枚举、14 天/10,000 条本机队列上限、非模态说明和同意版本边界。`telemetry-worker/` 提供 Cloudflare Worker + Workers Analytics Engine 的收集器源码，但正式包的收集地址仍为空，因此当前不会上传任何数据。
+当前代码已经实现固定事件目录、严格枚举、14 天/10,000 条本机队列上限、非模态说明、同意版本边界及低频批量上传器。上传器仅接受源码白名单中的精确 HTTPS 主机，禁用代理和重定向，失败时保留队列并指数退避。`telemetry-worker/` 提供 Cloudflare Worker + Workers Analytics Engine 的收集器源码，但正式主机白名单和收集地址仍为空，因此当前不会启动上传线程或发送任何请求。
 
 ## 2. 目标、非目标与成功标准
 
@@ -87,10 +87,12 @@ Vue / Electron / FastAPI 产生预定义事件
 
 | 位置 | 职责 |
 | --- | --- |
-| `backend/services/telemetry.py` | 字段校验、SQLite 队列、保留清理、批量上传与退避 |
+| `backend/services/telemetry.py` | 字段校验、SQLite 队列、保留清理、批次构造与成功确认删除 |
+| `backend/services/telemetry_uploader.py` | 精确目的地校验、低频上传、失败退避和应用生命周期 |
 | `backend/routers/telemetry.py` | 仅本机可访问的设置、状态、事件写入、清除接口 |
 | `backend/services/database.py` | 仅增加遥测设置迁移；事件队列使用独立数据库 |
-| `backend/main.py` | 启动/停止上传器，注册本机遥测路由 |
+| `backend/services/application_lifecycle.py` | 随桌面后端生命周期启动/停止上传器 |
+| `backend/main.py` | 注册本机遥测路由并继承桌面 API 能力边界 |
 | `frontend/src/services/telemetry.js` | 前端事件目录与调用门面；禁止业务组件直接网络上报 |
 | `frontend/src/components/SettingsDialog.vue` | “隐私与诊断”设置页；沿用既有圆角 token 与设置页结构 |
 | `frontend/electron/main.cjs` / `preload.cjs` | 主进程启动、渲染器失效和早期暂存；通过窄 IPC 暴露，禁止任意字段透传 |
@@ -241,7 +243,7 @@ Vue / Electron / FastAPI 产生预定义事件
 
 ### Phase 1：本地闭环（不上传）
 
-- 已实现事件目录、枚举收敛、独立队列、设置页及非模态同意说明，默认关闭。
+- 已实现事件目录、枚举收敛、独立队列、设置页、非模态同意说明及默认禁用的低频上传器。
 - 为启动、任务流水线、错误分类、下载、转写、AI、搜索、更新和 Obsidian 同步接入 20 个高价值事件。
 - 已完成本地单元测试和“未知字段不得入队、未知枚举归为 other、隐私说明版本变化会丢弃旧队列”的回归测试。
 

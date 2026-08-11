@@ -33,6 +33,7 @@ from services.report_group_scheduler import report_group_scheduler
 from services.rss_scheduler import rss_subscription_scheduler
 from services.search_index_scheduler import search_index_scheduler
 from services.task_manager import task_manager
+from services.telemetry_uploader import telemetry_uploader
 from services.watcher_restore import restore_enabled_watchers, stop_watchers
 from services.wechat_draft_tasks import wechat_draft_task_manager
 from services.wechat_public_scheduler import wechat_public_album_scheduler
@@ -78,6 +79,7 @@ async def start_application() -> None:
     # once after database/index repair when a previous desktop session ended.
     start_article_source_preparation()
     enqueue_pending_article_preparation()
+    telemetry_uploader.start()
     if settings.miniprogram_forum_capture_enabled:
         miniprogram_forum_scheduler.start()
     task_manager.recover_from_database()
@@ -113,6 +115,7 @@ async def start_application() -> None:
 
 
 async def stop_application() -> None:
+    telemetry_uploader.stop()
     telemetry_service.flush()
     stop_watchers()
     openclaw_notification_scheduler.stop()
