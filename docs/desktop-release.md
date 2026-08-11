@@ -48,4 +48,4 @@ xattr -dr com.apple.quarantine "/Applications/KnowledgeHub.app"
 - 运行 `python scripts/check_public_release_tree.py`，确认没有本机资料、报告或常见凭据进入公开树和将要发布的分支/标签历史。
 - 使用明确的分支和标签推送；不要使用 `git push --mirror`。本机的恢复与开发工具引用不属于发布面。
 - 公开版保持 `MINIPROGRAM_FORUM_CAPTURE_ENABLED=false`；不发布微信小程序视觉采集。
-- 若启用封闭测试遥测，必须由测试者在“设置 → 隐私与诊断”主动开启；不配置收集端时只保留受限本机队列。
+- 若启用封闭测试遥测，必须由测试者在非模态说明或“设置 → 隐私与诊断”主动开启；不配置收集端时只保留受限本机队列。手动替换 DMG 会保留已有同意；一旦遥测字段或用途变化，必须提升隐私说明版本、清除旧队列并重新征求同意。

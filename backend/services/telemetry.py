@@ -6,13 +6,12 @@ import json
 import platform
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock, Timer
 from typing import Any
 
 from config import settings
-
 
 EVENT_FIELDS: dict[str, frozenset[str]] = {
     "app_started": frozenset(),
@@ -35,6 +34,28 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
     "asr_completed": frozenset({"backend", "result", "duration_bucket"}),
     "ai_summary_completed": frozenset({"result", "duration_bucket"}),
     "export_completed": frozenset({"export_kind", "result"}),
+}
+
+# A notice version is a consent boundary, not a cosmetic copy revision.  New
+# events or fields must advance it, which makes an installed older consent
+# inactive until the person has read the updated, non-modal notice.
+SCHEMA_VERSION = 1
+PRIVACY_NOTICE_VERSION = "2026-08-telemetry-v1"
+MAX_PENDING_EVENTS = 10_000
+MAX_EVENT_AGE_DAYS = 14
+
+_ENUM_VALUES: dict[str, frozenset[str]] = {
+    "action": frozenset({"retry", "pause", "resume", "cancel"}),
+    "backend": frozenset({"faster_whisper", "mlx", "other"}),
+    "duration_bucket": frozenset({"0_1m", "1_10m", "10_60m", "60m_plus", "other"}),
+    "export_kind": frozenset({"markdown", "other"}),
+    "input_kind": frozenset({"link", "other"}),
+    "processing_mode": frozenset({"full", "transcript", "other"}),
+    "result": frozenset({"accepted", "available", "conflict", "disabled", "empty", "failed", "succeeded", "unavailable", "up_to_date", "other"}),
+    "result_count_bucket": frozenset({"0", "1_5", "6_20", "21_100", "101_plus", "other"}),
+    "stage": frozenset({"analyze", "asr", "download", "executor", "export", "ocr", "prepare", "queued", "summary", "transcribe", "unknown", "other"}),
+    "state": frozenset({"enabled", "disabled", "other"}),
+    "view": frozenset({"campus", "creator", "knowledge", "library", "prompts", "reports", "rss", "wechat", "other"}),
 }
 
 _lock = Lock()
@@ -72,6 +93,55 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _os_major() -> int:
+    try:
+        return max(0, int((platform.mac_ver()[0] or "0").split(".", 1)[0]))
+    except ValueError:
+        return 0
+
+
+def _architecture() -> str:
+    machine = platform.machine().lower()
+    if machine in {"arm64", "aarch64"}:
+        return "arm64"
+    if machine in {"x86_64", "amd64", "x64"}:
+        return "x64"
+    return "other"
+
+
+def _current_consent(connection: sqlite3.Connection) -> bool:
+    return (
+        _setting(connection, "enabled") == "true"
+        and _setting(connection, "privacy_notice_version") == PRIVACY_NOTICE_VERSION
+    )
+
+
+def _prune(connection: sqlite3.Connection) -> None:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=MAX_EVENT_AGE_DAYS)).isoformat()
+    connection.execute("DELETE FROM telemetry_events WHERE occurred_at < ?", (cutoff,))
+    overflow = connection.execute("SELECT COUNT(*) FROM telemetry_events").fetchone()[0] - MAX_PENDING_EVENTS
+    if overflow > 0:
+        connection.execute(
+            "DELETE FROM telemetry_events WHERE id IN (SELECT id FROM telemetry_events ORDER BY occurred_at LIMIT ?)",
+            (overflow,),
+        )
+
+
+def _sanitize_properties(event_name: str, properties: dict[str, Any] | None) -> dict[str, str]:
+    allowed = EVENT_FIELDS.get(event_name)
+    if allowed is None:
+        raise ValueError("未知遥测事件")
+    payload = properties or {}
+    if set(payload) - allowed:
+        raise ValueError("遥测事件包含未允许字段")
+    sanitized: dict[str, str] = {}
+    for key, value in payload.items():
+        choices = _ENUM_VALUES[key]
+        normalized = value if isinstance(value, str) else "other"
+        sanitized[key] = normalized if normalized in choices else "other"
+    return sanitized
+
+
 def _flush_locked() -> None:
     global _flush_timer
     _flush_timer = None
@@ -79,9 +149,10 @@ def _flush_locked() -> None:
         return
     try:
         with _connect() as connection:
-            if _setting(connection, "enabled") != "true":
+            if not _current_consent(connection):
                 _pending_events.clear()
                 return
+            _prune(connection)
             connection.executemany(
                 "INSERT INTO telemetry_events(id, event_name, occurred_at, properties) VALUES (?, ?, ?, ?)",
                 _pending_events,
@@ -109,20 +180,43 @@ def _schedule_flush_locked() -> None:
 def status() -> dict[str, object]:
     flush()
     if not _path().exists():
-        return {"enabled": False, "pending_events": 0, "event_catalog_size": len(EVENT_FIELDS)}
+        return {
+            "enabled": False,
+            "pending_events": 0,
+            "event_catalog_size": len(EVENT_FIELDS),
+            "privacy_notice_version": PRIVACY_NOTICE_VERSION,
+            "requires_consent": True,
+        }
     with _lock, _connect() as connection:
-        enabled = _setting(connection, "enabled") == "true"
+        enabled = _current_consent(connection)
+        if not enabled and _setting(connection, "enabled") == "true":
+            # A new notice version must never silently inherit older consent or
+            # upload events gathered under it.
+            connection.execute("DELETE FROM telemetry_events")
+            connection.execute("INSERT OR REPLACE INTO telemetry_settings(key, value) VALUES ('enabled', 'false')")
         pending = int(connection.execute("SELECT COUNT(*) FROM telemetry_events").fetchone()[0]) if enabled else 0
-        return {"enabled": enabled, "pending_events": pending, "event_catalog_size": len(EVENT_FIELDS)}
+        return {
+            "enabled": enabled,
+            "pending_events": pending,
+            "event_catalog_size": len(EVENT_FIELDS),
+            "privacy_notice_version": PRIVACY_NOTICE_VERSION,
+            "requires_consent": not enabled,
+        }
 
 
-def set_enabled(enabled: bool) -> dict[str, object]:
+def set_enabled(enabled: bool, *, notice_version: str = "") -> dict[str, object]:
     global _enabled_cache, _flush_timer
     database_path = _path()
     with _lock:
         if enabled:
+            if notice_version != PRIVACY_NOTICE_VERSION:
+                raise ValueError("请先阅读当前隐私与诊断说明")
             with _connect() as connection:
                 connection.execute("INSERT OR REPLACE INTO telemetry_settings(key, value) VALUES ('enabled', 'true')")
+                connection.execute(
+                    "INSERT OR REPLACE INTO telemetry_settings(key, value) VALUES ('privacy_notice_version', ?)",
+                    (PRIVACY_NOTICE_VERSION,),
+                )
                 if not _setting(connection, "installation_id"):
                     connection.execute(
                         "INSERT INTO telemetry_settings(key, value) VALUES ('installation_id', ?)", (str(uuid.uuid4()),)
@@ -145,23 +239,14 @@ def set_enabled(enabled: bool) -> dict[str, object]:
 
 def record(event_name: str, properties: dict[str, Any] | None = None) -> bool:
     global _enabled_cache
-    allowed = EVENT_FIELDS.get(event_name)
-    if allowed is None:
-        raise ValueError("未知遥测事件")
-    payload = properties or {}
-    if set(payload) - allowed:
-        raise ValueError("遥测事件包含未允许字段")
-    # Only short fixed values are accepted; free text, URLs, paths and content
-    # cannot enter this queue through this API.
-    if any(not isinstance(value, str) or len(value) > 40 for value in payload.values()):
-        raise ValueError("遥测属性必须是短枚举值")
+    payload = _sanitize_properties(event_name, properties)
     if not _path().exists():
         return False
     with _lock:
         if _enabled_cache is None:
             try:
                 with _connect() as connection:
-                    _enabled_cache = _setting(connection, "enabled") == "true"
+                    _enabled_cache = _current_consent(connection)
             except sqlite3.Error:
                 return False
         if not _enabled_cache:
@@ -180,7 +265,7 @@ def event_payloads_for_upload(limit: int = 100) -> list[dict[str, object]]:
         return []
     flush()
     with _lock, _connect() as connection:
-        if _setting(connection, "enabled") != "true":
+        if not _current_consent(connection):
             return []
         installation_id = _setting(connection, "installation_id")
         rows = connection.execute(
@@ -188,12 +273,16 @@ def event_payloads_for_upload(limit: int = 100) -> list[dict[str, object]]:
         ).fetchall()
     return [
         {
+            "schema_version": SCHEMA_VERSION,
+            "privacy_notice_version": PRIVACY_NOTICE_VERSION,
             "event_id": row[0],
             "event_name": row[1],
             "occurred_at": row[2],
             "installation_id": installation_id,
             "app_version": settings.app_version,
             "platform": platform.system().lower(),
+            "architecture": _architecture(),
+            "os_major": _os_major(),
             "properties": json.loads(row[3]),
         }
         for row in rows

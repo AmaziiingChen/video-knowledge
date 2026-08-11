@@ -8,6 +8,12 @@ lines.
 
 ## RC blockers
 
+- [ ] Stop or durably hand off automatic WeChat article preparation before a
+  subscription sync returns. The current `catch_up` regression can leave a
+  background preparation write alive after its temporary data root is torn
+  down (`tests/test_wechat_subscriptions.py`); this is a real lifecycle
+  boundary, not a test-only cleanup workaround. Add a shutdown/restart-safe
+  behavior test before accepting RC evidence for a clean app exit.
 - [x] Restore the packaged MCP bridge without weakening the local API boundary.
   The bridge must receive a scoped capability without placing it in URLs or
   logs, the unsigned DMG must contain an executable MCP entry, status checks
@@ -509,6 +515,11 @@ data-integrity, ownership-conflict or test-isolation blocker.
   orchestration. Further report normalization or writing splits are deferred
   unless stabilization evidence proves that they block correctness, testing or
   release work.
+- [ ] Keep the telemetry collector undeployed until an approved HTTPS hostname,
+  data-processing owner, retention notice and Cloudflare account authorization
+  are recorded. The checked-in Worker accepts only the fixed opt-in schema;
+  the desktop release keeps its collector URL blank and therefore makes no
+  telemetry network request.
 
 ## Non-negotiable compatibility checks
 

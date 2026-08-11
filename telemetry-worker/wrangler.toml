@@ -1,0 +1,9 @@
+name = "knowledgehub-telemetry-collector"
+main = "src/collector.js"
+compatibility_date = "2026-08-11"
+
+[[analytics_engine_datasets]]
+binding = "TELEMETRY"
+dataset = "knowledgehub_telemetry"
+
+# Set INSTALLATION_HMAC_KEY with `wrangler secret put`; never commit it.

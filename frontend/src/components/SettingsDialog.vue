@@ -91,7 +91,7 @@
             <div class="settings-row">
               <div class="settings-row-copy">
                 <h3>发送匿名使用数据</h3>
-                <p>默认关闭。只记录 20 个固定检查点的结果，不包含文章、视频、OCR 文本、搜索词、路径、链接、账号或密钥。关闭会删除本机待发送事件。</p>
+                <p>仅在你允许后记录 20 个固定检查点的结果，不包含文章、视频、OCR 文本、搜索词、路径、链接、账号或密钥。关闭会删除本机待发送事件；事件范围变更时会再次告知。</p>
               </div>
               <div class="settings-row-control settings-switch-control">
                 <el-switch v-model="telemetryEnabled" :loading="telemetrySaving" aria-label="发送匿名使用数据" @change="saveTelemetry" />
@@ -803,6 +803,7 @@ const VISUAL_MODEL_SECRET_REVEAL_API = `${API}/wechat-publishing/cover-settings/
 const telemetryEnabled = ref(false)
 const telemetryPendingEvents = ref(0)
 const telemetrySaving = ref(false)
+const telemetryNoticeVersion = ref('')
 const favoriteSources = ref([])
 const favoriteSourcesLoading = ref(false)
 const favoriteBusyId = ref('')
@@ -1146,6 +1147,7 @@ async function loadTelemetryStatus() {
     const response = await axios.get(TELEMETRY_API, { timeout: 5000 })
     telemetryEnabled.value = Boolean(response.data?.enabled)
     telemetryPendingEvents.value = Number(response.data?.pending_events || 0)
+    telemetryNoticeVersion.value = String(response.data?.privacy_notice_version || '')
   } catch {
     // The settings dialog remains usable if an older backend lacks telemetry.
   }
@@ -1154,7 +1156,10 @@ async function loadTelemetryStatus() {
 async function saveTelemetry(enabled) {
   telemetrySaving.value = true
   try {
-    const response = await axios.put(TELEMETRY_API, { enabled: Boolean(enabled) }, { timeout: 5000 })
+    const response = await axios.put(TELEMETRY_API, {
+      enabled: Boolean(enabled),
+      privacy_notice_version: Boolean(enabled) ? telemetryNoticeVersion.value : '',
+    }, { timeout: 5000 })
     telemetryEnabled.value = Boolean(response.data?.enabled)
     telemetryPendingEvents.value = Number(response.data?.pending_events || 0)
     ElMessage.success(telemetryEnabled.value ? '已开启匿名使用数据' : '已关闭并清除本机遥测数据')

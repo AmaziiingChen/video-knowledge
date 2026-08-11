@@ -1,16 +1,15 @@
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-
 from services import telemetry
-
 
 router = APIRouter()
 
 
 class TelemetrySettingsRequest(BaseModel):
     enabled: bool
+    privacy_notice_version: str = ""
 
 
 class TelemetryEventRequest(BaseModel):
@@ -31,7 +30,10 @@ def telemetry_status() -> dict[str, object]:
 
 @router.put("/telemetry")
 def save_telemetry_settings(request: TelemetrySettingsRequest) -> dict[str, object]:
-    return telemetry.set_enabled(request.enabled)
+    try:
+        return telemetry.set_enabled(request.enabled, notice_version=request.privacy_notice_version)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.post("/telemetry/events", status_code=204)

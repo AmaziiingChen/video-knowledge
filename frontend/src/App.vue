@@ -19,6 +19,14 @@
       </div>
     </header>
 
+    <TelemetryConsentNotice
+      v-if="telemetryNoticeVisible"
+      :saving="telemetryConsentSaving"
+      @allow="enableTelemetryFromNotice"
+      @dismiss="dismissTelemetryNotice"
+      @open-privacy="openPrivacySettings"
+    />
+
     <main id="main-workspace" class="workspace" tabindex="-1" :aria-busy="startupBlocking">
       <WorkbenchShell
           ref="workbenchShell"
@@ -811,15 +819,17 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SvgMaskIcon from './components/SvgMaskIcon.vue'
 import PanelToggleIcon from './components/PanelToggleIcon.vue'
 import StatusBreadcrumb from './components/StatusBreadcrumb.vue'
 import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
+import TelemetryConsentNotice from './components/TelemetryConsentNotice.vue'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
+const TELEMETRY_NOTICE_STORAGE_KEY = 'knowledgehub:telemetry-notice-version'
 import { formatTokenCount } from './utils/viewFormatters'
 import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from './utils/localApiAuth.js'
 import WorkbenchShell from './workbench/WorkbenchShell.vue'
@@ -1839,10 +1849,71 @@ function openGeneratedReport(contentItemId) {
   if (item) openContentFromSidebar(item)
 }
 
-async function openSettings() {
-  settingsInitialSection.value = 'appearance'
+async function openSettings(section = 'appearance') {
+  settingsInitialSection.value = section
   showSettings.value = true
   await Promise.all([loadWeChatSubscriptions(), loadWechatPublishingSettings(), loadWechatQwenCoverSettings(), loadMediaTools(), loadRuntimeComponents(), loadDeepSeekSettings(), loadPaddleOcrSettings(), loadManualCollectionSettings(), loadFolderImportWatcherStatus()])
+}
+
+const telemetryNoticeVisible = ref(false)
+const telemetryConsentSaving = ref(false)
+const telemetryNoticeVersion = ref('')
+
+function rememberTelemetryNotice(version) {
+  try {
+    localStorage.setItem(TELEMETRY_NOTICE_STORAGE_KEY, version)
+  } catch {
+    // A restricted profile may refuse localStorage; the notice can safely be
+    // shown again rather than weakening consent or blocking the workspace.
+  }
+}
+
+function hasSeenTelemetryNotice(version) {
+  try {
+    return localStorage.getItem(TELEMETRY_NOTICE_STORAGE_KEY) === version
+  } catch {
+    return false
+  }
+}
+
+async function loadTelemetryNotice() {
+  try {
+    const response = await axios.get(`${API}/telemetry`, { timeout: 5000 })
+    const status = response.data || {}
+    const version = String(status.privacy_notice_version || '')
+    telemetryNoticeVersion.value = version
+    telemetryNoticeVisible.value = Boolean(version && status.requires_consent && !hasSeenTelemetryNotice(version))
+  } catch {
+    // A release paired with an older backend remains fully usable and simply
+    // does not display a notice it cannot honour.
+  }
+}
+
+async function enableTelemetryFromNotice() {
+  const version = telemetryNoticeVersion.value
+  if (!version) return
+  telemetryConsentSaving.value = true
+  try {
+    await axios.put(`${API}/telemetry`, { enabled: true, privacy_notice_version: version }, { timeout: 5000 })
+    rememberTelemetryNotice(version)
+    telemetryNoticeVisible.value = false
+    ElMessage.success('已开启匿名诊断数据')
+  } catch {
+    ElMessage.error('无法保存匿名诊断数据设置')
+  } finally {
+    telemetryConsentSaving.value = false
+  }
+}
+
+function dismissTelemetryNotice() {
+  const version = telemetryNoticeVersion.value
+  if (version) rememberTelemetryNotice(version)
+  telemetryNoticeVisible.value = false
+}
+
+function openPrivacySettings() {
+  dismissTelemetryNotice()
+  void openSettings('privacy')
 }
 
 async function chooseObsidianFolder() {
@@ -2554,6 +2625,10 @@ watch(processLogHeight, (value) => {
 
 watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
   localStorage.setItem(WORKSPACE_PANE_VISIBILITY_KEY, JSON.stringify({ primary, context }))
+})
+
+onMounted(() => {
+  void loadTelemetryNotice()
 })
 
 onBeforeUnmount(() => {
