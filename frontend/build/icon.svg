@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">KnowledgeHub app icon</title>
+  <desc id="desc">A graphite K assembled from layered pages with a restrained spectral seam.</desc>
+  <defs>
+    <linearGradient id="tile" x1="160" y1="112" x2="856" y2="924" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFCF8"/>
+      <stop offset="1" stop-color="#F3F2EE"/>
+    </linearGradient>
+    <linearGradient id="graphite" x1="300" y1="224" x2="746" y2="790" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#323438"/>
+      <stop offset="1" stop-color="#25272A"/>
+    </linearGradient>
+    <linearGradient id="seam" x1="448" y1="474" x2="458" y2="550" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#665CFF"/>
+      <stop offset="0.52" stop-color="#527EF5"/>
+      <stop offset="1" stop-color="#45C7E8"/>
+    </linearGradient>
+    <filter id="tile-shadow" x="38" y="50" width="948" height="956" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#17191B" flood-opacity="0.13"/>
+    </filter>
+    <filter id="mark-shadow" x="224" y="154" width="628" height="720" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#17191B" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect x="80" y="68" width="864" height="864" rx="210" fill="url(#tile)" filter="url(#tile-shadow)"/>
+  <rect x="81" y="69" width="862" height="862" rx="209" fill="none" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="2"/>
+
+  <g filter="url(#mark-shadow)">
+    <!-- Two quiet paper layers establish the knowledge-page construction. -->
+    <g transform="translate(15 17)" fill="none" stroke="#D8D5CE" stroke-width="168" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M450 512L708 318"/>
+      <path d="M450 512L708 706"/>
+    </g>
+    <rect x="303" y="235" width="174" height="576" rx="62" fill="#D8D5CE"/>
+
+    <g transform="translate(8 9)" fill="none" stroke="#F7F6F2" stroke-width="158" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M450 512L708 318"/>
+      <path d="M450 512L708 706"/>
+    </g>
+    <rect x="296" y="227" width="174" height="576" rx="62" fill="#F7F6F2"/>
+
+    <!-- The graphite cover stays nearly flat so the silhouette survives at 16–32 px. -->
+    <g fill="none" stroke="url(#graphite)" stroke-width="148" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M450 512L708 318"/>
+      <path d="M450 512L708 706"/>
+    </g>
+    <rect x="288" y="218" width="166" height="576" rx="60" fill="url(#graphite)"/>
+
+    <!-- A short theme-neutral spectrum marks the point where sources converge. -->
+    <path d="M453 496C451 505 451 519 453 528" fill="none" stroke="url(#seam)" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

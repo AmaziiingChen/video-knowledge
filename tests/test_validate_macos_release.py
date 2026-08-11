@@ -24,11 +24,13 @@ def _release_app(volume: Path, *, version: str = "0.1.0") -> Path:
                 "CFBundleIdentifier": release.EXPECTED_BUNDLE_ID,
                 "CFBundleShortVersionString": version,
                 "CFBundleExecutable": "KnowledgeHub",
+                "CFBundleIconFile": "icon.icns",
             },
             target,
         )
     (contents / "MacOS" / "KnowledgeHub").write_bytes(b"app")
     (contents / "Resources" / "app.asar").write_bytes(b"asar")
+    (contents / "Resources" / "icon.icns").write_bytes(release.SOURCE_ICON.read_bytes())
     (contents / "Resources" / "backend" / "knowledgehub-backend" / "knowledgehub-backend").write_bytes(b"backend")
     return contents.parent
 
@@ -51,6 +53,7 @@ def test_validate_app_accepts_the_expected_unsigned_arm64_layout(tmp_path, monke
         "bundle_id": "com.knowledgehub.desktop",
         "version": "0.1.0",
         "architecture": "arm64",
+        "icon": "icon.icns",
         "developer_id": "ad-hoc-or-unsigned",
         "backend_mib": 0.0,
         "backend_smoke": {"status": "ok"},
@@ -65,4 +68,13 @@ def test_validate_app_rejects_bundled_model_weights(tmp_path, monkeypatch):
     monkeypatch.setattr(release, "executable_architectures", lambda _path: {"arm64"})
 
     with pytest.raises(RuntimeError, match="model weights"):
+        release.validate_app(tmp_path, "0.1.0")
+
+
+def test_validate_app_rejects_the_default_or_wrong_application_icon(tmp_path, monkeypatch):
+    app = _release_app(tmp_path)
+    (app / "Contents" / "Resources" / "icon.icns").write_bytes(b"wrong icon")
+    monkeypatch.setattr(release, "executable_architectures", lambda _path: {"arm64"})
+
+    with pytest.raises(RuntimeError, match="approved KnowledgeHub application icon"):
         release.validate_app(tmp_path, "0.1.0")
