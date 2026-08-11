@@ -1,7 +1,9 @@
 """Application startup and shutdown orchestration for the local backend."""
 
 from config import settings
+
 from services import telemetry as telemetry_service
+from services.article_ingest_preparation import enqueue_pending_article_preparation
 from services.cache_retention import cache_retention_scheduler
 from services.campus_digest_scheduler import campus_digest_scheduler
 from services.campus_source_scheduler import campus_source_scheduler
@@ -64,6 +66,10 @@ async def start_application() -> None:
         connection.commit()
     miniprogram_forum_collector.recover_stale_runs()
     interrupted_initial_syncs = wechat_subscription_service.recover_interrupted_initial_syncs()
+    # Body capture and OCR preparation use in-memory executors.  Their durable
+    # readiness state lives on the content item, so rebuild that bounded queue
+    # once after database/index repair when a previous desktop session ended.
+    enqueue_pending_article_preparation()
     if settings.miniprogram_forum_capture_enabled:
         miniprogram_forum_scheduler.start()
     task_manager.recover_from_database()

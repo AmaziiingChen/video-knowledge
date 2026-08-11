@@ -16,6 +16,7 @@ def _patch_lifecycle_dependencies(monkeypatch):
         "apply_saved_paddle_ocr_settings",
         "initialize_database",
         "resume_pending_ocr_jobs",
+        "enqueue_pending_article_preparation",
         "ensure_content_index_ready",
         "recover_legacy_report_documents",
         "repair_report_folder_bindings",
@@ -59,6 +60,14 @@ def test_application_lifecycle_starts_and_stops_favorite_scheduler(monkeypatch):
 
     favorite_scheduler.start.assert_called_once_with()
     favorite_scheduler.stop.assert_called_once_with()
+
+
+def test_application_lifecycle_resumes_pending_article_preparation_once(monkeypatch):
+    _patch_lifecycle_dependencies(monkeypatch)
+
+    asyncio.run(application_lifecycle.start_application())
+
+    application_lifecycle.enqueue_pending_article_preparation.assert_called_once_with()
 
 
 def test_disabled_favorite_scheduler_never_creates_a_thread(monkeypatch):
