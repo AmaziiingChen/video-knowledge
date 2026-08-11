@@ -17,20 +17,25 @@ lines.
   arm64 DMG contained the single-bundle `--mcp-stdio` entry, initialized over
   stdio, listed 21 tools, executed an isolated read-only task-list call, accepted
   the valid session capability and rejected missing and incorrect capabilities.
-- [ ] Restore an approved macOS application icon before freezing the candidate.
-  The current source tree contains browser favicons but no `.icns` application
-  asset, so the 2026-08-11 local package correctly reported that it used the
-  default Electron icon. Do not fabricate or substitute branding; add the
-  approved source artwork and verify the icon in the built `.app` and mounted
-  DMG.
-- [ ] Add a deterministic packaged-app core smoke using an isolated temporary
+- [x] Restore the approved macOS application and menu-bar icons before freezing
+  the candidate. `frontend/build/icon.svg` is rendered reproducibly to the
+  packaged `.icns`; `frontend/electron/assets/trayTemplate.svg` supplies the
+  monochrome tray asset. The package validator rejects a DMG whose application
+  icon differs from the approved ICNS source. Commit `d4a066b` contains the
+  final asset refinement; the fresh candidate DMG still needs physical
+  validation under the RC verification gate below.
+- [x] Add a deterministic packaged-app core smoke using an isolated temporary
   user-data directory. It must start the unsigned `.app`, prove the renderer and
   bundled backend are ready, import and reopen a local fixture, restart once,
-  clean up and write machine-readable evidence.
-- [ ] Add a reproducible idle-resource sampler. With no active queue work,
+  clean up and write machine-readable evidence. `scripts/smoke_macos_desktop.py`
+  implements this with renderer CDP access and the existing per-session backend
+  capability; its first fresh-DMG evidence remains an RC gate.
+- [x] Add a reproducible idle-resource sampler. With no active queue work,
   model download or optional automation, record the Electron/backend process
   tree's CPU, RSS, thread count and disk read/write activity after fixed warm-up
-  and sampling windows.
+  and sampling windows. `scripts/measure_macos_idle.py` records a first baseline
+  only; it establishes no invented release threshold and still requires an RC
+  sample from a fresh packaged candidate.
 
 ## RC verification required
 
