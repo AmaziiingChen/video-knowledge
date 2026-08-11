@@ -6,16 +6,19 @@ import argparse
 import json
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from macos_desktop_runtime import (
     CdpClient,
     app_executable,
+    close_desktop_app,
     free_loopback_port,
     launch_app,
     redact,
     require_port_available,
     terminate,
+    wait_for_port_available,
     wait_for_renderer,
 )
 
@@ -25,12 +28,21 @@ FIXTURE_MARKDOWN = f"# {FIXTURE_TITLE}\n\n这是发布候选的隔离本地 Mark
 
 def renderer_expression(body: str) -> str:
     return f"""(async () => {{
-      const desktop = window.knowledgeHubDesktop
-      if (!desktop || !desktop.isDesktop) throw new Error('preload bridge 不可用')
-      const ready = await desktop.waitForBackend()
-      if (!ready) throw new Error('bundled backend 未就绪')
-      const token = await desktop.backendAccessToken()
-      if (!token) throw new Error('未取得桌面后端 capability')
+      // CDP runs in the renderer's main world, while Electron deliberately
+      // keeps preload APIs in its isolated world. A renderer request is the
+      // real packaged path: main.cjs injects its per-session capability only
+      // for this trusted webContents and never exposes that value to CDP.
+      let health = null
+      for (let attempt = 0; attempt < 240; attempt += 1) {{
+        try {{
+          const response = await fetch('http://127.0.0.1:8000/api/health')
+          if (response.ok) {{ health = response; break }}
+        }} catch {{
+          // The packaged window intentionally appears before its backend.
+        }}
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }}
+      if (!health) throw new Error('bundled backend did not become ready within 60 seconds')
       {body}
     }})()"""
 
@@ -42,7 +54,7 @@ def import_fixture(client: CdpClient) -> dict[str, str]:
       const form = new FormData()
       form.append('file', new File([{body}], 'knowledgehub-release-smoke.md', {{ type: 'text/markdown' }}))
       const response = await fetch('http://127.0.0.1:8000/api/content/import-markdown', {{
-        method: 'POST', headers: {{ 'X-KnowledgeHub-Token': token }}, body: form,
+        method: 'POST', body: form,
       }})
       const payload = await response.json()
       if (!response.ok || !payload.id || payload.title !== {title}) {{
@@ -60,7 +72,6 @@ def verify_persisted_and_open(client: CdpClient, item: dict[str, str]) -> None:
     title = json.dumps(item["title"], ensure_ascii=False)
     value = client.evaluate(renderer_expression(f"""
       const response = await fetch(`http://127.0.0.1:8000/api/content/item/${{encodeURIComponent({item_id})}}`, {{
-        headers: {{ 'X-KnowledgeHub-Token': token }},
       }})
       const payload = await response.json()
       if (!response.ok || payload.id !== {item_id} || payload.title !== {title}) {{
@@ -81,11 +92,25 @@ def verify_persisted_and_open(client: CdpClient, item: dict[str, str]) -> None:
 
 
 def open_renderer(process, debugging_port: int) -> CdpClient:
-    page = wait_for_renderer(debugging_port, process)
-    debugger_url = str(page.get("webSocketDebuggerUrl") or "")
-    if not debugger_url:
-        raise RuntimeError("renderer 未提供调试连接")
-    return CdpClient(debugger_url)
+    deadline = time.monotonic() + 30
+    last_error = ""
+    while time.monotonic() < deadline:
+        page = wait_for_renderer(debugging_port, process)
+        debugger_url = str(page.get("webSocketDebuggerUrl") or "")
+        if not debugger_url:
+            last_error = "renderer 未提供调试连接"
+            time.sleep(0.25)
+            continue
+        client = CdpClient(debugger_url)
+        try:
+            if client.evaluate("document.readyState") == "complete":
+                return client
+            last_error = "renderer 文档仍在加载"
+        except RuntimeError as exc:
+            last_error = str(exc)
+        client.close()
+        time.sleep(0.25)
+    raise RuntimeError(f"renderer 上下文未稳定：{last_error}")
 
 
 def run_smoke(app: Path) -> dict[str, object]:
@@ -103,15 +128,16 @@ def run_smoke(app: Path) -> dict[str, object]:
             try:
                 item = import_fixture(client)
             finally:
+                first_shutdown_clean = close_desktop_app(client, process)
                 client.close()
 
-            first_shutdown_clean = terminate(process)
-            require_port_available(8000)
+            wait_for_port_available(8000)
             process = launch_app(executable, profile, debugging_port)
             client = open_renderer(process, debugging_port)
             try:
                 verify_persisted_and_open(client, item)
             finally:
+                close_desktop_app(client, process)
                 client.close()
             report = {
                 "status": "ok",
@@ -129,7 +155,7 @@ def run_smoke(app: Path) -> dict[str, object]:
             # check makes cleanup a test result, not an undocumented side effect.
             if profile.exists():
                 shutil.rmtree(profile, ignore_errors=True)
-            require_port_available(8000)
+            wait_for_port_available(8000)
     report["temporary_profile_cleanup"] = "ok"
     return report
 

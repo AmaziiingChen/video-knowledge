@@ -14,10 +14,12 @@ from pathlib import Path
 from macos_desktop_runtime import (
     CdpClient,
     app_executable,
+    close_desktop_app,
     free_loopback_port,
     launch_app,
     require_port_available,
     terminate,
+    wait_for_port_available,
     wait_for_renderer,
 )
 
@@ -149,12 +151,9 @@ def run_measurement(app: Path, *, warmup_seconds: float, sample_seconds: float, 
         try:
             page = wait_for_renderer(debugging_port, process)
             client = CdpClient(str(page["webSocketDebuggerUrl"]))
-            try:
-                ready = client.evaluate("window.knowledgeHubDesktop?.waitForBackend?.()")
-            finally:
-                client.close()
+            ready = client.evaluate("document.readyState === 'complete'")
             if ready is not True:
-                raise RuntimeError("待机采样前 bundled backend 未就绪")
+                raise RuntimeError("待机采样前 renderer 未就绪")
             time.sleep(warmup_seconds)
             deadline = time.monotonic() + sample_seconds
             previous_io: dict[int, tuple[int, int]] = {}
@@ -176,8 +175,13 @@ def run_measurement(app: Path, *, warmup_seconds: float, sample_seconds: float, 
                 "known_process_ids": sorted(known_pids),
             }
         finally:
-            terminate(process)
-            require_port_available(8000)
+            try:
+                close_desktop_app(client, process)
+            except UnboundLocalError:
+                terminate(process)
+            else:
+                client.close()
+            wait_for_port_available(8000)
     report["temporary_profile_cleanup"] = "ok"
     return report
 

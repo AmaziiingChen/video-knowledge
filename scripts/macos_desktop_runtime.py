@@ -37,12 +37,26 @@ def require_port_available(port: int) -> None:
             raise RuntimeError(f"本机端口 {port} 已被占用；隔离桌面验证不能复用现有后端") from exc
 
 
+def wait_for_port_available(port: int, timeout: float = 15) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: RuntimeError | None = None
+    while time.monotonic() < deadline:
+        try:
+            require_port_available(port)
+            return
+        except RuntimeError as exc:
+            last_error = exc
+            time.sleep(0.1)
+    raise last_error or RuntimeError(f"本机端口 {port} 未能释放")
+
+
 def launch_app(executable: Path, profile: Path, debugging_port: int) -> subprocess.Popen[str]:
     profile.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
     environment.update({
         "HOME": str(profile / "home"),
         "TMPDIR": str(profile / "tmp"),
+        "KNOWLEDGEHUB_USER_DATA_DIR": str(profile / "electron-user-data"),
         "NO_PROXY": "127.0.0.1,localhost",
         "no_proxy": "127.0.0.1,localhost",
     })
@@ -164,13 +178,13 @@ class CdpClient:
             return self._receive_text()
         return payload.decode("utf-8")
 
-    def evaluate(self, expression: str) -> object:
+    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
         request_id = self._next_id
         self._next_id += 1
         self._send_text(json.dumps({
             "id": request_id,
-            "method": "Runtime.evaluate",
-            "params": {"expression": expression, "awaitPromise": True, "returnByValue": True},
+            "method": method,
+            "params": params or {},
         }))
         while True:
             response = json.loads(self._receive_text())
@@ -178,10 +192,16 @@ class CdpClient:
                 continue
             if "error" in response:
                 raise RuntimeError(f"renderer CDP 请求失败：{response['error']}")
-            result = response.get("result", {}).get("result", {})
-            if "exceptionDetails" in response.get("result", {}):
-                raise RuntimeError(f"renderer 脚本失败：{response['result']['exceptionDetails'].get('text', '未知错误')}")
-            return result.get("value")
+            return response.get("result", {})
+
+    def evaluate(self, expression: str) -> object:
+        response = self.call("Runtime.evaluate", {
+            "expression": expression, "awaitPromise": True, "returnByValue": True,
+        })
+        result = response.get("result", {})
+        if "exceptionDetails" in response:
+            raise RuntimeError(f"renderer 脚本失败：{response['exceptionDetails'].get('text', '未知错误')}")
+        return result.get("value")
 
     def close(self) -> None:
         try:
@@ -201,6 +221,21 @@ def terminate(process: subprocess.Popen[str], timeout: float = 15) -> bool:
         process.kill()
         process.wait(timeout=5)
         return False
+
+
+def close_desktop_app(client: CdpClient, process: subprocess.Popen[str], timeout: float = 15) -> bool:
+    """Request Electron's normal app quit before using a failure-only signal."""
+    try:
+        client.call("Browser.close")
+    except RuntimeError:
+        # A socket close after Browser.close is expected from some Chromium versions.
+        pass
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return True
+        time.sleep(0.1)
+    return terminate(process, timeout=5)
 
 
 def redact(value: object, *secrets_to_remove: str) -> object:

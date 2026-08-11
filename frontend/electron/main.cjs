@@ -12,6 +12,7 @@ const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
 const { backendSpawnOptions, terminateBackendProcess } = require('./backend-process.cjs')
 const { shouldInjectBackendToken, withBackendToken } = require('./backend-request-auth.cjs')
+const { applyUserDataDirectoryOverride } = require('./user-data-dir.cjs')
 const {
   LEASE_HEARTBEAT_MS,
   createMcpBridgeSession,
@@ -27,6 +28,11 @@ const LOCAL_HTML_PREVIEW_PARTITION = 'persist:knowledgehub-local-html-preview'
 const APP_PROTOCOL = 'knowledgehub'
 const APP_ORIGIN = `${APP_PROTOCOL}://app`
 const BACKEND_INSTANCE_TOKEN = randomUUID()
+
+// Release checks use this explicit, process-local override so an isolated DMG
+// run never opens the user's real Electron profile. Normal launches retain
+// Electron's platform-default userData path.
+applyUserDataDirectoryOverride(app)
 
 // KnowledgeHub owns explicit direct-network clients. Do not let Electron
 // navigation or platform login windows silently follow the macOS system proxy.
