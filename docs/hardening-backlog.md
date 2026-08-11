@@ -33,6 +33,13 @@ lines.
   icon differs from the approved ICNS source. Commit `d4a066b` contains the
   final asset refinement; the fresh candidate DMG still needs physical
   validation under the RC verification gate below.
+- [x] Restore the native macOS icon language inside the renderer without
+  republishing the historical Apple CoreSVG exports. Standard workbench,
+  toolbar, assistant and campus-source icons are generated from the installed
+  SF Symbols catalog through AppKit before macOS development and production
+  builds; the separately reviewed OpenClaw brand mark remains an explicit
+  integration asset. A source contract prevents direct Tabler or Element Plus
+  icon imports from returning to product components.
 - [x] Add a deterministic packaged-app core smoke using an isolated temporary
   user-data directory. It must start the unsigned `.app`, prove the renderer and
   bundled backend are ready, import and reopen a local fixture, restart once,

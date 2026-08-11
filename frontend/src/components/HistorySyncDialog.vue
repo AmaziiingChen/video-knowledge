@@ -92,7 +92,7 @@
 
 <script setup>
 import { computed, reactive, watch } from 'vue'
-import { Close } from '@element-plus/icons-vue'
+import { Close } from './macosSymbolComponents.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

@@ -214,7 +214,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowDown, ArrowLeft, ArrowRight, Close, Search } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowLeft, ArrowRight, Close, Search } from '../components/macosSymbolComponents.js'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 const arrowRightIcon = 'arrow.right'
 const eraserIcon = 'eraser'

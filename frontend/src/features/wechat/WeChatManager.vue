@@ -462,7 +462,7 @@
 <script setup>
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ElCheckbox } from 'element-plus'
-import { Close, Filter, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { Close, Filter, MoreFilled, Plus, Refresh, Search } from '../../components/macosSymbolComponents.js'
 import BatchSelectionToolbar from '../../components/BatchSelectionToolbar.vue'
 import HistorySyncDialog from '../../components/HistorySyncDialog.vue'
 import ReportGroupMultiSelect from '../../components/ReportGroupMultiSelect.vue'

@@ -101,7 +101,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ArrowUp } from '@element-plus/icons-vue'
+import { ArrowUp } from '../../components/macosSymbolComponents.js'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 const newChatIcon = 'ellipsis.bubble'
 const exportIcon = 'arrow.down.document'

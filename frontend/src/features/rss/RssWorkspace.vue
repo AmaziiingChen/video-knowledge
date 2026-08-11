@@ -106,7 +106,7 @@
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '../../components/macosSymbolComponents.js'
 import ReportGroupMultiSelect from '../../components/ReportGroupMultiSelect.vue'
 import CollectionState from '../../components/CollectionState.vue'
 const rssHubIcon = 'rsshub'

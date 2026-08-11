@@ -503,7 +503,7 @@
 import { computed, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { IconX } from '@tabler/icons-vue'
+import { IconX } from './macosSymbolComponents.js'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import { API_BASE as API } from '../utils/localApiAuth.js'

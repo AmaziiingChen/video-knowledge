@@ -19,6 +19,10 @@ when deciding which local checks a change requires.
    unrelated formatting or dependency upgrades.
 3. Add a focused test for changed behaviour. For frontend changes run
    `cd frontend && npm run lint && npm run typecheck && npm test && npm run test:coverage && npm run build`.
+   On macOS, `dev` and `build` use `/usr/bin/xcrun swift` plus AppKit to render
+   the reviewed SF Symbols into an ignored generated-assets directory; install
+   the Xcode Command Line Tools before running those commands. Non-macOS builds
+   skip this step because the supported desktop release target is macOS.
    Run `ruff check --select E9,F63,F7,F82 backend tests scripts` and the affected
    backend tests for Python changes. Run
    `python scripts/check_architecture_budget.py` for structural changes. Its

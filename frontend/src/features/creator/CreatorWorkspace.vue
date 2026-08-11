@@ -202,7 +202,7 @@
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { MoreFilled } from '@element-plus/icons-vue'
+import { MoreFilled } from '../../components/macosSymbolComponents.js'
 import { requestDestructiveConfirmation } from '../../composables/useDestructiveConfirm'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../../utils/sourceSyncTask'
 import { API_BASE as API } from '../../utils/localApiAuth.js'

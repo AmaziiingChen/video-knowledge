@@ -147,7 +147,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { MoreFilled } from '@element-plus/icons-vue'
+import { MoreFilled } from '../../components/macosSymbolComponents.js'
 import MiniProgramForumCapture from './MiniProgramForumCapture.vue'
 import HistorySyncDialog from '../../components/HistorySyncDialog.vue'
 import ReportGroupMultiSelect from '../../components/ReportGroupMultiSelect.vue'

@@ -5,8 +5,13 @@ repository root. Dependencies keep their own licenses and notices.
 
 - JavaScript dependencies and their resolved versions are recorded in
   `frontend/package-lock.json`.
-- The interface icon set uses the installed `@tabler/icons-vue` dependency
-  (MIT); no Apple CoreSVG or SF Symbols export is redistributed in this tree.
+- macOS builds render their interface symbols from the installed operating
+  system through AppKit. No Apple CoreSVG or SF Symbols SVG export is tracked
+  or redistributed in this source tree; use of the rendered symbols remains
+  subject to Apple's SF Symbols terms and platform restrictions.
+- `frontend/public/brand-icons/openclaw.svg` identifies the optional OpenClaw
+  integration. OpenClaw is distributed under the MIT License; its name and
+  visual identity remain the property of its respective owner.
 - Python dependencies are listed in `requirements.txt`; their exact license
   terms must be reviewed before any binary distribution.
 - Electron, Chromium, Playwright, ffmpeg, yt-dlp, Whisper runtimes and any

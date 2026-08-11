@@ -65,7 +65,7 @@
 </template>
 
 <script setup>
-import { Aim } from '@element-plus/icons-vue'
+import { Aim } from '../components/macosSymbolComponents.js'
 import { formatTimelineTime } from './mediaTranscriptModel.js'
 
 defineProps({

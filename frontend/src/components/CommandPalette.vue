@@ -69,7 +69,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Search } from '@element-plus/icons-vue'
+import { Search } from './macosSymbolComponents.js'
 import { filterCommandItems } from './commandPaletteState.js'
 
 const props = defineProps({

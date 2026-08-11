@@ -84,7 +84,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { ArrowUp } from '@element-plus/icons-vue'
+import { ArrowUp } from '../components/macosSymbolComponents.js'
 import { useMarkdownFootnoteNavigation } from '../composables/useMarkdownFootnoteNavigation'
 import ReportCoverPreview from './ReportCoverPreview.vue'
 import ReportOutlineRail from './ReportOutlineRail.vue'

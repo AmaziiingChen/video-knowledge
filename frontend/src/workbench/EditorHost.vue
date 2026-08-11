@@ -396,7 +396,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import {
   ArrowLeft,
   ArrowRight,
-} from '@element-plus/icons-vue'
+} from '../components/macosSymbolComponents.js'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../components/AiSkeletonStream.vue'
 const movieClapperIcon = 'movieclapper'

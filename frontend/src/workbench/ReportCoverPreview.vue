@@ -46,7 +46,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight } from '../components/macosSymbolComponents.js'
 import {
   adjacentReportCover,
   reportCoverIndex,

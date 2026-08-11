@@ -87,7 +87,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, Check, Minus } from '@element-plus/icons-vue'
+import { ArrowRight, Check, Minus } from '../components/macosSymbolComponents.js'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 
 const props = defineProps({
