@@ -3,7 +3,11 @@
 from config import settings
 
 from services import telemetry as telemetry_service
-from services.article_ingest_preparation import enqueue_pending_article_preparation
+from services.article_ingest_preparation import (
+    enqueue_pending_article_preparation,
+    shutdown_article_source_preparation,
+    start_article_source_preparation,
+)
 from services.cache_retention import cache_retention_scheduler
 from services.campus_digest_scheduler import campus_digest_scheduler
 from services.campus_source_scheduler import campus_source_scheduler
@@ -12,7 +16,10 @@ from services.creator_scheduler import creator_subscription_scheduler
 from services.database import connect, initialize_database
 from services.favorite_scheduler import favorite_subscription_scheduler
 from services.forum_capture_repository import repair_forum_capture_document_types
-from services.knowledge_library import ensure_library_layout, recover_legacy_report_documents
+from services.knowledge_library import (
+    ensure_library_layout,
+    recover_legacy_report_documents,
+)
 from services.llm_settings import apply_saved_llm_settings
 from services.miniprogram_forum_collector import miniprogram_forum_collector
 from services.miniprogram_forum_settings import miniprogram_forum_scheduler
@@ -69,6 +76,7 @@ async def start_application() -> None:
     # Body capture and OCR preparation use in-memory executors.  Their durable
     # readiness state lives on the content item, so rebuild that bounded queue
     # once after database/index repair when a previous desktop session ended.
+    start_article_source_preparation()
     enqueue_pending_article_preparation()
     if settings.miniprogram_forum_capture_enabled:
         miniprogram_forum_scheduler.start()
@@ -121,3 +129,4 @@ async def stop_application() -> None:
     favorite_subscription_scheduler.stop()
     rss_subscription_scheduler.stop()
     report_group_scheduler.stop()
+    shutdown_article_source_preparation(wait=True)

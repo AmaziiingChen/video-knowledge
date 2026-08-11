@@ -18,16 +18,16 @@ from services.wechat_bulk_sync_queue import (
     WeChatBulkSyncQueue,
 )
 from services.wechat_initial_sync_queue import WeChatInitialSyncQueue
+from services.wechat_subscription_accounts import (
+    WECHAT_RATE_LIMIT_COOLDOWN_HOURS,
+    WeChatSubscriptionAccountService,
+)
 from services.wechat_subscription_client import (
     WeChatAccountCandidate,
     WeChatAdminClient,
     WeChatArticleCandidate,
-    canonical_article_id,  # noqa: F401 - legacy public import
     _published_at,  # noqa: F401 - legacy public import
-)
-from services.wechat_subscription_accounts import (
-    WECHAT_RATE_LIMIT_COOLDOWN_HOURS,
-    WeChatSubscriptionAccountService,
+    canonical_article_id,  # noqa: F401 - legacy public import
 )
 from services.wechat_subscription_errors import (
     WeChatRateLimitError,
@@ -109,6 +109,7 @@ class WeChatSubscriptionService:
         session_store: Any | None = None,
         admin_client: WeChatAdminClient | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        enqueue_preparation: Callable[[str], bool] = enqueue_article_source_preparation,
     ) -> None:
         self._admin_client = admin_client or WeChatAdminClient()
         self._accounts = WeChatSubscriptionAccountService(
@@ -118,6 +119,7 @@ class WeChatSubscriptionService:
         )
         self._syncing: set[str] = set()
         self._sync_lock = Lock()
+        self._enqueue_preparation = enqueue_preparation
         # All background and manual collectors share one authenticated WeChat
         # session lane. This prevents the scheduler, first-sync workers and a
         # bulk update from producing concurrent platform requests.
@@ -838,7 +840,7 @@ class WeChatSubscriptionService:
         if subscription["auto_process"] and item.status == "inbox":
             process_inbox_item(item.id, use_cache=True, processing_mode="full")
         else:
-            enqueue_article_source_preparation(item.id)
+            self._enqueue_preparation(item.id)
         return True
 
 

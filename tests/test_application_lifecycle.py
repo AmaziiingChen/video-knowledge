@@ -16,7 +16,9 @@ def _patch_lifecycle_dependencies(monkeypatch):
         "apply_saved_paddle_ocr_settings",
         "initialize_database",
         "resume_pending_ocr_jobs",
+        "start_article_source_preparation",
         "enqueue_pending_article_preparation",
+        "shutdown_article_source_preparation",
         "ensure_content_index_ready",
         "recover_legacy_report_documents",
         "repair_report_folder_bindings",
@@ -67,7 +69,16 @@ def test_application_lifecycle_resumes_pending_article_preparation_once(monkeypa
 
     asyncio.run(application_lifecycle.start_application())
 
+    application_lifecycle.start_article_source_preparation.assert_called_once_with()
     application_lifecycle.enqueue_pending_article_preparation.assert_called_once_with()
+
+
+def test_application_lifecycle_stops_article_preparation_after_producers(monkeypatch):
+    _patch_lifecycle_dependencies(monkeypatch)
+
+    asyncio.run(application_lifecycle.stop_application())
+
+    application_lifecycle.shutdown_article_source_preparation.assert_called_once_with(wait=True)
 
 
 def test_disabled_favorite_scheduler_never_creates_a_thread(monkeypatch):

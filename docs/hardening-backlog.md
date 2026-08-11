@@ -8,12 +8,15 @@ lines.
 
 ## RC blockers
 
-- [ ] Stop or durably hand off automatic WeChat article preparation before a
+- [x] Stop or durably hand off automatic WeChat article preparation before a
   subscription sync returns. The current `catch_up` regression can leave a
   background preparation write alive after its temporary data root is torn
-  down (`tests/test_wechat_subscriptions.py`); this is a real lifecycle
-  boundary, not a test-only cleanup workaround. Add a shutdown/restart-safe
-  behavior test before accepting RC evidence for a clean app exit.
+  down. Article preparation executors now stop idempotently after every
+  producer, recreate on the next application lifecycle, and recover incomplete
+  durable readiness at startup. Subscription service tests inject the same
+  preparation boundary instead of leaking production threads into temporary
+  data roots. The affected tests and the complete 1,111-test backend regression
+  pass in one process.
 - [x] Restore the packaged MCP bridge without weakening the local API boundary.
   The bridge must receive a scoped capability without placing it in URLs or
   logs, the unsigned DMG must contain an executable MCP entry, status checks
