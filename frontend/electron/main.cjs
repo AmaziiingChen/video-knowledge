@@ -57,9 +57,9 @@ let notificationTray = null
 let pendingNotifications = []
 
 function trayIcon() {
-  return nativeImage.createFromDataURL('data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path fill="black" d="M9 1.5a5 5 0 0 0-5 5v3.4L2.6 12v1.2h12.8V12L14 9.9V6.5a5 5 0 0 0-5-5ZM6.7 14.4a2.5 2.5 0 0 0 4.6 0H6.7Z"/></svg>'
-  ))
+  const image = nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png'))
+  image.setTemplateImage(true)
+  return image
 }
 
 function showMainWindow() {
@@ -96,7 +96,6 @@ function updateNotificationTray() {
 function createNotificationTray() {
   if (process.platform !== 'darwin' || notificationTray) return
   notificationTray = new Tray(trayIcon())
-  notificationTray.setPressedImage(trayIcon())
   notificationTray.on('click', showMainWindow)
   updateNotificationTray()
 }

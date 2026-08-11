@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">KnowledgeHub app icon</title>
-  <desc id="desc">A graphite K assembled from layered pages with a restrained spectral seam.</desc>
+  <desc id="desc">A graphite K assembled from layered pages.</desc>
   <defs>
     <linearGradient id="tile" x1="160" y1="112" x2="856" y2="924" gradientUnits="userSpaceOnUse">
       <stop stop-color="#FFFCF8"/>
@@ -9,11 +9,6 @@
     <linearGradient id="graphite" x1="300" y1="224" x2="746" y2="790" gradientUnits="userSpaceOnUse">
       <stop stop-color="#323438"/>
       <stop offset="1" stop-color="#25272A"/>
-    </linearGradient>
-    <linearGradient id="seam" x1="448" y1="474" x2="458" y2="550" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#665CFF"/>
-      <stop offset="0.52" stop-color="#527EF5"/>
-      <stop offset="1" stop-color="#45C7E8"/>
     </linearGradient>
     <filter id="tile-shadow" x="38" y="50" width="948" height="956" filterUnits="userSpaceOnUse">
       <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#17191B" flood-opacity="0.13"/>
@@ -47,7 +42,5 @@
     </g>
     <rect x="288" y="218" width="166" height="576" rx="60" fill="url(#graphite)"/>
 
-    <!-- A short theme-neutral spectrum marks the point where sources converge. -->
-    <path d="M453 496C451 505 451 519 453 528" fill="none" stroke="url(#seam)" stroke-width="4" stroke-linecap="round"/>
   </g>
 </svg>
