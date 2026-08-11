@@ -5,7 +5,7 @@
         <div ref="modelMenuRef" class="assistant-model-menu" @focusout="handleMenuFocusOut('model', $event)">
           <button class="assistant-model-pill" :class="{ open: modelMenuOpen }" type="button" aria-label="切换模型" :aria-expanded="modelMenuOpen" @click="toggleModelMenu" @keydown.esc="closeAssistantMenus">
             <span>{{ selectedAiModelLabel }}</span>
-            <el-icon class="assistant-menu-chevron"><ArrowDown /></el-icon>
+            <SvgMaskIcon class="assistant-menu-chevron" src="chevron.down" :size="14" />
           </button>
           <Transition name="assistant-model-pop">
             <div v-if="modelMenuOpen" class="assistant-model-options">
@@ -18,7 +18,7 @@
         <div v-if="qaShortcutButtons.length" ref="shortcutMenuRef" class="assistant-command-menu" @focusout="handleMenuFocusOut('shortcut', $event)">
           <button class="assistant-command-menu-button" :class="{ active: shortcutMenuOpen }" type="button" :aria-expanded="shortcutMenuOpen" :disabled="askingQuestion || !currentQaEnabled" @click="toggleShortcutMenu" @keydown.esc="closeAssistantMenus">
             <span>快捷命令</span>
-            <el-icon class="assistant-menu-chevron"><ArrowDown /></el-icon>
+            <SvgMaskIcon class="assistant-menu-chevron" src="chevron.down" :size="14" />
           </button>
         </div>
         <el-tooltip v-if="showOcrControl" :content="ocrControlTooltip" placement="top">
@@ -79,7 +79,6 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted } from 'vue'
-import { ArrowDown } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import { useAssistantComposerController } from './useAssistantComposerController.js'
 

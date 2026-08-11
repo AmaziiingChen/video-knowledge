@@ -73,7 +73,7 @@
             <span>{{ selectedNodes.length }}</span>
             <el-tooltip content="移入回收站" placement="top">
               <button class="sidebar-action-button danger" type="button" aria-label="将选中项移入回收站" @click.stop="requestDeleteSelected">
-                <el-icon><Delete /></el-icon>
+                <SvgMaskIcon :src="trashIcon" :size="16" />
               </button>
             </el-tooltip>
           </div>
@@ -160,13 +160,13 @@
               <template v-if="isMutableLibraryNode(node) || node.type === 'unread-root'" #actions>
                 <el-tooltip v-if="node.type === 'unread-root'" content="全部标记为已读" placement="top">
                   <button class="sidebar-tree-action" type="button" aria-label="全部标记为已读" @click.stop="markAllUnreadViewed">
-                    <el-icon><CircleCheck /></el-icon>
+                    <SvgMaskIcon src="checkmark.circle" :size="15" />
                   </button>
                 </el-tooltip>
                 <template v-if="isMutableLibraryNode(node)">
                   <el-tooltip v-if="node.type === 'folder'" content="新建文件夹" placement="top">
                     <button class="sidebar-tree-action" type="button" aria-label="新建子文件夹" @click.stop="startNewFolder(node.id)">
-                      <el-icon><Plus /></el-icon>
+                      <SvgMaskIcon src="append.page" :size="15" />
                     </button>
                   </el-tooltip>
                   <el-tooltip :content="node.type === 'folder' ? '重命名文件夹' : '重命名内容'" placement="top">
@@ -176,7 +176,7 @@
                   </el-tooltip>
                   <el-tooltip v-if="node.type === 'folder' && node.hasNewDescendants" content="将文件夹内全部内容标记为已读" placement="top">
                     <button class="sidebar-tree-action" type="button" aria-label="将文件夹内全部内容标记为已读" @click.stop="markFolderViewed(node)">
-                      <el-icon><CircleCheck /></el-icon>
+                      <SvgMaskIcon src="checkmark.circle" :size="15" />
                     </button>
                   </el-tooltip>
                   <el-tooltip content="移入回收站" placement="top">
@@ -253,7 +253,6 @@ import {
   sortLibraryNodes,
   unreadFolderCounts,
 } from '../features/library/libraryTreeModel.js'
-import { CircleCheck, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import LibraryTrashPanel from './LibraryTrashPanel.vue'
 import LibraryContextMenu from './LibraryContextMenu.vue'
