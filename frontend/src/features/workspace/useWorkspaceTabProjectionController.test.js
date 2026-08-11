@@ -65,5 +65,4 @@ test('falls back to the selected source text only for the active article family'
   assert.equal(controller.transcriptForTab('content:1'), '已加载正文')
   assert.equal(controller.activeWorkspaceTranscript.value, '已加载正文')
   assert.deepEqual(controller.articlePreviewForTab('content:1'), { html: '<p>预览</p>' })
-  assert.equal(controller.statusForTab('missing'), 'inbox')
 })

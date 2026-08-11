@@ -891,7 +891,6 @@ const {
   douyinVideoQuality,
   searchQuery,
   librarySearchScope,
-  searchResults,
   retryingContentId,
   libraryFolders,
   libraryFolderHistoryStates,
@@ -1002,7 +1001,6 @@ const {
   workspaceTabById,
   contentForTab,
   resultForTab,
-  statusForTab,
   mediaUrlForTab,
   originalMediaUrlForTab,
   transcriptForTab,
@@ -2222,7 +2220,6 @@ function handleStatusBreadcrumbSelect(item) {
   if (!item?.actionable) return
   activeView.value = 'library'
   searchQuery.value = ''
-  searchResults.value = []
   if (item.folderId) libraryFolderRevealIds.value = [item.folderId]
 }
 

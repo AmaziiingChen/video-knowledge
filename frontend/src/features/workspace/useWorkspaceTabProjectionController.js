@@ -45,10 +45,6 @@ export function useWorkspaceTabProjectionController({
     return matchingTasks[0] || null
   }
 
-  function statusForTab(tabId) {
-    return contentForTab(tabId)?.status || resultForTab(tabId)?.status || workspaceTabById(tabId)?.status || 'inbox'
-  }
-
   function mediaUrlForTab(tabId) {
     const tabResult = resultForTab(tabId)
     const tabContent = contentForTab(tabId)
@@ -116,7 +112,6 @@ export function useWorkspaceTabProjectionController({
     workspaceTabById,
     contentForTab,
     resultForTab,
-    statusForTab,
     mediaUrlForTab,
     originalMediaUrlForTab,
     transcriptForTab,

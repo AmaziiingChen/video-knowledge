@@ -16,14 +16,12 @@ export function useLibrarySearchController({
 } = {}) {
   const searchQuery = ref('')
   const librarySearchScope = ref('all')
-  const searchResults = ref([])
   const searchResultContentItems = ref([])
   const searchingContent = ref(false)
   let searchTimer = null
   let searchRequestVersion = 0
 
   function clearSearchState() {
-    searchResults.value = []
     searchResultContentItems.value = []
     searchingContent.value = false
   }
@@ -49,7 +47,6 @@ export function useLibrarySearchController({
         : { data: [] }
       if (requestVersion !== searchRequestVersion) return
       const itemsById = new Map((resolved.data || []).map((item) => [String(item.id), item]))
-      searchResults.value = results
       searchResultContentItems.value = contentItemIds
         .map((id) => itemsById.get(String(id)))
         .filter(Boolean)
@@ -92,7 +89,6 @@ export function useLibrarySearchController({
   return {
     searchQuery,
     librarySearchScope,
-    searchResults,
     searchResultContentItems,
     searchingContent,
     searchContent,

@@ -38,12 +38,10 @@ function createController({ request = {}, recordTelemetry = () => {} } = {}) {
 
 test('empty and one-character queries clear immediately without scheduling a request', async () => {
   const { controller, timers, cancelled } = createController()
-  controller.searchResults.value = [{ content_key: 'old' }]
   controller.searchResultContentItems.value = [{ id: 'old' }]
   controller.searchQuery.value = 'a'
   await nextTick()
 
-  assert.deepEqual(controller.searchResults.value, [])
   assert.deepEqual(controller.searchResultContentItems.value, [])
   assert.equal(timers.length, 0)
 
