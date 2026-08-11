@@ -38,7 +38,10 @@ lines.
   bundled backend are ready, import and reopen a local fixture, restart once,
   clean up and write machine-readable evidence. `scripts/smoke_macos_desktop.py`
   implements this with renderer CDP access and the existing per-session backend
-  capability; its first fresh-DMG evidence remains an RC gate.
+  capability. The first physical run corrected the port probe's macOS
+  `TIME_WAIT` handling and now reopens the persisted fixture through the real
+  on-demand library search path instead of assuming a forbidden full-content
+  startup load. Fresh-DMG evidence remains an RC gate for each candidate.
 - [x] Add a reproducible idle-resource sampler. With no active queue work,
   model download or optional automation, record the Electron/backend process
   tree's CPU, RSS, thread count and disk read/write activity after fixed warm-up

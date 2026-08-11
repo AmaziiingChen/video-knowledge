@@ -77,13 +77,36 @@ def verify_persisted_and_open(client: CdpClient, item: dict[str, str]) -> None:
       if (!response.ok || payload.id !== {item_id} || payload.title !== {title}) {{
         throw new Error(`fixture persistence failed: ${{response.status}} ${{JSON.stringify(payload)}}`)
       }}
-      const button = [...document.querySelectorAll('.sidebar-tree-row-main')]
-        .find((element) => element.textContent?.trim() === {title})
-      if (!button) throw new Error('导入资料未出现在资料库树')
+      const searchModeButton = document.querySelector('button[aria-label="搜索资料"]')
+      if (!searchModeButton) throw new Error('资料库搜索入口不可用')
+      searchModeButton.click()
+      let searchInput = null
+      for (let attempt = 0; attempt < 40; attempt += 1) {{
+        searchInput = document.querySelector('input[aria-label="搜索资料库内容"]')
+        if (searchInput) break
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }}
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      if (!searchInput || !valueSetter) throw new Error('资料库搜索输入框不可用')
+      valueSetter.call(searchInput, {title})
+      searchInput.dispatchEvent(new Event('input', {{ bubbles: true }}))
+      let button = null
+      for (let attempt = 0; attempt < 80; attempt += 1) {{
+        const label = [...document.querySelectorAll('.sidebar-tree-row-label')]
+          .find((element) => element.textContent?.trim() === {title})
+        button = label?.closest('.sidebar-tree-row-main') || null
+        if (button) break
+        await new Promise((resolve) => setTimeout(resolve, 125))
+      }}
+      if (!button) throw new Error('持久化资料未出现在搜索结果')
       button.click()
-      await new Promise((resolve) => setTimeout(resolve, 250))
-      const tab = [...document.querySelectorAll('.workspace-tab-label')]
-        .find((element) => element.textContent?.trim() === {title})
+      let tab = null
+      for (let attempt = 0; attempt < 80; attempt += 1) {{
+        tab = [...document.querySelectorAll('.workspace-tab-label')]
+          .find((element) => element.textContent?.trim() === {title})
+        if (tab) break
+        await new Promise((resolve) => setTimeout(resolve, 125))
+      }}
       if (!tab) throw new Error('导入资料未在工作区打开')
       return {{ title: tab.textContent?.trim() }}
     """))

@@ -31,6 +31,11 @@ def free_loopback_port() -> int:
 
 def require_port_available(port: int) -> None:
     with socket.socket() as listener:
+        # Match the backend server's restart semantics: a recently closed
+        # connection may remain in TIME_WAIT, but must not make a clean app
+        # restart look like an active listener. SO_REUSEADDR still rejects a
+        # process that is actually listening on this address and port.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             listener.bind(("127.0.0.1", port))
         except OSError as exc:

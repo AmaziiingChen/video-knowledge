@@ -24,12 +24,42 @@ smoke = _load("smoke_macos_desktop")
 idle = _load("measure_macos_idle")
 
 
+def test_port_probe_allows_restart_reuse_but_rejects_an_active_listener(monkeypatch):
+    calls: list[tuple[object, ...]] = []
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def setsockopt(self, *args):
+            calls.append(("setsockopt", *args))
+
+        def bind(self, address):
+            calls.append(("bind", address))
+            raise OSError("address already in use")
+
+    monkeypatch.setattr(runtime.socket, "socket", Socket)
+
+    with pytest.raises(RuntimeError, match="端口 8000 已被占用"):
+        runtime.require_port_available(8000)
+    assert calls == [
+        ("setsockopt", runtime.socket.SOL_SOCKET, runtime.socket.SO_REUSEADDR, 1),
+        ("bind", ("127.0.0.1", 8000)),
+    ]
+
+
 def test_desktop_smoke_uses_the_renderer_auth_path_without_exposing_a_capability():
     expression = smoke.renderer_expression("return true")
+    restart_source = Path(smoke.__file__).read_text(encoding="utf-8")
 
     assert "http://127.0.0.1:8000/api/health" in expression
     assert "window.knowledgeHubDesktop" not in expression
     assert "X-KnowledgeHub-Token" not in expression
+    assert 'button[aria-label="搜索资料"]' in restart_source
+    assert 'input[aria-label="搜索资料库内容"]' in restart_source
     assert runtime.redact({"token": "private-value"}, "private-value") == {"token": "[redacted]"}
 
 
