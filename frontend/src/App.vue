@@ -829,8 +829,6 @@ import ProcessLogDock from './workbench/ProcessLogDock.vue'
 import PrimarySidebar from './workbench/PrimarySidebar.vue'
 import { normalizeWorkspacePaneVisibility } from './workbench/paneVisibilityState.js'
 import { isSinglePaneWorkspaceView } from './workbench/workspaceViewLoading.js'
-import { formatReportTaskWindow } from './features/reports/reportGenerationPresentation.js'
-import { consumeReportEventStream } from './features/reports/reportEventStream.js'
 import SecondarySidebar from './features/assistant/SecondarySidebar.vue'
 import { useAppController } from './composables/useAppController'
 import { useCampusAccess } from './composables/useCampusAccess'
@@ -843,6 +841,7 @@ import { useWechatCoverController } from './features/wechat/useWechatCoverContro
 import { useWechatDraftController } from './features/wechat/useWechatDraftController.js'
 import { useWechatPublishingSettingsController } from './features/wechat/useWechatPublishingSettingsController.js'
 import { useWechatReportPromptController } from './features/prompts/useWechatReportPromptController.js'
+import { useWechatReportGenerationController } from './features/reports/useWechatReportGenerationController.js'
 import { usePromptWorkspaceController } from './features/prompts/usePromptWorkspaceController.js'
 import { useWechatAccountController } from './features/wechat/useWechatAccountController.js'
 import { useWechatFilterController } from './features/wechat/useWechatFilterController.js'
@@ -1571,21 +1570,6 @@ const {
   confirmDestructive: requestDestructiveConfirmation,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
-const wechatGeneratingGroupId = ref('')
-const wechatPreparingGroupId = ref('')
-const reportGenerationDialog = ref({
-  visible: false,
-  phase: 'checking',
-  requestId: '',
-  reportKey: '',
-  reportLabel: '报告',
-  groupName: '',
-  preflight: null,
-})
-let reportGenerationRequestSequence = 0
-let reportGenerationConfirmationResolver = null
-let reportPreflightRequest = null
-let wechatPreparingRequestId = ''
 const fixedSystemPrompts = ref([])
 const {
   promptWorkspaceTemplates,
@@ -1661,6 +1645,25 @@ let wechatInitialSyncListPollTimer = null
 function wechatErrorMessage(error, fallback = '微信公众号订阅操作失败') {
   return error?.response?.data?.detail || error?.message || fallback
 }
+
+const {
+  wechatGeneratingGroupId,
+  wechatPreparingGroupId,
+  reportGenerationDialog,
+  generateWeChatReport,
+  confirmReportGenerationDialog,
+  cancelReportGenerationDialog,
+  disposeWechatReportGenerationController,
+} = useWechatReportGenerationController({
+  reportGroups: wechatReportGroups,
+  reportGroupApi: WECHAT_REPORT_GROUP_API,
+  addLog,
+  processLogOpen,
+  refreshContentItems: loadContentItems,
+  refreshLibraryFolders: loadLibraryFolders,
+  refreshAiTokenUsage: loadAiTokenUsageSummary,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
 
 const {
   selectedWeChatAccountId,
@@ -1976,194 +1979,6 @@ async function openOriginalFile(path) {
   } catch (error) {
     ElMessage.error(wechatErrorMessage(error, '打开原始文件失败'))
   }
-}
-
-function openReportGenerationDialog({ requestId, reportKey, reportLabel, groupName }) {
-  reportGenerationConfirmationResolver?.(false)
-  reportGenerationDialog.value = {
-    visible: true,
-    phase: 'checking',
-    requestId,
-    reportKey,
-    reportLabel,
-    groupName,
-    preflight: null,
-  }
-  return new Promise((resolve) => {
-    reportGenerationConfirmationResolver = resolve
-  })
-}
-
-function confirmReportGenerationDialog() {
-  if (!reportGenerationDialog.value.visible || reportGenerationDialog.value.phase !== 'ready') return
-  reportGenerationDialog.value = { ...reportGenerationDialog.value, phase: 'submitting' }
-  const resolve = reportGenerationConfirmationResolver
-  reportGenerationConfirmationResolver = null
-  resolve?.(true)
-}
-
-function cancelReportGenerationDialog() {
-  const state = reportGenerationDialog.value
-  if (!state.visible || state.phase === 'submitting') return
-  if (reportPreflightRequest?.requestId === state.requestId) reportPreflightRequest.controller.abort()
-  const resolve = reportGenerationConfirmationResolver
-  reportGenerationConfirmationResolver = null
-  resolve?.(false)
-  reportGenerationDialog.value = { ...state, visible: false }
-  if (wechatPreparingRequestId === state.requestId) {
-    wechatPreparingRequestId = ''
-    wechatPreparingGroupId.value = ''
-  }
-}
-
-function dismissReportGenerationDialog(requestId) {
-  if (reportGenerationDialog.value.requestId !== requestId) return
-  const resolve = reportGenerationConfirmationResolver
-  reportGenerationConfirmationResolver = null
-  resolve?.(false)
-  reportGenerationDialog.value = { ...reportGenerationDialog.value, visible: false }
-}
-
-function closeReportGenerationDialog(requestId) {
-  if (reportGenerationDialog.value.requestId !== requestId) return
-  reportGenerationDialog.value = { ...reportGenerationDialog.value, visible: false }
-}
-
-async function generateWeChatReport(groupId, reportType, options = {}) {
-  if (wechatGeneratingGroupId.value || wechatPreparingGroupId.value) return
-  const reportKey = `${groupId}:${reportType}`
-  const reportLabel = { daily: '日报', weekly: '周报', range: '区间报告' }[reportType] || '汇总'
-  const groupName = wechatReportGroups.value.find((group) => group.id === groupId)?.name || '校园生活'
-  const requestId = `report-confirm-${++reportGenerationRequestSequence}`
-  const requestPayload = { report_type: reportType }
-  if (options?.windowStart && options?.windowEnd) {
-    requestPayload.window_start = options.windowStart
-    requestPayload.window_end = options.windowEnd
-    requestPayload.include_history_context = options.includeHistoryContext !== false
-  }
-  requestPayload.include_external_imports = options.includeExternalImports === true
-  if (options?.fileName) requestPayload.file_name = options.fileName
-  const preflightController = new AbortController()
-  reportPreflightRequest = { requestId, controller: preflightController }
-  wechatPreparingRequestId = requestId
-  wechatPreparingGroupId.value = reportKey
-  const confirmation = openReportGenerationDialog({
-    requestId,
-    reportKey,
-    reportLabel,
-    groupName,
-  })
-  let preflight
-  try {
-    const response = await axios.post(
-      `${WECHAT_REPORT_GROUP_API}/${groupId}/preflight`,
-      requestPayload,
-      { timeout: 30000, signal: preflightController.signal }
-    )
-    preflight = response.data || {}
-    if (reportGenerationDialog.value.requestId !== requestId) return
-    reportGenerationDialog.value = {
-      ...reportGenerationDialog.value,
-      phase: 'ready',
-      groupName: preflight.group_name || groupName,
-      preflight,
-    }
-    const confirmed = await confirmation
-    if (!confirmed) return
-  } catch (error) {
-    dismissReportGenerationDialog(requestId)
-    const canceled = axios.isCancel(error) || error?.code === 'ERR_CANCELED'
-    if (!canceled) ElMessage.error(wechatErrorMessage(error, '报告预检失败'))
-    return
-  } finally {
-    if (reportPreflightRequest?.requestId === requestId) reportPreflightRequest = null
-    if (wechatPreparingRequestId === requestId) {
-      wechatPreparingRequestId = ''
-      wechatPreparingGroupId.value = ''
-    }
-  }
-  const taskId = `report:${reportType}:${Date.now()}`
-  const windowLabel = formatReportTaskWindow(options.windowStart, options.windowEnd)
-  const taskName = `${groupName} · ${windowLabel ? `${windowLabel} ${reportLabel}` : reportLabel}`
-  wechatGeneratingGroupId.value = reportKey
-  processLogOpen.value = true
-  addLog(`开始生成${reportLabel}`, 'info', 'report_prepare', null, {
-    task_id: taskId,
-    task_name: taskName,
-    task_status: 'running',
-    task_progress: 0
-  })
-  try {
-    let receivedProgress = false
-    const result = await consumeWeChatReportStream(groupId, reportType, options, (event) => {
-      if (!receivedProgress) {
-        receivedProgress = true
-        closeReportGenerationDialog(requestId)
-      }
-      addLog(
-        event.message || '报告生成中',
-        event.level || 'info',
-        event.stage || 'report_prepare',
-        event.elapsed_seconds ?? null,
-        {
-          task_id: taskId,
-          task_name: taskName,
-          task_status: event.level === 'error' ? 'failed' : 'running',
-          task_progress: Number(event.progress || 0),
-          model: event.model || null,
-          call_count: Number(event.call_count || 0),
-          prompt_tokens: event.prompt_tokens ?? null,
-          completion_tokens: event.completion_tokens ?? null,
-          total_tokens: event.total_tokens ?? null,
-          input_chars: event.input_chars ?? null,
-          output_chars: event.output_chars ?? null,
-          estimated_cost: event.estimated_cost ?? null
-        }
-      )
-    })
-    closeReportGenerationDialog(requestId)
-    const modeLabel = result?.generation_mode === 'campus_clustered' ? '，已完成事件聚类与引用审校' : ''
-    addLog(`生成完成，共汇总 ${result?.source_count || 0} 篇文章${modeLabel}`, 'success', 'report_save', null, {
-      task_id: taskId,
-      task_name: taskName,
-      task_status: 'succeeded',
-      task_progress: 100,
-      call_count: Number(result?.ai_token_usage?.call_count || 0),
-      prompt_tokens: result?.ai_token_usage?.prompt_tokens ?? null,
-      completion_tokens: result?.ai_token_usage?.completion_tokens ?? null,
-      total_tokens: result?.ai_token_usage?.total_tokens ?? null,
-      estimated_cost: result?.ai_token_usage?.estimated_cost ?? null
-    })
-    ElMessage.success(`已生成${reportLabel}，共汇总 ${result?.source_count || 0} 篇文章${modeLabel}`)
-    await loadContentItems()
-    await loadLibraryFolders()
-  } catch (error) {
-    closeReportGenerationDialog(requestId)
-    const message = wechatErrorMessage(error, '生成报告失败')
-    addLog(message, 'error', 'report_prepare', null, {
-      task_id: taskId,
-      task_name: taskName,
-      task_status: 'failed',
-      task_progress: 100
-    })
-    ElMessage.error(message)
-  } finally {
-    closeReportGenerationDialog(requestId)
-    if (wechatGeneratingGroupId.value === reportKey) wechatGeneratingGroupId.value = ''
-    void loadAiTokenUsageSummary()
-  }
-}
-
-async function consumeWeChatReportStream(groupId, reportType, options, onProgress) {
-  const payload = { report_type: reportType }
-  if (options?.windowStart && options?.windowEnd) {
-    payload.window_start = options.windowStart
-    payload.window_end = options.windowEnd
-    payload.include_history_context = options.includeHistoryContext !== false
-  }
-  payload.include_external_imports = options.includeExternalImports === true
-  if (options?.fileName) payload.file_name = options.fileName
-  return consumeReportEventStream(`${WECHAT_REPORT_GROUP_API}/${groupId}/generate-stream`, payload, onProgress)
 }
 
 function statusbarDirectoryName(value) {
@@ -2742,9 +2557,7 @@ watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
 })
 
 onBeforeUnmount(() => {
-  reportPreflightRequest?.controller.abort()
-  reportGenerationConfirmationResolver?.(false)
-  reportGenerationConfirmationResolver = null
+  disposeWechatReportGenerationController()
   disposeWechatAccountController()
   disposeWechatCoverController()
   disposeWechatDraftController()
