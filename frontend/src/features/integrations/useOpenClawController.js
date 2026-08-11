@@ -3,7 +3,15 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { API_BASE as API } from '../../utils/localApiAuth.js'
 
-export function useOpenClawController() {
+const OPENCLAW_STATUS_POLL_INTERVAL_MS = 5 * 60 * 1000
+
+export function useOpenClawController({
+  request = axios,
+  notify = ElMessage,
+  apiBase = API,
+  scheduleInterval = (callback, delay) => window.setInterval(callback, delay),
+  cancelInterval = (timer) => window.clearInterval(timer),
+} = {}) {
   const openclawRunning = ref(false)
   const openclawScanning = ref(false)
   const openclawState = ref('unknown')
@@ -42,12 +50,12 @@ export function useOpenClawController() {
 
   function startOpenClawStatusPolling() {
     if (openclawTimer.value) return
-    openclawTimer.value = setInterval(loadOpenClawStatus, 30000)
+    openclawTimer.value = scheduleInterval(loadOpenClawStatus, OPENCLAW_STATUS_POLL_INTERVAL_MS)
   }
 
   function stopOpenClawStatusPolling() {
     if (!openclawTimer.value) return
-    clearInterval(openclawTimer.value)
+    cancelInterval(openclawTimer.value)
     openclawTimer.value = null
   }
 
@@ -60,7 +68,7 @@ export function useOpenClawController() {
 
   async function loadOpenClawStatus(forceRefresh = false) {
     try {
-      const response = await axios.get(`${API}/openclaw-gateway`, {
+      const response = await request.get(`${apiBase}/openclaw-gateway`, {
         params: forceRefresh ? { refresh: true } : undefined,
         timeout: 30000
       })
@@ -77,8 +85,8 @@ export function useOpenClawController() {
       openclawScanning.value = true
       try {
         await loadOpenClawStatus(true)
-        if (openclawRunning.value) ElMessage.success(openclawStatus.value || 'OpenClaw Gateway 运行正常')
-        else ElMessage.warning(openclawStatus.value || 'OpenClaw Gateway 未响应')
+        if (openclawRunning.value) notify.success(openclawStatus.value || 'OpenClaw Gateway 运行正常')
+        else notify.warning(openclawStatus.value || 'OpenClaw Gateway 未响应')
       } finally {
         openclawScanning.value = false
       }
@@ -87,15 +95,15 @@ export function useOpenClawController() {
 
     openclawScanning.value = true
     try {
-      const response = await axios.post(`${API}/openclaw-gateway/start`, {}, { timeout: 60000 })
+      const response = await request.post(`${apiBase}/openclaw-gateway/start`, {}, { timeout: 60000 })
       applyOpenClawStatus(response.data)
       if (!openclawRunning.value) throw new Error(openclawStatus.value || 'OpenClaw Gateway 未能启动')
-      ElMessage.success('OpenClaw Gateway 已启动')
+      notify.success('OpenClaw Gateway 已启动')
     } catch (error) {
       const message = error.response?.data?.detail || error.message || '启动 OpenClaw Gateway 失败'
       openclawRunning.value = false
       openclawStatus.value = typeof message === 'string' ? message : '启动 OpenClaw Gateway 失败'
-      ElMessage.error(openclawStatus.value)
+      notify.error(openclawStatus.value)
     } finally {
       openclawScanning.value = false
     }

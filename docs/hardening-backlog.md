@@ -52,6 +52,12 @@ lines.
   discovery now uses supported `ps` columns, while current thread counts come
   from `libproc` task information; a direct macOS probe and behavior regression
   cover that release-tool compatibility fix.
+- [x] Remove the 30-second OpenClaw deep-status cost from normal desktop idle.
+  The first physical five-minute baseline traced every CPU/RSS spike to two
+  short-lived OpenClaw CLI processes started by the renderer's status poll.
+  Startup and explicit diagnosis still refresh immediately, while background
+  status polling now runs every five minutes and remains idempotent and
+  cancellable. The exact fresh candidate must still repeat the idle baseline.
 
 ## RC verification required
 
