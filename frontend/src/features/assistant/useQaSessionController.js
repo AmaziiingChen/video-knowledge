@@ -96,38 +96,6 @@ export function useQaSessionController({
     if (isQaSessionActive(contentItemId)) qaHistory.value = session.history
   }
 
-  function projectPipelineSuggestedQuestions(contentItemId, task) {
-    const normalizedContentItemId = String(contentItemId || '')
-    const taskContentItemId = String(task?.content_item_id || '')
-    const taskId = String(task?.task_id || '')
-    if (
-      !normalizedContentItemId
-      || taskContentItemId !== normalizedContentItemId
-      || !taskId
-      || task?.status !== 'succeeded'
-      || task?.success !== true
-    ) return false
-
-    const questions = Array.isArray(task?.suggested_questions)
-      ? task.suggested_questions
-        .map((question) => String(question || '').trim())
-        .filter(Boolean)
-        .slice(0, 3)
-      : []
-    if (!questions.length) return false
-
-    const session = ensureQaSession(normalizedContentItemId)
-    if (session.lastProjectedSummaryTaskId === taskId) return false
-    // Consume the terminal result even when an active/later conversation owns
-    // the panel. Clearing that conversation must not resurrect an older task.
-    session.lastProjectedSummaryTaskId = taskId
-    if (session.asking || session.generatingSummary || session.history.length) return false
-
-    session.suggestedQuestions = questions
-    syncQaSessionIfActive(normalizedContentItemId, session)
-    return true
-  }
-
   function clearQaSession(contentItemId, session = ensureQaSession(contentItemId)) {
     clearQaSessionState(session)
     syncQaSessionIfActive(contentItemId, session)
@@ -206,11 +174,7 @@ export function useQaSessionController({
         session.history = session.history.length === initialHistoryLength
           ? savedItems
           : [...savedItems, ...session.history]
-        // An empty persisted conversation must not erase suggestions delivered
-        // by a just-completed automatic summary while history was loading.
-        if (session.history.length) {
-          session.suggestedQuestions = session.history.at(-1)?.suggestedQuestions || []
-        }
+        session.suggestedQuestions = session.history.at(-1)?.suggestedQuestions || []
         session.historyLoaded = true
         session.historyHasMore = Boolean(response.data?.has_more)
         session.historyNextBefore = String(response.data?.next_before || '')
@@ -304,7 +268,6 @@ export function useQaSessionController({
     detachQaSession,
     syncQaSessionIfActive,
     refreshQaSessionHistory,
-    projectPipelineSuggestedQuestions,
     clearQaSession,
     resetActiveQaSession,
     insertQaShortcut,

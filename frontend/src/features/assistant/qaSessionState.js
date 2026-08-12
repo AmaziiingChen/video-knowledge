@@ -14,7 +14,6 @@ export function createQaSession() {
     generatingSummaryReasoning: '',
     generatingSummaryReasoningExpanded: false,
     suggestedQuestions: [],
-    lastProjectedSummaryTaskId: '',
     lastSaved: false,
     historyLoaded: false,
     historyLoading: false,
@@ -36,9 +35,6 @@ export function clearQaSessionState(session) {
   session.generatingSummaryReasoning = ''
   session.generatingSummaryReasoningExpanded = false
   session.suggestedQuestions = []
-  // Keep the consumed task marker across an explicit clear/new conversation.
-  // Otherwise the same completed pipeline task would immediately restore its
-  // old suggestions into the newly emptied conversation.
   session.lastSaved = false
   session.historyLoading = false
   session.historyLoadingMore = false

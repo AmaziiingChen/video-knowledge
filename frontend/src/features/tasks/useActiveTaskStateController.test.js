@@ -43,7 +43,6 @@ test('reset restores the complete idle projection and releases task-owned state'
     summary: '摘要',
     reasoning_content: '思考',
     reasoning_truncated: true,
-    suggested_questions: ['接下来呢？'],
     ai_calls: [{ id: 1 }],
     timings: { total: 2 },
     overall_progress: 80,
@@ -62,7 +61,6 @@ test('reset restores the complete idle projection and releases task-owned state'
   assert.equal(controller.result.summary, null)
   assert.equal(controller.result.reasoning_content, '')
   assert.equal(controller.result.reasoning_truncated, false)
-  assert.deepEqual(controller.result.suggested_questions, [])
   assert.deepEqual(controller.result.ai_calls, [])
   assert.deepEqual(controller.result.timings, {})
   assert.equal(controller.result.overall_progress, 0)
@@ -91,7 +89,6 @@ test('applies a backend snapshot, forwards logs, and advances the visible step',
     summary: '摘要',
     reasoning_content: '思考',
     reasoning_truncated: true,
-    suggested_questions: ['问题一？', '问题二？', '问题三？', '问题四？'],
     display_title: '显示标题',
     source_title: '来源标题',
     logs: [{ message: '处理中' }],
@@ -111,7 +108,6 @@ test('applies a backend snapshot, forwards logs, and advances the visible step',
   assert.equal(harness.controller.result.transcript, '正文')
   assert.equal(harness.controller.result.reasoning_content, '思考')
   assert.equal(harness.controller.result.reasoning_truncated, true)
-  assert.deepEqual(harness.controller.result.suggested_questions, ['问题一？', '问题二？', '问题三？'])
   assert.equal(harness.controller.result.overall_progress, 42.5)
   assert.deepEqual(harness.controller.result.progress, { transcribe: 40 })
   assert.equal(harness.controller.taskStatus.value, 'running')
