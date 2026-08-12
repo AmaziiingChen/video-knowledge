@@ -115,6 +115,7 @@ export function createQaResponseStreamController({
 
   function finalizeQaStreamDone(data, pendingItem, contentItemId, options = {}) {
     const session = options.session || null
+    const hadReasoning = Boolean(pendingItem.reasoning)
     // A response belonging to article A can finish after the user has opened
     // article B. Persisting happened server-side already; only update the
     // visible Markdown pane when it still represents A.
@@ -126,6 +127,9 @@ export function createQaResponseStreamController({
     }
     if (typeof data.answer === 'string') pendingItem.answer = data.answer
     pendingItem.reasoning = typeof data.reasoning_content === 'string' ? data.reasoning_content : (pendingItem.reasoning || '')
+    if (!hadReasoning && pendingItem.reasoning) options.onFirstReasoning?.()
+    options.onReasoning?.(pendingItem.reasoning)
+    if (typeof data.answer === 'string') options.onCommit?.(pendingItem.answer)
     pendingItem.suggestedQuestions = Array.isArray(data.suggested_questions) ? data.suggested_questions.slice(0, 3) : []
     options.onSuggestions?.(pendingItem.suggestedQuestions)
     if (typeof data.assistant_message_id === 'string' && data.assistant_message_id) {

@@ -951,6 +951,8 @@ const {
   generatingAiSummary,
   isPipelineSummaryGenerating,
   generatingSummaryText,
+  generatingSummaryReasoning,
+  generatingSummaryReasoningExpanded,
   pipelineGeneratingSummaryText,
   pipelineGeneratingSummaryReasoning,
   pipelineGeneratingSummaryReasoningTruncated,

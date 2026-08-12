@@ -1,7 +1,26 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
+import { createQaResponseStreamController } from './createQaResponseStreamController.js'
 import { useAiSummaryGenerationController } from './useAiSummaryGenerationController.js'
+
+function streamResponse(blocks) {
+  const encoder = new TextEncoder()
+  return new Response(new ReadableStream({
+    start(controller) {
+      blocks.forEach((block) => controller.enqueue(encoder.encode(block)))
+      controller.close()
+    },
+  }))
+}
+
+function immediateRenderer({ onCommit }) {
+  return {
+    enqueue: (text) => onCommit(text),
+    drain: () => Promise.resolve(),
+    flush: () => {},
+  }
+}
 
 function createSession() {
   return {
@@ -159,6 +178,35 @@ test('streams a summary with the established request, progress logs and timer li
   assert.deepEqual(session.suggestedQuestions, ['继续理解？'])
   assert.equal(session.asking, false)
   assert.equal(session.generatingSummary, false)
+  assert.deepEqual(harness.messages.success, ['AI 摘要已保存到内容记录'])
+})
+
+test('projects reasoning from a real summary response stream into the summary session', async () => {
+  const session = createSession()
+  const responseController = createQaResponseStreamController({
+    appendContentAiCall: () => {},
+    getSelectedContentItem: () => ({ id: 'content-1' }),
+    applyMarkdownState: () => {},
+    refreshQaSessionHistory: () => {},
+    refreshFallbackHistory: () => {},
+    setLastQaSaved: () => {},
+    createStreamRenderer: immediateRenderer,
+  })
+  const harness = controllerHarness({
+    session,
+    readQaStream: responseController.readQaStream,
+    fetchRequest: async () => streamResponse([
+      'event: reasoning_delta\ndata: {"text":"先检查资料"}\n\n',
+      'event: delta\ndata: {"text":"摘要正文"}\n\n',
+      'event: done\ndata: {"answer":"摘要正文","reasoning_content":"先检查资料","saved_to_content":true}\n\n',
+    ]),
+  })
+
+  await harness.controller.generateAiSummary()
+
+  assert.equal(session.generatingSummaryReasoning, '先检查资料')
+  assert.equal(session.generatingSummaryReasoningExpanded, false)
+  assert.equal(session.generatingSummaryText, '')
   assert.deepEqual(harness.messages.success, ['AI 摘要已保存到内容记录'])
 })
 

@@ -122,6 +122,38 @@ test('keeps reasoning separate, collapses on answer, and accepts authoritative s
   assert.deepEqual(session.suggestedQuestions, ['继续问？'])
 })
 
+test('publishes authoritative done-only reasoning to detached summary callbacks', async () => {
+  const pendingItem = { answer: '', reasoning: '', reasoningExpanded: false, pending: true }
+  const session = { lastSaved: false, suggestedQuestions: [] }
+  const firstReasoningCalls = []
+  const reasoningCalls = []
+  const commitCalls = []
+  const controller = createQaResponseStreamController({
+    appendContentAiCall: () => {},
+    getSelectedContentItem: () => ({ id: 'content-1' }),
+    applyMarkdownState: () => {},
+    refreshQaSessionHistory: () => {},
+    refreshFallbackHistory: () => {},
+    setLastQaSaved: () => {},
+    createStreamRenderer: immediateRenderer,
+  })
+
+  await controller.readQaStream(streamResponse([
+    'event: done\ndata: {"answer":"最终摘要","reasoning_content":"完成事件里的摘要思考"}\n\n',
+  ]), pendingItem, 'content-1', {
+    session,
+    onFirstReasoning: () => firstReasoningCalls.push(true),
+    onReasoning: (reasoning) => reasoningCalls.push(reasoning),
+    onCommit: (answer) => commitCalls.push(answer),
+  })
+
+  assert.deepEqual(firstReasoningCalls, [true])
+  assert.deepEqual(reasoningCalls, ['完成事件里的摘要思考'])
+  assert.deepEqual(commitCalls, ['最终摘要'])
+  assert.equal(pendingItem.reasoning, '完成事件里的摘要思考')
+  assert.equal(pendingItem.answer, '最终摘要')
+})
+
 test('reasoning-only interrupted stream fails without inventing an answer', async () => {
   const pendingItem = { answer: '', reasoning: '', pending: true }
   const controller = createQaResponseStreamController({
