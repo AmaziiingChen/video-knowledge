@@ -51,6 +51,7 @@ export function useAppSettingsController() {
     try {
       localStorage.setItem(ASSISTANT_SETTINGS_KEY, JSON.stringify({
         auto_qa_shortcut_recognition: Boolean(autoQaShortcutRecognition.value),
+        ai_model: assistantAiModel.value,
       }))
     } catch {
       // 本地存储失败不影响追问功能。
@@ -74,11 +75,8 @@ export function useAppSettingsController() {
   }
 
   function startSettingsPersistence() {
-    watch(selectedAiModel, (model) => {
-      assistantAiModel.value = model
-      persistAiSettings()
-    })
-    watch(autoQaShortcutRecognition, persistAssistantSettings)
+    watch(selectedAiModel, persistAiSettings)
+    watch([assistantAiModel, autoQaShortcutRecognition], persistAssistantSettings)
     watch(selectedTheme, persistAppearanceSettings)
   }
 
@@ -110,7 +108,11 @@ export function useAppSettingsController() {
       if (!raw) return false
       const data = JSON.parse(raw)
       autoQaShortcutRecognition.value = Boolean(data.auto_qa_shortcut_recognition ?? true)
-      return true
+      if (typeof data.ai_model === 'string' && data.ai_model.trim()) {
+        assistantAiModel.value = normalizeAiModelValue(data.ai_model)
+        return true
+      }
+      return false
     } catch {
       return false
     }
@@ -136,7 +138,8 @@ export function useAppSettingsController() {
   function restoreSettings() {
     restoreAsrSettings()
     const hasLocalAiSettings = restoreAiSettings()
-    restoreAssistantSettings()
+    const hasLocalAssistantModel = restoreAssistantSettings()
+    if (!hasLocalAssistantModel) assistantAiModel.value = selectedAiModel.value
     restoreAppearanceSettings()
     return { hasLocalAiSettings }
   }

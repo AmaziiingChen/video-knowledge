@@ -108,6 +108,20 @@ test('a failed or busy new-conversation request preserves the current session', 
   assert.deepEqual(messages.error, ['无法归档当前对话'])
 })
 
+test('keeps completed suggestions isolated when their content is no longer active', () => {
+  const controller = useQaSessionController()
+  const first = controller.activateQaSession('article-one')
+  first.suggestedQuestions = []
+  const second = controller.activateQaSession('article-two')
+  second.suggestedQuestions = ['第二篇建议']
+  controller.syncQaSessionIfActive('article-two', second)
+
+  first.suggestedQuestions = ['第一篇迟到建议']
+  controller.syncQaSessionIfActive('article-one', first)
+
+  assert.deepEqual(controller.suggestedQuestions.value, ['第二篇建议'])
+})
+
 test('composes shortcuts from the current session dependencies', () => {
   let autoRecognitionEnabled = true
   const templates = [{ name: '总结', template: '提炼核心观点' }]

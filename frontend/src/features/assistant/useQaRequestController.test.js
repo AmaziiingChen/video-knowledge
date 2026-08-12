@@ -144,6 +144,35 @@ test('submits selected text, bounded history and Obsidian options through the pr
   assert.equal(harness.notificationCalls.length, 0)
 })
 
+test('publishes follow-up suggestions only after the completed stream updates the active session', async () => {
+  let finishStream
+  const snapshots = []
+  const session = createSession()
+  session.suggestedQuestions = ['上一轮建议']
+  const harness = controllerHarness({
+    session,
+    syncQaSessionIfActive: (_contentItemId, currentSession) => {
+      snapshots.push([...currentSession.suggestedQuestions])
+    },
+    readQaStream: async (_response, item, _contentItemId, options) => {
+      await new Promise((resolve) => { finishStream = resolve })
+      item.pending = false
+      item.answer = '完成回答'
+      options.session.suggestedQuestions = ['完成后才出现？']
+    },
+  })
+
+  const asking = harness.controller.askQuestion('何时展示建议？')
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(snapshots, [[]])
+
+  finishStream()
+  await asking
+  assert.deepEqual(snapshots.at(-2), ['完成后才出现？'])
+  assert.deepEqual(snapshots.at(-1), ['完成后才出现？'])
+})
+
 test('records a bounded completion notification after the user switches content', async () => {
   let completionReloads = 0
   const harness = controllerHarness({
@@ -224,7 +253,10 @@ test('uses a custom template without clearing the current draft', async () => {
 })
 
 test('marks a pending question as failed and releases the session after a server error', async () => {
+  const session = createSession()
+  session.suggestedQuestions = ['失败前的旧建议']
   const harness = controllerHarness({
+    session,
     fetchRequest: async () => ({
       ok: false,
       text: async () => JSON.stringify({ detail: '模型服务不可用' }),
@@ -238,6 +270,7 @@ test('marks a pending question as failed and releases the session after a server
   assert.equal(harness.session.history[0].error, true)
   assert.equal(harness.session.history[0].answer, '追问失败')
   assert.equal(harness.session.asking, false)
+  assert.deepEqual(harness.session.suggestedQuestions, [])
   assert.deepEqual(harness.messages.error, ['模型服务不可用'])
 })
 

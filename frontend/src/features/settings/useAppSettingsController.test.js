@@ -115,12 +115,50 @@ test('persists changed AI, assistant, and appearance preferences without alterin
 
     assert.deepEqual(controller.aiRequestOptions(), { ai_model: 'deepseek-v4-pro:enabled' })
     assert.deepEqual(controller.appearanceRequestOptions(), { theme: 'night' })
-    assert.equal(controller.assistantAiModel.value, 'deepseek-v4-pro:enabled')
+    assert.equal(controller.assistantAiModel.value, 'deepseek-v4-flash:enabled')
     assert.equal(storage.getItem(AI_SETTINGS_KEY), JSON.stringify({ ai_model: 'deepseek-v4-pro:enabled' }))
-    assert.equal(storage.getItem(ASSISTANT_SETTINGS_KEY), JSON.stringify({ auto_qa_shortcut_recognition: false }))
+    assert.equal(storage.getItem(ASSISTANT_SETTINGS_KEY), JSON.stringify({
+      auto_qa_shortcut_recognition: false,
+      ai_model: 'deepseek-v4-flash:enabled',
+    }))
     assert.equal(storage.getItem(APPEARANCE_SETTINGS_KEY), JSON.stringify({ theme: 'night' }))
     assert.equal(globalThis.document.documentElement.dataset.theme, 'night')
     assert.equal(themeColor.content, '#1D211C')
+  } finally {
+    globalThis.localStorage = priorStorage
+    globalThis.document = priorDocument
+  }
+})
+
+test('restores and persists an assistant-only model without changing the global model', async () => {
+  const priorStorage = globalThis.localStorage
+  const priorDocument = globalThis.document
+  const storage = createStorage({
+    [AI_SETTINGS_KEY]: JSON.stringify({ ai_model: 'deepseek-v4-flash:enabled' }),
+    [ASSISTANT_SETTINGS_KEY]: JSON.stringify({
+      auto_qa_shortcut_recognition: true,
+      ai_model: 'qwen::qwen3.7-plus:enabled',
+    }),
+  })
+  globalThis.localStorage = storage
+  installDocument()
+  try {
+    const controller = useAppSettingsController()
+    controller.startSettingsPersistence()
+    controller.restoreSettings()
+    await nextTick()
+
+    assert.equal(controller.selectedAiModel.value, 'deepseek-v4-flash:enabled')
+    assert.equal(controller.assistantAiModel.value, 'qwen::qwen3.7-plus:enabled')
+
+    controller.assistantAiModel.value = 'mimo::mimo-v2.5:enabled'
+    await nextTick()
+    assert.equal(controller.selectedAiModel.value, 'deepseek-v4-flash:enabled')
+    assert.equal(storage.getItem(AI_SETTINGS_KEY), JSON.stringify({ ai_model: 'deepseek-v4-flash:enabled' }))
+    assert.equal(storage.getItem(ASSISTANT_SETTINGS_KEY), JSON.stringify({
+      auto_qa_shortcut_recognition: true,
+      ai_model: 'mimo::mimo-v2.5:enabled',
+    }))
   } finally {
     globalThis.localStorage = priorStorage
     globalThis.document = priorDocument

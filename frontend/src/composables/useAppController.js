@@ -247,6 +247,7 @@ export function useAppController() {
     loadDesktopBootstrapSettings,
   } = useDesktopBootstrapSettingsController({
     selectedAiModel,
+    assistantAiModel,
     normalizeAiModelValue,
     checkManualUpdate,
   })

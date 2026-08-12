@@ -10,6 +10,7 @@ function selectionProvider(selection) {
 
 export function useDesktopBootstrapSettingsController({
   selectedAiModel,
+  assistantAiModel,
   normalizeAiModelValue,
   checkManualUpdate,
   request = axios,
@@ -69,6 +70,11 @@ export function useDesktopBootstrapSettingsController({
         .filter(Boolean)
       if (!hasLocalAiSettings || !optionValues.includes(selectedAiModel.value)) {
         selectedAiModel.value = serverDefault || optionValues[0] || selectedAiModel.value
+      }
+      if (assistantAiModel && !optionValues.includes(assistantAiModel.value)) {
+        assistantAiModel.value = optionValues.includes(selectedAiModel.value)
+          ? selectedAiModel.value
+          : optionValues[0] || assistantAiModel.value
       }
 
       void checkManualUpdate()

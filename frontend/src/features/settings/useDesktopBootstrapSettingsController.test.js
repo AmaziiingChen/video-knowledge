@@ -5,12 +5,14 @@ import { ref } from 'vue'
 
 import { useDesktopBootstrapSettingsController } from './useDesktopBootstrapSettingsController.js'
 
-function createController({ responses = [], selectedModel = 'local-model' } = {}) {
+function createController({ responses = [], selectedModel = 'local-model', assistantModel = selectedModel } = {}) {
   const requests = []
   const updateChecks = []
   const selectedAiModel = ref(selectedModel)
+  const assistantAiModel = ref(assistantModel)
   const controller = useDesktopBootstrapSettingsController({
     selectedAiModel,
+    assistantAiModel,
     normalizeAiModelValue: (model) => `normalized:${model}`,
     checkManualUpdate: () => updateChecks.push('checked'),
     request: {
@@ -23,7 +25,7 @@ function createController({ responses = [], selectedModel = 'local-model' } = {}
     },
     apiBase: 'http://api.test',
   })
-  return { controller, requests, selectedAiModel, updateChecks }
+  return { controller, requests, selectedAiModel, assistantAiModel, updateChecks }
 }
 
 test('loads current backend choices without replacing a locally persisted AI model', async () => {
@@ -168,4 +170,31 @@ test('keeps an unconfigured server default instead of inventing a frontend-only 
   assert.equal(selectedAiModel.value, 'qwen::qwen3.7-plus:enabled')
   assert.equal(controller.availableAiModels.value[0].disabled, false)
   assert.equal(controller.availableAiModels.value[1].disabled, true)
+})
+
+test('reconciles only an unavailable assistant model to the enabled global default', async () => {
+  const { controller, selectedAiModel, assistantAiModel } = createController({
+    selectedModel: 'deepseek-v4-flash:enabled',
+    assistantModel: 'qwen::removed:enabled',
+    responses: [
+      {
+        default_ai_model: 'deepseek-v4-flash:enabled',
+        text_model_configured: true,
+        available_ai_models: [
+          { value: 'deepseek-v4-flash:enabled', provider: 'deepseek' },
+          { value: 'qwen::qwen3.7-plus:enabled', provider: 'qwen' },
+        ],
+      },
+      { providers: [
+        { id: 'deepseek', label: 'DeepSeek', configured: true, enabled: true },
+        { id: 'qwen', label: '千问', configured: false, enabled: true },
+      ] },
+      {},
+    ],
+  })
+
+  await controller.loadDesktopBootstrapSettings({ hasLocalAiSettings: true })
+
+  assert.equal(selectedAiModel.value, 'deepseek-v4-flash:enabled')
+  assert.equal(assistantAiModel.value, 'deepseek-v4-flash:enabled')
 })

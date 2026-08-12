@@ -110,6 +110,10 @@ export function useQaRequestController({
         }
       }
       await readQaStream(response, pendingItem, contentItemId, { session })
+      // readQaStream resolves only after the authoritative `done` event. The
+      // stream controller has updated the session by then, so expose follow-up
+      // suggestions immediately without leaking them during partial output.
+      syncQaSessionIfActive(contentItemId, session)
       // A response may finish after the user has moved to another document or
       // hidden the app. Persist a bounded local completion event in that case.
       if (
@@ -218,6 +222,7 @@ export function useQaRequestController({
         throw new Error(payload.detail || '重新生成回答失败')
       }
       await readQaStream(response, item, contentItemId, { session })
+      syncQaSessionIfActive(contentItemId, session)
       notify.success(item.obsidianError ? '回答已重新生成，但 Markdown 更新失败' : '回答已重新生成')
     } catch (error) {
       item.answer = previousAnswer
