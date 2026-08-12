@@ -141,6 +141,14 @@ class OpenAICompatibleProvider:
             return {"enable_thinking": self.thinking_type == "enabled"}
         return None
 
+    def _reasoning_effort(self) -> str | None:
+        # DeepSeek V4 accepts the thinking switch and effort as separate
+        # controls. Send both explicitly so a saved thinking selection cannot
+        # silently fall back to a response without reasoning metadata.
+        if self.name == "deepseek" and self.thinking_type == "enabled":
+            return "high"
+        return None
+
     def _safe_error(self, exc: Exception) -> RuntimeError:
         secret = str(getattr(self, "_api_key_redaction", "") or "")
         detail = str(exc).replace(secret, "••••") if secret else str(exc)
@@ -195,6 +203,9 @@ class OpenAICompatibleProvider:
         extra_body = self._extra_body()
         if extra_body:
             request["extra_body"] = extra_body
+        reasoning_effort = self._reasoning_effort()
+        if reasoning_effort:
+            request["reasoning_effort"] = reasoning_effort
         if response_format == "json_object":
             if not getattr(self, "supports_response_format", True):
                 raise ValueError("当前 Provider 未声明支持 JSON Object 输出")
@@ -259,6 +270,9 @@ class OpenAICompatibleProvider:
         extra_body = self._extra_body()
         if extra_body:
             request["extra_body"] = extra_body
+        reasoning_effort = self._reasoning_effort()
+        if reasoning_effort:
+            request["reasoning_effort"] = reasoning_effort
         if response_format == "json_object":
             if not getattr(self, "supports_response_format", True):
                 raise ValueError("当前 Provider 未声明支持 JSON Object 输出")

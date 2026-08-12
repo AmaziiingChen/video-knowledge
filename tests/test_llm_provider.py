@@ -101,6 +101,7 @@ def test_json_object_uses_standard_chat_completion_response_format():
     request = completions.calls[0]
     assert request["response_format"] == {"type": "json_object"}
     assert request["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert request["reasoning_effort"] == "high"
     assert "tools" not in request
     assert "tool_choice" not in request
 
@@ -132,6 +133,7 @@ def test_stream_events_separate_reasoning_from_json_content():
     assert request["stream"] is True
     assert request["stream_options"] == {"include_usage": True}
     assert request["response_format"] == {"type": "json_object"}
+    assert request["reasoning_effort"] == "high"
     assert "tools" not in request
     assert "tool_choice" not in request
 
@@ -146,11 +148,13 @@ def test_qwen_uses_enable_thinking_while_custom_sends_no_vendor_parameter():
     provider._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
     provider.chat([LLMMessage(role="user", content="test")])
     assert completions.calls[-1]["extra_body"] == {"enable_thinking": True}
+    assert "reasoning_effort" not in completions.calls[-1]
 
     provider.name = "custom"
     provider.thinking_parameter = "none"
     provider.chat([LLMMessage(role="user", content="test")])
     assert "extra_body" not in completions.calls[-1]
+    assert "reasoning_effort" not in completions.calls[-1]
 
 
 @pytest.mark.parametrize(

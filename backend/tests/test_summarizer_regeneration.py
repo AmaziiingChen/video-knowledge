@@ -109,3 +109,35 @@ def test_automatic_summary_caps_persistable_reasoning(monkeypatch):
     assert summary == "文章摘要"
     assert len(reasoning_updates[-1][0]) == MAX_REASONING_CONTENT_CHARS
     assert reasoning_updates[-1][1] is True
+
+
+class _LongArticleReasoningProvider:
+    name = "test"
+    model = "thinking-model"
+
+    def chat_stream_events(self, messages, *, temperature):
+        del temperature
+        user_content = messages[-1].content
+        if user_content.startswith("原文第"):
+            yield LLMStreamChunk(reasoning_content="整理思考")
+            yield LLMStreamChunk(content="压缩材料")
+            return
+        yield LLMStreamChunk(reasoning_content="总结思考")
+        yield LLMStreamChunk(content="文章摘要")
+
+
+def test_automatic_long_article_exposes_preparation_reasoning(monkeypatch):
+    monkeypatch.setattr("services.summarizer.record_ai_call", lambda **_kwargs: None)
+    reasoning_updates = []
+
+    title, summary = summarize_stream(
+        "原文" * 30_000,
+        "文章标题",
+        provider=_LongArticleReasoningProvider(),
+        task_type="article_summary",
+        on_reasoning_delta=lambda reasoning, truncated: reasoning_updates.append((reasoning, truncated)),
+    )
+
+    assert title == "文章标题"
+    assert summary == "文章摘要"
+    assert reasoning_updates[-1] == ("整理思考整理思考总结思考", False)

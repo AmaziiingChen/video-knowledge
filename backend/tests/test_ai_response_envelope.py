@@ -149,3 +149,36 @@ def test_production_summary_event_stream_separates_reasoning_body_and_trailer(mo
     ))
     _assert_stream_envelope(events)
     assert records[0]["provider_response"].usage.total_tokens == 8
+
+
+class _LongMaterialStreamingProvider:
+    name = "test"
+    model = "thinking-model"
+
+    def chat_stream_events(self, messages, *, temperature):
+        del temperature
+        user_content = messages[-1].content
+        if user_content.startswith("原文第"):
+            yield LLMStreamChunk(reasoning_content="整理材料思考")
+            yield LLMStreamChunk(content="压缩后的材料")
+            return
+        yield LLMStreamChunk(reasoning_content="形成摘要思考")
+        yield LLMStreamChunk(content="最终摘要")
+
+
+def test_long_manual_summary_streams_material_preparation_reasoning(monkeypatch):
+    monkeypatch.setattr("services.summarizer.record_ai_call", lambda **_kwargs: None)
+    events = list(stream_regenerated_content_summary_events(
+        "原文" * 30_000,
+        "长文章",
+        content_kind="article",
+        provider=_LongMaterialStreamingProvider(),
+    ))
+
+    reasoning = "".join(event.text for event in events if event.kind == "reasoning_delta")
+    answer = "".join(event.text for event in events if event.kind == "answer_delta")
+    envelope = next(event.envelope for event in events if event.kind == "done")
+    assert reasoning.startswith("整理材料思考")
+    assert reasoning.endswith("形成摘要思考")
+    assert answer == "最终摘要"
+    assert envelope.reasoning_content == reasoning
