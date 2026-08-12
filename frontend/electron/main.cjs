@@ -656,7 +656,12 @@ app.whenReady().then(async () => {
   configureWechatPreviewSession()
   configureLocalHtmlPreviewSession()
   campusWebVpn = createCampusWebVpnController({ app, BrowserWindow, session, safeStorage, dialog })
-  platformAuth = createPlatformAuthController({ BrowserWindow, session, backendUrl: BACKEND_URL })
+  platformAuth = createPlatformAuthController({
+    BrowserWindow,
+    session,
+    backendUrl: BACKEND_URL,
+    backendToken: BACKEND_INSTANCE_TOKEN,
+  })
   // Render the real Vue workbench immediately. Its data hydration waits on the
   // bridge below, so the visible shell does not make failed API requests while
   // Python is still booting.

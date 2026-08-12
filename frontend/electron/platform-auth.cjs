@@ -1,4 +1,6 @@
 const http = require('http')
+const { createHash } = require('crypto')
+const { withBackendToken } = require('./backend-request-auth.cjs')
 
 const PLATFORM_CONFIG = {
   bilibili: {
@@ -36,7 +38,14 @@ function isVerifiedPlatformSession(status) {
   return status?.state === 'valid'
 }
 
-function createPlatformAuthController({ BrowserWindow, session, backendUrl }) {
+function createPlatformAuthController({
+  BrowserWindow,
+  session,
+  backendUrl,
+  backendToken = '',
+  request = requestJson,
+  scheduleClose = setTimeout,
+}) {
   const loginWindows = new Map()
 
   function configFor(platform) {
@@ -75,7 +84,7 @@ function createPlatformAuthController({ BrowserWindow, session, backendUrl }) {
     const sessionCookies = await platformCookies(platform)
     const endpoint = `${config.statusPath}${refresh ? '?refresh=true' : ''}`
     try {
-      const response = await requestJson(backendUrl, endpoint)
+      const response = await request(backendUrl, endpoint, { token: backendToken })
       const backendStatus = platform === 'bilibili'
         ? (response.cookies?.bilibili || {})
         : response
@@ -96,18 +105,22 @@ function createPlatformAuthController({ BrowserWindow, session, backendUrl }) {
     }
   }
 
-  async function persistSession(platform) {
+  async function persistSession(platform, previousFingerprint = '') {
     const config = configFor(platform)
     const cookies = await platformCookies(platform)
     if (!config.isSignedIn(cookies)) return null
     // Credentials stay inside Electron's isolated session and this local IPC
     // bridge. They are never returned to the renderer or written to its logs.
     const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ')
-    await requestJson(backendUrl, config.apiPath, {
-      method: 'POST',
-      body: { cookie: cookieHeader },
-    })
-    return status(platform, { refresh: true })
+    const fingerprint = createHash('sha256').update(cookieHeader).digest('hex')
+    if (fingerprint !== previousFingerprint) {
+      await request(backendUrl, config.apiPath, {
+        method: 'POST',
+        body: { cookie: cookieHeader },
+        token: backendToken,
+      })
+    }
+    return { fingerprint, status: await status(platform, { refresh: true }) }
   }
 
   function openLoginWindow(platform, parentWindow) {
@@ -137,18 +150,35 @@ function createPlatformAuthController({ BrowserWindow, session, backendUrl }) {
     })
     loginWindows.set(platform, loginWindow)
     let completing = false
-    const persistIfSignedIn = async () => {
+    let persistAttempt = null
+    let persistRequested = false
+    let lastPersistedFingerprint = ''
+    const persistIfSignedIn = () => {
       if (completing || loginWindow.isDestroyed()) return false
-      const saved = await persistSession(platform).catch(() => null)
-      // Xiaohongshu can issue a `web_session` cookie to an anonymous visitor.
-      // Keep the login window open until the backend has verified the actual
-      // session rather than treating the cookie name alone as completion.
-      if (!isVerifiedPlatformSession(saved)) return false
-      completing = true
-      setTimeout(() => {
-        if (!loginWindow.isDestroyed()) loginWindow.close()
-      }, 350)
-      return true
+      if (persistAttempt) {
+        persistRequested = true
+        return persistAttempt
+      }
+      persistAttempt = (async () => {
+        const saved = await persistSession(platform, lastPersistedFingerprint).catch(() => null)
+        if (saved?.fingerprint) lastPersistedFingerprint = saved.fingerprint
+        // Xiaohongshu can issue a `web_session` cookie to an anonymous visitor.
+        // Keep the login window open until the backend has verified the actual
+        // session rather than treating the cookie name alone as completion.
+        if (!isVerifiedPlatformSession(saved?.status)) return false
+        completing = true
+        scheduleClose(() => {
+          if (!loginWindow.isDestroyed()) loginWindow.close()
+        }, 350)
+        return true
+      })().finally(() => {
+        persistAttempt = null
+        if (persistRequested && !completing && !loginWindow.isDestroyed()) {
+          persistRequested = false
+          void persistIfSignedIn()
+        }
+      })
+      return persistAttempt
     }
     const activeSession = platformSession(platform)
     const cookieListener = () => { void persistIfSignedIn() }
@@ -185,20 +215,28 @@ function createPlatformAuthController({ BrowserWindow, session, backendUrl }) {
     const window = loginWindows.get(platform)
     if (window && !window.isDestroyed()) window.close()
     await platformSession(platform).clearStorageData()
-    await requestJson(backendUrl, config.apiPath, { method: 'DELETE' })
+    await request(backendUrl, config.apiPath, { method: 'DELETE', token: backendToken })
     return status(platform, { refresh: true })
   }
 
   return { connect, disconnect, status }
 }
 
-function requestJson(baseUrl, path, { method = 'GET', body = null } = {}) {
+function requestJson(baseUrl, path, {
+  method = 'GET',
+  body = null,
+  token = '',
+  requestImpl = http.request,
+} = {}) {
   const target = new URL(path, baseUrl)
   const payload = body === null ? '' : JSON.stringify(body)
   return new Promise((resolve, reject) => {
-    const request = http.request(target, {
+    const request = requestImpl(target, {
       method,
-      headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+      headers: withBackendToken(
+        payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+        token,
+      ),
       timeout: 15000,
     }, (response) => {
       const chunks = []
@@ -218,4 +256,4 @@ function requestJson(baseUrl, path, { method = 'GET', body = null } = {}) {
   })
 }
 
-module.exports = { PLATFORM_CONFIG, createPlatformAuthController, isVerifiedPlatformSession }
+module.exports = { PLATFORM_CONFIG, createPlatformAuthController, isVerifiedPlatformSession, requestJson }
