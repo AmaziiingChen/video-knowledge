@@ -113,9 +113,6 @@ class _EnvelopeStreamingProvider:
     name = "test"
     model = "test-stream"
 
-    def chat(self, *_args, **_kwargs):
-        raise AssertionError("valid trailer must not trigger the fallback call")
-
     def chat_stream_events(self, *_args, **_kwargs):
         yield LLMStreamChunk(reasoning_content="先核对")
         yield LLMStreamChunk(content="纯正文")

@@ -64,22 +64,6 @@ def normalize_suggested_questions(value: object) -> list[str]:
     return result
 
 
-def parse_suggested_questions_response(value: object) -> list[str]:
-    """Recover one bounded JSON object from fenced or lightly noisy output."""
-    raw = str(value or "").strip()[:MAX_TRAILER_CHARS]
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(raw):
-        if character != "{":
-            continue
-        try:
-            parsed, _end = decoder.raw_decode(raw[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict) and isinstance(parsed.get("questions"), list):
-            return normalize_suggested_questions(parsed["questions"])
-    raise ValueError("模型没有返回有效的推荐问题 JSON 对象")
-
-
 def suggested_questions_json(value: object) -> str:
     return json.dumps(
         normalize_suggested_questions(value), ensure_ascii=False, separators=(",", ":")

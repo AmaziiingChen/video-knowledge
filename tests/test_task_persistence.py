@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from config import settings
 from fastapi.testclient import TestClient
+
 from main import app
 from presentation.task_responses import to_task_response
 from services.pipeline_runner import (
@@ -24,6 +24,7 @@ from services.task_manager import (
     TaskPersistenceError,
     TaskRecord,
 )
+from config import settings
 
 
 def test_task_create_failure_never_leaves_an_in_memory_ghost():
@@ -96,7 +97,6 @@ def test_completed_summary_reasoning_survives_task_manager_restart():
                 summary="可见摘要",
                 reasoning_content="独立思考",
                 reasoning_truncated=False,
-                suggested_questions=["还可以问什么？"],
             )
             assert first._persist_state(record) is True
 
@@ -110,7 +110,6 @@ def test_completed_summary_reasoning_survives_task_manager_restart():
             assert restored.result.summary == "可见摘要"
             assert restored.result.reasoning_content == "独立思考"
             assert restored.result.reasoning_truncated is False
-            assert restored.result.suggested_questions == ["还可以问什么？"]
     finally:
         if first is not None:
             first._executor.shutdown(wait=True, cancel_futures=True)
@@ -125,7 +124,6 @@ def test_legacy_task_result_without_reasoning_fields_remains_compatible():
     assert result.summary == "旧摘要"
     assert result.reasoning_content == ""
     assert result.reasoning_truncated is False
-    assert result.suggested_questions == []
 
 
 def test_task_state_persistence_retries_busy_database_and_exposes_failure():
@@ -218,7 +216,6 @@ def test_task_list_returns_compact_summaries_and_detail_endpoint_keeps_logs():
             summary="长摘要",
             reasoning_content="独立思考",
             reasoning_truncated=True,
-            suggested_questions=["还可以问什么？"],
             text_source=TextSourceInfo(kind="subtitle", source="provider"),
             ai_calls=[AICallInfo(call_type="summary", prompt_tokens=12)],
             cache_hits=["transcript"],
@@ -250,7 +247,6 @@ def test_task_list_returns_compact_summaries_and_detail_endpoint_keeps_logs():
     assert summary["reasoning_content"] == ""
     assert summary["reasoning_length"] == 4
     assert summary["reasoning_truncated"] is True
-    assert summary["suggested_questions"] == ["还可以问什么？"]
     assert summary["text_source"] is None
     assert summary["ai_calls"] == []
     assert summary["cache_hits"] == []
@@ -263,7 +259,6 @@ def test_task_list_returns_compact_summaries_and_detail_endpoint_keeps_logs():
     assert detail["details_included"] is True
     assert detail["transcript"] == "长转写"
     assert detail["reasoning_content"] == "独立思考"
-    assert detail["suggested_questions"] == ["还可以问什么？"]
     assert detail["logs"][0]["message"] == "失败详情"
     assert detail["ai_calls"][0]["prompt_tokens"] == 12
     assert detail["error_info"]["message"] == "服务暂不可用"

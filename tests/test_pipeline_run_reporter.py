@@ -107,13 +107,3 @@ def test_streamed_reasoning_is_separate_bounded_and_coalesced() -> None:
     assert response.reasoning_content == "核对材料"
     assert response.reasoning_truncated is True
     assert [snapshot.reasoning_content for snapshot in snapshots] == ["核", "核对材料"]
-
-
-def test_completed_summary_suggestions_remain_separate_from_summary() -> None:
-    response = PipelineResponse(success=False, summary="正文")
-    reporter = PipelineRunReporter(response, None)
-
-    reporter.publish_suggested_questions(["问题一？", "问题二？"])
-
-    assert response.summary == "正文"
-    assert response.suggested_questions == ["问题一？", "问题二？"]

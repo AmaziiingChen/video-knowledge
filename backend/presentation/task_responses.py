@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+
 from services.pipeline_runner import (
     AICallInfo,
     DownloadTransferInfo,
@@ -35,7 +36,6 @@ class TaskResponse(BaseModel):
     reasoning_content: str = ""
     reasoning_length: int = 0
     reasoning_truncated: bool = False
-    suggested_questions: list[str] = Field(default_factory=list)
     obsidian_path: str | None = None
     markdown_draft_path: str | None = None
     whisper_model: str | None = None
@@ -88,7 +88,6 @@ def to_task_response(
         reasoning_content=result.reasoning_content if result and include_heavy_payload else "",
         reasoning_length=len(result.reasoning_content or "") if result else 0,
         reasoning_truncated=bool(result and result.reasoning_truncated),
-        suggested_questions=result.suggested_questions if result else [],
         obsidian_path=result.obsidian_path if result else None,
         markdown_draft_path=result.markdown_draft_path if result else None,
         whisper_model=result.whisper_model if result else record.whisper_model,

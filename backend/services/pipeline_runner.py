@@ -882,12 +882,12 @@ def run_pipeline_sync(
                 content_title,
                 model=ai_model,
                 task_type="article_summary" if is_article else "summary",
-                task_id=response.task_id, content_item_id=content_item_id,
+                task_id=response.task_id,
+                content_item_id=content_item_id,
                 ai_call_callback=remember_ai_call("summary"),
                 transcript_segments=transcript_segments if not is_article else None,
                 source_context=source_context,
                 on_delta=publish_summary_delta, on_reasoning_delta=reporter.publish_reasoning_delta,
-                on_suggested_questions=reporter.publish_suggested_questions,
                 cancel_check=check_cancel,
             )
         except PipelineCancelled:
