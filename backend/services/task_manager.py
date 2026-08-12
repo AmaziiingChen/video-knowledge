@@ -22,7 +22,7 @@ from services.database import (
 from services.pipeline_runner import PipelineLog, PipelineRequest, PipelineResponse, classify_pipeline_error, run_pipeline_sync
 from services.repository import ContentRepository, TaskRepository
 from config import settings
-from services.telemetry import record as record_telemetry
+from services.telemetry import record as record_telemetry, telemetry_stage_bucket
 from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_request, xiaohongshu_capabilities
 
 
@@ -96,17 +96,6 @@ def _source_sync_identity(request: dict) -> tuple[str, str]:
         if value:
             return kind, value
     return kind, "bulk"
-
-
-def _duration_bucket(value: object) -> str:
-    seconds = float(value or 0)
-    if seconds < 10:
-        return "under_10s"
-    if seconds < 60:
-        return "10_60s"
-    if seconds < 300:
-        return "1_5m"
-    return "5m_plus"
 
 
 def _request_payload(record: TaskRecord) -> dict:
@@ -610,9 +599,10 @@ class TaskManager:
                 # bottleneck, while the final terminal state is still durable.
                 self._broadcast_update(snapshot)
                 stage = str(result.step or "")
-                if stage and stage != last_telemetry_stage:
-                    last_telemetry_stage = stage
-                    record_telemetry("pipeline_stage_completed", {"stage": stage[:40]})
+                stage_bucket = telemetry_stage_bucket(stage)
+                if stage and stage_bucket != last_telemetry_stage:
+                    last_telemetry_stage = stage_bucket
+                    record_telemetry("pipeline_stage_reached", {"stage": stage_bucket})
 
             def cancel_check() -> bool:
                 with self._lock:
@@ -728,31 +718,11 @@ class TaskManager:
                     logger.info("Could not record task completion notification", exc_info=True)
             if final_snapshot.status in {"succeeded", "failed"}:
                 if final_snapshot.status == "failed":
-                    record_telemetry("pipeline_stage_failed", {"stage": str(result.step or "unknown")[:40]})
+                    record_telemetry("pipeline_stage_failed", {"stage": telemetry_stage_bucket(result.step)})
                 record_telemetry(
                     "task_finished",
-                    {"result": final_snapshot.status, "stage": str(result.step or "unknown")[:40]},
+                    {"result": final_snapshot.status, "stage": telemetry_stage_bucket(result.step)},
                 )
-                timings = result.timings or {}
-                if "download" in timings or result.step == "download":
-                    record_telemetry(
-                        "media_download_completed",
-                        {"result": final_snapshot.status, "duration_bucket": _duration_bucket(timings.get("download"))},
-                    )
-                if "transcribe" in timings or result.step == "transcribe":
-                    record_telemetry(
-                        "asr_completed",
-                        {
-                            "backend": str(final_snapshot.asr_backend or "auto")[:40],
-                            "result": final_snapshot.status,
-                            "duration_bucket": _duration_bucket(timings.get("transcribe")),
-                        },
-                    )
-                if "summarize" in timings or result.step == "summarize":
-                    record_telemetry(
-                        "ai_summary_completed",
-                        {"result": final_snapshot.status, "duration_bucket": _duration_bucket(timings.get("summarize"))},
-                    )
             self._wake_openclaw_terminal_delivery()
         except Exception as exc:
             with self._lock:

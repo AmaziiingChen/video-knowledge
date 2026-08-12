@@ -26,8 +26,10 @@ def test_telemetry_requires_the_current_notice_and_sanitizes_unknown_enum_values
         assert telemetry.set_enabled(True, notice_version=telemetry.PRIVACY_NOTICE_VERSION)["enabled"] is True
         assert telemetry.record("task_finished", {"result": "failed", "stage": "user supplied path"}) is True
         assert telemetry.status()["pending_events"] == 2
-        with pytest.raises(ValueError, match="未允许字段"):
+        with pytest.raises(ValueError, match="固定目录"):
             telemetry.record("task_finished", {"error": "a user URL must never be stored"})
+        with pytest.raises(ValueError, match="固定目录"):
+            telemetry.record("task_finished", {"result": "failed"})
         payloads = telemetry.event_payloads_for_upload()
         assert payloads[-1]["properties"] == {"result": "failed", "stage": "other"}
         batch = telemetry.upload_batch()
@@ -40,11 +42,30 @@ def test_telemetry_requires_the_current_notice_and_sanitizes_unknown_enum_values
         assert telemetry.set_enabled(False) == {
             "enabled": False,
             "pending_events": 0,
-            "event_catalog_size": 20,
+            "event_catalog_size": 17,
             "privacy_notice_version": telemetry.PRIVACY_NOTICE_VERSION,
             "requires_consent": True,
         }
         assert telemetry.event_payloads_for_upload() == []
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected"),
+    [
+        ("", "unknown"),
+        ("parse", "prepare"),
+        ("info", "prepare"),
+        ("extract_audio", "prepare"),
+        ("wait_for_ocr", "ocr"),
+        ("transcribe", "transcribe"),
+        ("summarize", "summary"),
+        ("save", "export"),
+        ("cover_generate", "analyze"),
+        ("private/path", "other"),
+    ],
+)
+def test_internal_pipeline_stages_map_to_the_fixed_public_catalog(stage, expected):
+    assert telemetry.telemetry_stage_bucket(stage) == expected
 
 
 def test_telemetry_discards_an_old_consent_queue_when_the_notice_changes():

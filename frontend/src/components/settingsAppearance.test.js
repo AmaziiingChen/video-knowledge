@@ -47,6 +47,14 @@ test('Telegram controls are absent from the desktop UI', () => {
   assert.doesNotMatch(chromeSource, /Telegram|telegram/)
 })
 
+test('privacy settings disclose Cloudflare delivery and the three-month retention boundary', () => {
+  assert.match(source, /17 个固定检查点/)
+  assert.match(source, /低频发送到 Cloudflare/)
+  assert.match(source, /匿名数据最多保留 3 个月/)
+  assert.match(source, /关闭后会删除本机待发送事件/)
+  assert.doesNotMatch(source, /未配置官方 HTTPS 收集端前不会上传/)
+})
+
 test('Xiaohongshu feature capabilities keep single-note credentials separate from unsupported sync', () => {
   assert.match(source, /当前仅支持主动导入单篇图文，收藏、创作者同步与评论采集暂未开放/)
   assert.match(source, /:disabled="!platformAuthAvailable \|\| !xiaohongshuSessionProbeAvailable"/)

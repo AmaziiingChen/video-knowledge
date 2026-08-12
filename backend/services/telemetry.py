@@ -19,7 +19,7 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
     "import_started": frozenset({"input_kind"}),
     "import_completed": frozenset({"result"}),
     "task_enqueued": frozenset({"processing_mode"}),
-    "pipeline_stage_completed": frozenset({"stage"}),
+    "pipeline_stage_reached": frozenset({"stage"}),
     "pipeline_stage_failed": frozenset({"stage"}),
     "task_finished": frozenset({"result", "stage"}),
     "task_control_used": frozenset({"action"}),
@@ -30,9 +30,6 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
     "update_check_completed": frozenset({"result"}),
     "telemetry_consent_changed": frozenset({"state"}),
     "update_download_page_opened": frozenset(),
-    "media_download_completed": frozenset({"result", "duration_bucket"}),
-    "asr_completed": frozenset({"backend", "result", "duration_bucket"}),
-    "ai_summary_completed": frozenset({"result", "duration_bucket"}),
     "export_completed": frozenset({"export_kind", "result"}),
 }
 
@@ -40,14 +37,12 @@ EVENT_FIELDS: dict[str, frozenset[str]] = {
 # events or fields must advance it, which makes an installed older consent
 # inactive until the person has read the updated, non-modal notice.
 SCHEMA_VERSION = 1
-PRIVACY_NOTICE_VERSION = "2026-08-telemetry-v1"
+PRIVACY_NOTICE_VERSION = "2026-08-telemetry-v2"
 MAX_PENDING_EVENTS = 10_000
 MAX_EVENT_AGE_DAYS = 14
 
 _ENUM_VALUES: dict[str, frozenset[str]] = {
     "action": frozenset({"retry", "pause", "resume", "cancel"}),
-    "backend": frozenset({"faster_whisper", "mlx", "other"}),
-    "duration_bucket": frozenset({"0_1m", "1_10m", "10_60m", "60m_plus", "other"}),
     "export_kind": frozenset({"markdown", "other"}),
     "input_kind": frozenset({"link", "other"}),
     "processing_mode": frozenset({"full", "transcript", "other"}),
@@ -132,14 +127,41 @@ def _sanitize_properties(event_name: str, properties: dict[str, Any] | None) -> 
     if allowed is None:
         raise ValueError("未知遥测事件")
     payload = properties or {}
-    if set(payload) - allowed:
-        raise ValueError("遥测事件包含未允许字段")
+    if set(payload) != allowed:
+        raise ValueError("遥测事件字段与固定目录不一致")
     sanitized: dict[str, str] = {}
     for key, value in payload.items():
         choices = _ENUM_VALUES[key]
         normalized = value if isinstance(value, str) else "other"
         sanitized[key] = normalized if normalized in choices else "other"
     return sanitized
+
+
+def telemetry_stage_bucket(value: object) -> str:
+    """Map internal pipeline steps to the public, fixed telemetry catalog."""
+    stage = str(value or "").strip().lower()
+    mapped = {
+        "queued": "queued",
+        "parse": "prepare",
+        "info": "prepare",
+        "extract": "prepare",
+        "download": "download",
+        "extract_audio": "prepare",
+        "wait_for_ocr": "ocr",
+        "ocr": "ocr",
+        "transcribe": "transcribe",
+        "asr": "asr",
+        "analyze": "analyze",
+        "cover_generate": "analyze",
+        "summarize": "summary",
+        "summary": "summary",
+        "save": "export",
+        "export": "export",
+        "executor": "executor",
+    }
+    if not stage:
+        return "unknown"
+    return mapped.get(stage, "other")
 
 
 def _flush_locked() -> None:

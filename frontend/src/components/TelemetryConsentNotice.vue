@@ -2,7 +2,7 @@
   <aside class="telemetry-consent-notice" aria-label="隐私与诊断说明" role="status">
     <div class="telemetry-consent-copy">
       <strong>帮助改进 KnowledgeHub</strong>
-      <p>如你允许，我们会发送匿名的启动、功能结果和错误类别，用于修复问题。不会发送资料内容、搜索词、链接、路径、账号或密钥。</p>
+      <p>如你允许，我们会通过 Cloudflare 发送匿名的启动、功能结果和处理阶段，最多保留 3 个月。不会发送资料内容、搜索词、链接、路径、账号或密钥。</p>
     </div>
     <div class="telemetry-consent-actions">
       <button class="telemetry-consent-allow" type="button" :disabled="saving" @click="$emit('allow')">允许匿名诊断数据</button>

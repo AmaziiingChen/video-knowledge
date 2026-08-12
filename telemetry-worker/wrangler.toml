@@ -1,9 +1,37 @@
 name = "knowledgehub-telemetry-collector"
 main = "src/collector.js"
-compatibility_date = "2026-08-11"
+compatibility_date = "2026-08-12"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+persist = false
 
 [[analytics_engine_datasets]]
 binding = "TELEMETRY"
 dataset = "knowledgehub_telemetry"
 
+[[ratelimits]]
+name = "INGEST_GLOBAL_RATE_LIMITER"
+namespace_id = "24081301"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
+[[ratelimits]]
+name = "INGEST_INSTALLATION_RATE_LIMITER"
+namespace_id = "24081302"
+
+  [ratelimits.simple]
+  limit = 2
+  period = 60
+
 # Set INSTALLATION_HMAC_KEY with `wrangler secret put`; never commit it.
+[secrets]
+required = ["INSTALLATION_HMAC_KEY"]

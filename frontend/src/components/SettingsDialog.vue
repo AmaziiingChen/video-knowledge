@@ -91,13 +91,13 @@
             <div class="settings-row">
               <div class="settings-row-copy">
                 <h3>发送匿名使用数据</h3>
-                <p>仅在你允许后记录 20 个固定检查点的结果，不包含文章、视频、OCR 文本、搜索词、路径、链接、账号或密钥。关闭会删除本机待发送事件；事件范围变更时会再次告知。</p>
+                <p>仅在你允许后记录 17 个固定检查点的结果，并低频发送到 Cloudflare。不会包含文章、视频、OCR 文本、搜索词、路径、链接、账号或密钥；匿名数据最多保留 3 个月。事件范围变更时会再次告知。</p>
               </div>
               <div class="settings-row-control settings-switch-control">
                 <el-switch v-model="telemetryEnabled" :loading="telemetrySaving" aria-label="发送匿名使用数据" @change="saveTelemetry" />
               </div>
             </div>
-            <p class="settings-group-note">本机待发送：{{ telemetryPendingEvents }} 条。未配置官方 HTTPS 收集端前不会上传。</p>
+            <p class="settings-group-note">本机待发送：{{ telemetryPendingEvents }} 条。关闭后会删除本机待发送事件；已发送的匿名数据将在保留期结束后删除。</p>
           </div>
         </section>
 

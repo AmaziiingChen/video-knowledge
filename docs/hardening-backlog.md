@@ -543,23 +543,35 @@ data-integrity, ownership-conflict or test-isolation blocker.
   orchestration. Further report normalization or writing splits are deferred
   unless stabilization evidence proves that they block correctness, testing or
   release work.
-- [x] Close the consented telemetry upload boundary without enabling a network
+- [x] Close the consented telemetry upload boundary before enabling a network
   destination. The desktop uploader batches only the fixed local schema, accepts
   only an exact HTTPS host compiled into the same reviewed release, disables
   redirects and environment proxies, retains events after failures, deletes only
   acknowledged event IDs and uses a 12-hour interval during healthy or empty
   operation, with bounded exponential retry after failures.
-  With both the source allowlist and collector URL empty, arbitrary environment
-  overrides cannot create a thread or request. Direct backend and Worker tests,
-  the complete backend regression, dependency audits, architecture budget and
-  public-tree scan pass for this boundary.
-- [ ] Keep the telemetry collector undeployed until an approved HTTPS hostname,
-  data-processing owner, retention notice and Cloudflare account authorization
-  are recorded. Domain selection, DNS, Worker deployment and production
-  allowlist/URL activation explicitly stop here for this release-candidate
-  cycle. The checked-in Worker accepts only the fixed opt-in schema; the desktop
-  release keeps its collector URL blank and therefore makes no telemetry network
-  request.
+  Arbitrary environment overrides cannot change the exact reviewed destination.
+  Direct backend and Worker tests, architecture budget and public-tree scan pass
+  for this boundary.
+- [x] Deploy and verify a beta Cloudflare collector on the free exact
+  `knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev` hostname.
+  Notice v2 names Cloudflare and the three-month Analytics Engine retention;
+  the desktop remains opt-in. Preview URLs and persistent invocation logs are
+  disabled, the Worker accepts only the 17-event exact fixed schema with a 256 KiB body
+  ceiling, and two HMAC/IP-free Workers Rate Limiting bindings reduce public
+  endpoint abuse. The public URL is allowed in the package; HMAC and Analytics
+  query secrets remain out of the repository and DMG. Remote smoke verification
+  on 2026-08-13 confirmed route rejection, strict-schema rejection, the 256 KiB
+  boundary, a successful test write and Analytics Engine readback with only the
+  monthly HMAC index.
+- [ ] Add transactional `event_id` idempotency only if duplicate-resistant raw
+  event counts become necessary. The beta Analytics Engine path is explicitly
+  at-least-once, so queries must deduplicate by `event_id` and account for
+  `_sample_interval`; do not claim exact event totals meanwhile.
+- [ ] Before treating telemetry as a critical production service, move from
+  `workers.dev` to a controlled domain/environment, revisit stronger global
+  abuse controls and document the final data-processing owner and access roles.
+  The beta endpoint is non-critical and telemetry failure must never affect the
+  local product.
 - [x] Keep the unlicensed `Spider_XHS` copy outside the public tree and restore
   only a narrow, independently implemented browser boundary. Session probing
   and user-initiated single-note imports observe exact page-initiated response

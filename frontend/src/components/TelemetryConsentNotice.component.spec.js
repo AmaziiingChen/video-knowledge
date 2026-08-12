@@ -7,6 +7,8 @@ describe('TelemetryConsentNotice', () => {
     const wrapper = mount(TelemetryConsentNotice)
 
     expect(wrapper.attributes('role')).toBe('status')
+    expect(wrapper.text()).toContain('通过 Cloudflare')
+    expect(wrapper.text()).toContain('最多保留 3 个月')
     expect(wrapper.text()).toContain('不会发送资料内容、搜索词、链接、路径、账号或密钥')
 
     const buttons = wrapper.findAll('button')

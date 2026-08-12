@@ -174,8 +174,11 @@ class Settings(BaseSettings):
     release_manifest_url: str = ""
     download_page_url: str = ""
     # The public collector is compiled as an exact-host allowlist in
-    # telemetry_uploader. Empty keeps every release completely offline.
-    telemetry_collector_url: str = ""
+    # telemetry_uploader. The background loop may exist before consent, but it
+    # cannot build a batch or create a network request until consent is active.
+    telemetry_collector_url: str = (
+        "https://knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev/v1/events"
+    )
 
 settings = Settings()
 ensure_private_data_directory(settings.data_dir)

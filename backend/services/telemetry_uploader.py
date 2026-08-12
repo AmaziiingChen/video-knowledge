@@ -13,9 +13,11 @@ from config import settings
 from services import telemetry
 
 COLLECTOR_PATH = "/v1/events"
-# Add the reviewed production hostname in the same commit that enables a
-# collector URL. Keeping this empty makes arbitrary environment overrides inert.
-OFFICIAL_COLLECTOR_HOSTS: frozenset[str] = frozenset()
+# Exact reviewed Cloudflare Workers hostname. Sibling workers, preview URLs,
+# ports, redirects and environment-provided destinations remain inert.
+OFFICIAL_COLLECTOR_HOSTS: frozenset[str] = frozenset(
+    {"knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev"}
+)
 INITIAL_DELAY_SECONDS = 60.0
 REGULAR_INTERVAL_SECONDS = 12 * 60 * 60.0
 MIN_RETRY_SECONDS = 5 * 60.0

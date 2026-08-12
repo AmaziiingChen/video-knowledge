@@ -190,6 +190,49 @@ def test_task_cancel_persists_after_releasing_manager_lock():
         manager._executor.shutdown(wait=True, cancel_futures=True)
 
 
+def test_task_telemetry_reports_reached_buckets_and_proven_failures_without_inventing_stage_results():
+    manager = TaskManager()
+    events = []
+    record = manager._record_from_request(
+        "telemetry-task",
+        PipelineRequest(share_text="https://example.com/article"),
+    )
+    with manager._lock:
+        manager._tasks[record.task_id] = record
+
+    def run_pipeline(*args, on_update, **kwargs):
+        on_update(PipelineResponse(success=False, step="parse"))
+        on_update(PipelineResponse(success=False, step="info"))
+        on_update(PipelineResponse(success=False, step="summarize"))
+        return PipelineResponse(
+            success=False,
+            step="summarize",
+            error="provider unavailable",
+            timings={"download": 0.0, "transcribe": 0.0, "summarize": 1.0},
+        )
+
+    try:
+        with (
+            patch("services.task_manager.run_pipeline_sync", side_effect=run_pipeline),
+            patch("services.task_manager.record_telemetry", side_effect=lambda name, properties: events.append((name, properties))),
+            patch.object(manager, "_persist_state", return_value=True),
+            patch.object(manager, "_persist_content_status"),
+            patch.object(manager, "_broadcast_update"),
+            patch.object(manager, "_schedule_next"),
+            patch.object(manager, "_wake_openclaw_terminal_delivery"),
+        ):
+            manager._run(record.task_id)
+
+        assert events == [
+            ("pipeline_stage_reached", {"stage": "prepare"}),
+            ("pipeline_stage_reached", {"stage": "summary"}),
+            ("pipeline_stage_failed", {"stage": "summary"}),
+            ("task_finished", {"result": "failed", "stage": "summary"}),
+        ]
+    finally:
+        manager._executor.shutdown(wait=True, cancel_futures=True)
+
+
 def test_task_persistence_failure_is_returned_as_service_unavailable():
     with patch(
         "routers.tasks.task_manager.create",

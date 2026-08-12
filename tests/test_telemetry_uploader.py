@@ -8,6 +8,8 @@ from services import telemetry_uploader
 
 ALLOWED_HOSTS = frozenset({"telemetry.example.test"})
 COLLECTOR_URL = "https://telemetry.example.test/v1/events"
+OFFICIAL_HOST = "knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev"
+OFFICIAL_URL = f"https://{OFFICIAL_HOST}/v1/events"
 
 
 class _Response:
@@ -51,6 +53,20 @@ def test_collector_url_requires_the_exact_reviewed_https_destination():
         "https://127.0.0.1/v1/events",
     ):
         assert telemetry_uploader.validated_collector_url(value, allowed_hosts=ALLOWED_HOSTS) == ""
+
+
+def test_default_collector_accepts_only_the_exact_workers_dev_host():
+    assert telemetry_uploader.settings.telemetry_collector_url == OFFICIAL_URL
+    assert telemetry_uploader.OFFICIAL_COLLECTOR_HOSTS == frozenset({OFFICIAL_HOST})
+    assert telemetry_uploader.validated_collector_url(OFFICIAL_URL) == OFFICIAL_URL
+    for value in (
+        "https://other.knowledgehub4chen.workers.dev/v1/events",
+        "https://knowledgehub-telemetry-collector-preview.knowledgehub4chen.workers.dev/v1/events",
+        "https://knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev.evil/v1/events",
+        f"https://{OFFICIAL_HOST}:444/v1/events",
+        f"https://{OFFICIAL_HOST}/v1/events?debug=1",
+    ):
+        assert telemetry_uploader.validated_collector_url(value) == ""
 
 
 def test_upload_success_acknowledges_only_the_sent_event_ids(monkeypatch):
@@ -118,7 +134,11 @@ def test_empty_or_disabled_upload_never_creates_a_request(monkeypatch):
 
 
 def test_environment_url_cannot_enable_an_unreviewed_destination(monkeypatch):
-    monkeypatch.setattr(telemetry_uploader.settings, "telemetry_collector_url", COLLECTOR_URL)
+    monkeypatch.setattr(
+        telemetry_uploader.settings,
+        "telemetry_collector_url",
+        "https://unreviewed.knowledgehub4chen.workers.dev/v1/events",
+    )
     client = _Client(_Response(payload={"accepted": 1}))
     uploader = telemetry_uploader.TelemetryUploader()
 
