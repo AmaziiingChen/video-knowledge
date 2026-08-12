@@ -11,6 +11,7 @@ from services.download_contracts import DownloadProgress
 from services.pipeline_contracts import (
     AICallInfo,
     DownloadTransferInfo,
+    MAX_REASONING_CONTENT_CHARS,
     PipelineLog,
     PipelineResponse,
 )
@@ -42,6 +43,7 @@ class PipelineRunReporter:
         self.on_update = on_update
         self.clock = clock
         self.last_summary_publish_at = 0.0
+        self.last_reasoning_publish_at = 0.0
 
     def publish(self) -> None:
         if self.on_update:
@@ -148,4 +150,15 @@ class PipelineRunReporter:
         if now - self.last_summary_publish_at < SUMMARY_PUBLISH_INTERVAL_SECONDS:
             return
         self.last_summary_publish_at = now
+        self.publish()
+
+    def publish_reasoning_delta(self, partial_reasoning: str, truncated: bool = False) -> None:
+        self.response.reasoning_content = str(partial_reasoning or "")[:MAX_REASONING_CONTENT_CHARS]
+        self.response.reasoning_truncated = bool(
+            truncated or len(str(partial_reasoning or "")) > MAX_REASONING_CONTENT_CHARS
+        )
+        now = self.clock()
+        if now - self.last_reasoning_publish_at < SUMMARY_PUBLISH_INTERVAL_SECONDS:
+            return
+        self.last_reasoning_publish_at = now
         self.publish()

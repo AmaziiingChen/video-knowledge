@@ -41,6 +41,8 @@ test('reset restores the complete idle projection and releases task-owned state'
     task_id: 'task-1',
     content_item_id: 'content-1',
     summary: '摘要',
+    reasoning_content: '思考',
+    reasoning_truncated: true,
     ai_calls: [{ id: 1 }],
     timings: { total: 2 },
     overall_progress: 80,
@@ -57,6 +59,8 @@ test('reset restores the complete idle projection and releases task-owned state'
   assert.equal(controller.result.task_id, null)
   assert.equal(controller.result.content_item_id, null)
   assert.equal(controller.result.summary, null)
+  assert.equal(controller.result.reasoning_content, '')
+  assert.equal(controller.result.reasoning_truncated, false)
   assert.deepEqual(controller.result.ai_calls, [])
   assert.deepEqual(controller.result.timings, {})
   assert.equal(controller.result.overall_progress, 0)
@@ -83,6 +87,8 @@ test('applies a backend snapshot, forwards logs, and advances the visible step',
     platform: 'bilibili',
     transcript: '正文',
     summary: '摘要',
+    reasoning_content: '思考',
+    reasoning_truncated: true,
     display_title: '显示标题',
     source_title: '来源标题',
     logs: [{ message: '处理中' }],
@@ -100,6 +106,8 @@ test('applies a backend snapshot, forwards logs, and advances the visible step',
   assert.equal(harness.controller.result.content_item_id, 'content-1')
   assert.equal(harness.controller.result.url, 'https://example.test/video')
   assert.equal(harness.controller.result.transcript, '正文')
+  assert.equal(harness.controller.result.reasoning_content, '思考')
+  assert.equal(harness.controller.result.reasoning_truncated, true)
   assert.equal(harness.controller.result.overall_progress, 42.5)
   assert.deepEqual(harness.controller.result.progress, { transcribe: 40 })
   assert.equal(harness.controller.taskStatus.value, 'running')

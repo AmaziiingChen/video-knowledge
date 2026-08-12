@@ -58,4 +58,14 @@ test('hydrates a task only when a readable or playable milestone changes', () =>
     shouldHydrateProgressiveTask(subtitlesReady, progressiveTaskSnapshot(downloading)),
     true
   )
+
+  const reasoningStarted = {
+    ...subtitlesReady,
+    step: 'summarize',
+    reasoning_length: 8,
+  }
+  assert.equal(
+    shouldHydrateProgressiveTask(reasoningStarted, progressiveTaskSnapshot(subtitlesReady)),
+    true
+  )
 })

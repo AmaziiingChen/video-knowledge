@@ -573,7 +573,7 @@ class TaskManager:
                     current.content_item_id = result.content_item_id or current.content_item_id
                     current.updated_at = _now_iso()
                     snapshot = self._copy_record(current)
-                is_streamed_summary = bool(result.summary) and result.step == "summarize"
+                is_streamed_summary = result.step == "summarize" and bool(result.summary or result.reasoning_content)
                 now = time.monotonic()
                 if not is_streamed_summary or now - last_state_persist_at >= SUMMARY_STATE_PERSIST_INTERVAL_SECONDS:
                     self._persist_state(snapshot)

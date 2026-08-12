@@ -1,5 +1,6 @@
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from config import settings
@@ -21,6 +22,7 @@ from services.llm_provider import (
     default_llm_provider,
 )
 from services.prompt_file_store import sync_prompt_files
+from services.pipeline_contracts import MAX_REASONING_CONTENT_CHARS, PipelineCancelled
 from services.prompt_templates import (
     DEFAULT_ARTICLE_MATERIAL_REDUCTION_PROMPT,
     DEFAULT_ARTICLE_SUMMARY_PROMPT,
@@ -46,6 +48,15 @@ MAX_QA_TRANSCRIPT_CHARS = 60000
 MAX_REGENERATION_DIRECT_SOURCE_CHARS = 54_000
 MAX_REGENERATION_CHUNK_SOURCE_CHARS = 36_000
 MAX_REGENERATION_FINAL_MATERIAL_CHARS = 54_000
+
+
+@dataclass(frozen=True)
+class SummaryStreamEvent:
+    kind: str
+    title: str = ""
+    summary: str = ""
+    reasoning_content: str = ""
+    reasoning_truncated: bool = False
 
 
 def _stream_provider_events(llm: LLMProvider, messages: list[LLMMessage], *, temperature: float) -> Iterator[LLMStreamChunk]:
@@ -192,6 +203,8 @@ def summarize_stream(
     transcript_segments: list[dict] | None = None,
     source_context: dict[str, object] | None = None,
     on_delta: Callable[[str, str], None] | None = None,
+    on_reasoning_delta: Callable[[str, bool], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> tuple[str, str]:
     """Generate a summary while exposing safe, renderable partial text.
 
@@ -199,6 +212,47 @@ def summarize_stream(
     ``on_delta`` receives the same title/body split as the final result, so a
     video title line is never rendered as part of the growing summary body.
     """
+    title = video_title
+    summary = ""
+    for event in summarize_stream_events(
+        transcript,
+        video_title,
+        provider=provider,
+        model=model,
+        task_type=task_type,
+        task_id=task_id,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        transcript_segments=transcript_segments,
+        source_context=source_context,
+        cancel_check=cancel_check,
+    ):
+        if event.kind == "reasoning_delta":
+            if on_reasoning_delta:
+                on_reasoning_delta(event.reasoning_content, event.reasoning_truncated)
+            continue
+        if event.kind in {"summary_delta", "done"}:
+            title = event.title
+            summary = event.summary
+            if event.kind == "summary_delta" and on_delta:
+                on_delta(title, summary)
+    return title, summary
+
+
+def summarize_stream_events(
+    transcript: str,
+    video_title: str = "",
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    task_type: str = "summary",
+    task_id: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    transcript_segments: list[dict] | None = None,
+    source_context: dict[str, object] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+) -> Iterator[SummaryStreamEvent]:
+    """Stream one automatic summary without mixing provider reasoning into its body."""
     should_record = provider is None or ai_call_callback is not None
     llm = provider or default_llm_provider(model)
     normalized_task_type = task_type if task_type in {"summary", "article_summary"} else "summary"
@@ -234,11 +288,11 @@ def summarize_stream(
     input_chars = sum(len(message.content) for message in messages)
     started_at = time.perf_counter()
     chunks: list[str] = []
+    reasoning_parts: list[str] = []
+    reasoning_chars = 0
+    visible_reasoning_chars = 0
+    reasoning_truncated = False
     stream_usage: LLMUsage | None = None
-
-    def remember_usage(usage: LLMUsage) -> None:
-        nonlocal stream_usage
-        stream_usage = usage
 
     def split_summary(raw: str) -> tuple[str, str]:
         content = raw.strip()
@@ -252,13 +306,35 @@ def summarize_stream(
         return title, summary
 
     try:
-        for chunk in llm.chat_stream(messages, temperature=0.3, on_usage=remember_usage):
-            chunks.append(chunk)
-            if on_delta:
+        for chunk in _stream_provider_events(llm, messages, temperature=0.3):
+            if cancel_check:
+                cancel_check()
+            if chunk.usage:
+                stream_usage = chunk.usage
+            if chunk.reasoning_content:
+                reasoning_chars += len(chunk.reasoning_content)
+                remaining = MAX_REASONING_CONTENT_CHARS - visible_reasoning_chars
+                if remaining > 0:
+                    visible_chunk = chunk.reasoning_content[:remaining]
+                    reasoning_parts.append(visible_chunk)
+                    visible_reasoning_chars += len(visible_chunk)
+                reasoning_truncated = reasoning_chars > MAX_REASONING_CONTENT_CHARS
+                yield SummaryStreamEvent(
+                    kind="reasoning_delta",
+                    reasoning_content="".join(reasoning_parts),
+                    reasoning_truncated=reasoning_truncated,
+                )
+            if chunk.content:
+                chunks.append(chunk.content)
                 title, partial_summary = split_summary("".join(chunks))
-                on_delta(title, partial_summary)
+                yield SummaryStreamEvent(
+                    kind="summary_delta",
+                    title=title,
+                    summary=partial_summary,
+                )
 
         raw_content = "".join(chunks)
+        visible_reasoning = "".join(reasoning_parts)
         title, summary = split_summary(raw_content)
         if should_record:
             provider_response = LLMResponse(
@@ -266,19 +342,28 @@ def summarize_stream(
                 provider=llm.name,
                 model=llm.model,
                 usage=stream_usage,
+                reasoning_content=visible_reasoning,
             )
             record = record_ai_call(
                 call_type="summary",
                 provider_response=provider_response,
                 input_chars=input_chars,
-                output_chars=len(raw_content),
+                output_chars=len(raw_content) + reasoning_chars,
                 elapsed_seconds=time.perf_counter() - started_at,
                 task_id=task_id,
                 content_item_id=content_item_id,
             )
             if record and ai_call_callback:
                 ai_call_callback(record)
-        return title, summary
+        yield SummaryStreamEvent(
+            kind="done",
+            title=title,
+            summary=summary,
+            reasoning_content=visible_reasoning,
+            reasoning_truncated=reasoning_truncated,
+        )
+    except PipelineCancelled:
+        raise
     except Exception as exc:
         if should_record:
             record_ai_call(

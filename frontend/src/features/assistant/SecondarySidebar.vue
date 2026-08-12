@@ -48,11 +48,12 @@
 
       <article v-if="currentInsightHtml" class="assistant-message assistant-message-summary">
         <AiReasoningPanel
-          :reasoning="generatingSummaryReasoning"
-          :expanded="generatingSummaryReasoningExpanded"
+          :reasoning="currentInsightReasoning"
+          :expanded="insightReasoningExpanded"
           :pending-answer="false"
+          :truncated="currentInsightReasoningTruncated"
           :render-markdown="renderMarkdown"
-          @update:expanded="$emit('update:generatingSummaryReasoningExpanded', $event)"
+          @update:expanded="insightReasoningExpanded = $event"
         />
         <div
           v-if="currentInsightTitle"
@@ -63,23 +64,24 @@
       </article>
 
       <article
-        v-if="generatingAiSummary || (!currentInsightHtml && generatingSummaryText)"
+        v-if="isGeneratingAnySummary || (!currentInsightHtml && visibleGeneratingSummaryText)"
         class="assistant-message assistant-message-answer assistant-message-new"
       >
         <AiReasoningPanel
-          :reasoning="generatingSummaryReasoning"
-          :expanded="generatingSummaryReasoningExpanded"
-          :pending-answer="!generatingSummaryText"
+          :reasoning="visibleGeneratingSummaryReasoning"
+          :expanded="visibleGeneratingReasoningExpanded"
+          :pending-answer="!visibleGeneratingSummaryText"
+          :truncated="visibleGeneratingSummaryReasoningTruncated"
           :render-markdown="renderMarkdown"
-          @update:expanded="$emit('update:generatingSummaryReasoningExpanded', $event)"
+          @update:expanded="updateVisibleGeneratingReasoningExpanded"
         />
         <div
-          v-if="generatingSummaryText"
+          v-if="visibleGeneratingSummaryText"
           class="assistant-message-body qa-answer"
-          v-html="renderMarkdown(generatingSummaryText)"
+          v-html="renderMarkdown(visibleGeneratingSummaryText)"
         />
         <AiSkeletonStream
-          v-else-if="!generatingSummaryReasoning"
+          v-else-if="!visibleGeneratingSummaryReasoning"
           class="assistant-message-body qa-answer"
           label="正在生成 AI 摘要"
           aria-label="AI 正在生成摘要"
@@ -144,7 +146,7 @@
               type="button"
               aria-label="重新生成回答"
               title="重新生成回答"
-              :disabled="askingQuestion || generatingAiSummary || startingNewChat || !item.id"
+              :disabled="askingQuestion || isGeneratingAnySummary || startingNewChat || !item.id"
               @click="$emit('regenerate-qa-answer', item)"
             >
               <SvgMaskIcon :src="regenerateAnswerIcon" :size="14" />
@@ -158,7 +160,7 @@
     <div class="assistant-composer-stack">
       <AssistantFollowUpSuggestions
         :questions="suggestedQuestions"
-        :disabled="askingQuestion || generatingAiSummary || startingNewChat"
+        :disabled="askingQuestion || isGeneratingAnySummary || startingNewChat"
         @select="forwardAskQuestion"
       />
       <AssistantComposer
@@ -170,7 +172,7 @@
       :prioritizing-article-ocr="prioritizingArticleOcr"
       :selected-text-context="selectedTextContext"
       :asking-question="askingQuestion"
-      :generating-ai-summary="generatingAiSummary"
+      :generating-ai-summary="isGeneratingAnySummary"
       :starting-new-chat="startingNewChat"
       :current-qa-enabled="currentQaEnabled"
       :current-qa-hint="currentQaHint"
@@ -194,7 +196,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
 import AiReasoningPanel from './AiReasoningPanel.vue'
@@ -221,6 +223,8 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  currentInsightReasoning: { type: String, default: '' },
+  currentInsightReasoningTruncated: { type: Boolean, default: false },
   contentContext: {
     type: Object,
     default: null
@@ -281,12 +285,17 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  pipelineGeneratingAiSummary: { type: Boolean, default: false },
   generatingSummaryText: {
     type: String,
     default: ''
   },
+  pipelineGeneratingSummaryText: { type: String, default: '' },
   generatingSummaryReasoning: { type: String, default: '' },
   generatingSummaryReasoningExpanded: { type: Boolean, default: false },
+  pipelineGeneratingSummaryReasoning: { type: String, default: '' },
+  pipelineGeneratingSummaryReasoningTruncated: { type: Boolean, default: false },
+  pipelineSummaryTaskId: { type: String, default: '' },
   suggestedQuestions: { type: Array, default: () => [] },
   canGenerateAiSummary: {
     type: Boolean,
@@ -345,13 +354,74 @@ const emit = defineEmits([
 ])
 
 const externalImportCitation = computed(() => externalImportCitationForContent(props.contentContext))
+const isGeneratingAnySummary = computed(() => (
+  props.generatingAiSummary || props.pipelineGeneratingAiSummary
+))
+const visibleGeneratingSummaryText = computed(() => (
+  props.pipelineGeneratingAiSummary
+    ? props.pipelineGeneratingSummaryText
+    : props.generatingSummaryText
+))
+const visibleGeneratingSummaryReasoning = computed(() => (
+  props.pipelineGeneratingAiSummary
+    ? props.pipelineGeneratingSummaryReasoning
+    : props.generatingSummaryReasoning
+))
+const visibleGeneratingSummaryReasoningTruncated = computed(() => Boolean(
+  props.pipelineGeneratingAiSummary && props.pipelineGeneratingSummaryReasoningTruncated
+))
+const pipelineReasoningExpanded = ref(false)
+const insightReasoningExpanded = ref(false)
+const visibleGeneratingReasoningExpanded = computed(() => (
+  props.pipelineGeneratingAiSummary
+    ? pipelineReasoningExpanded.value
+    : props.generatingSummaryReasoningExpanded
+))
+
+function updateVisibleGeneratingReasoningExpanded(value) {
+  if (props.pipelineGeneratingAiSummary) {
+    pipelineReasoningExpanded.value = Boolean(value)
+    return
+  }
+  emit('update:generatingSummaryReasoningExpanded', value)
+}
+
+watch(
+  () => props.pipelineSummaryTaskId,
+  () => {
+    pipelineReasoningExpanded.value = Boolean(
+      props.pipelineGeneratingAiSummary
+      && props.pipelineGeneratingSummaryReasoning
+      && !props.pipelineGeneratingSummaryText
+    )
+    insightReasoningExpanded.value = false
+  },
+)
+watch(
+  () => props.pipelineGeneratingSummaryReasoning,
+  (reasoning, previous) => {
+    if (props.pipelineGeneratingAiSummary && reasoning && !previous && !props.pipelineGeneratingSummaryText) {
+      pipelineReasoningExpanded.value = true
+    }
+  },
+  { immediate: true },
+)
+watch(
+  () => props.pipelineGeneratingSummaryText,
+  (text, previous) => {
+    if (props.pipelineGeneratingAiSummary && text && !previous) {
+      pipelineReasoningExpanded.value = false
+    }
+  },
+  { immediate: true },
+)
 const emptyState = computed(() => conversationEmptyState({
   conversationKey: props.conversationKey,
   currentQaEnabled: props.currentQaEnabled,
   currentQaHint: props.currentQaHint,
   currentInsightHtml: props.currentInsightHtml,
-  generatingAiSummary: props.generatingAiSummary,
-  generatingSummaryText: props.generatingSummaryText,
+  generatingAiSummary: isGeneratingAnySummary.value,
+  generatingSummaryText: visibleGeneratingSummaryText.value,
   qaHistory: props.qaHistory,
   qaHistoryLoading: props.qaHistoryLoading,
   qaHistoryLoadingMore: props.qaHistoryLoadingMore,

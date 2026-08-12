@@ -9,6 +9,8 @@ function createEmptyTaskResult() {
     video_path: null,
     transcript: null,
     summary: null,
+    reasoning_content: '',
+    reasoning_truncated: false,
     display_title: null,
     source_title: null,
     obsidian_path: null,
@@ -80,6 +82,8 @@ export function useActiveTaskStateController({
     result.video_path = data.video_path
     result.transcript = data.transcript
     result.summary = data.summary
+    result.reasoning_content = data.reasoning_content || ''
+    result.reasoning_truncated = Boolean(data.reasoning_truncated)
     result.display_title = data.display_title || null
     result.source_title = data.source_title || null
     result.obsidian_path = data.obsidian_path

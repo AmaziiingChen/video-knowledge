@@ -71,18 +71,30 @@ test('mirrors a running pipeline summary once and restores the static insight af
       step: 'summarize',
       progress: { summarize: 40 },
       summary: '正在生成',
+      reasoning_content: '正在核对来源',
+      reasoning_truncated: true,
+      task_id: 'task-1',
     },
   })
   assert.equal(state.controller.isPipelineSummaryGenerating.value, true)
   assert.equal(state.controller.pipelineGeneratingSummaryText.value, '正在生成')
+  assert.equal(state.controller.pipelineGeneratingSummaryReasoning.value, '正在核对来源')
+  assert.equal(state.controller.pipelineGeneratingSummaryReasoningTruncated.value, true)
+  assert.equal(state.controller.currentInsightReasoning.value, '')
+  assert.equal(state.controller.pipelineSummaryTaskId.value, 'task-1')
   assert.equal(state.controller.currentInsightHtml.value, '')
 
   state.activeWorkspaceResult.value = {
     status: 'succeeded',
     summary: '最终摘要',
+    reasoning_content: '最终思考',
   }
   assert.equal(state.controller.isPipelineSummaryGenerating.value, false)
   assert.equal(state.controller.currentInsightHtml.value, '<render>最终摘要</render>')
+  assert.equal(state.controller.currentInsightReasoning.value, '最终思考')
+
+  state.markdownState.markdown = '# 标题\n\n## AI 摘要\n\n用户后来生成的摘要。'
+  assert.equal(state.controller.currentInsightReasoning.value, '')
 })
 
 test('requires real text context when readiness blocks QA and preserves the backend hint', () => {

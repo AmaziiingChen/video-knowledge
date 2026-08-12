@@ -52,6 +52,7 @@ export function useTaskQueueController({
           'error_info',
           'transcript',
           'summary',
+          'reasoning_content',
         ]
         detailFields.forEach((field) => {
           if (existing[field] !== undefined) merged[field] = existing[field]

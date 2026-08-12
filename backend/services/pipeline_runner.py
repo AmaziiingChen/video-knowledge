@@ -75,7 +75,7 @@ from services.markdown_sync import replace_content_summary_and_sync, save_markdo
 from services.llm_settings import text_model_configured
 from services.search_index import upsert_search_document
 from services.source_context_store import save_source_context
-from services.summarizer import generate_article_markdown, generate_markdown, summarize, summarize_stream
+from services.summarizer import generate_article_markdown, generate_markdown, summarize_stream
 from services.subtitles import fetch_bilibili_subtitle, parse_subtitle_text
 from services.transcriber import ASR_BACKENDS, extract_audio_with_details, transcribe_with_details
 from services.url_parser import parse_share_text, redact_sensitive_url
@@ -299,18 +299,15 @@ def run_pipeline_sync(
         if stored_article:
             return run_prepared_stored_article(
                 stored_article,
-                response=response,
-                reporter=reporter,
-                fail=fail,
-                processing_mode=processing_mode,
-                api_key_configured=text_model_configured(ai_model),
-                ai_model=ai_model,
-                total_started_at=total_start,
-                summarize_article=summarize,
+                response=response, reporter=reporter, fail=fail,
+                processing_mode=processing_mode, api_key_configured=text_model_configured(ai_model),
+                ai_model=ai_model, total_started_at=total_start,
+                summarize_article=summarize_stream,
                 set_content_status=_set_content_status,
                 set_content_title=_set_content_title,
                 replace_summary=replace_content_summary_and_sync,
                 update_search=upsert_search_document,
+                cancel_check=check_cancel,
             )
 
         cached_video = None
@@ -890,8 +887,11 @@ def run_pipeline_sync(
                 ai_call_callback=remember_ai_call("summary"),
                 transcript_segments=transcript_segments if not is_article else None,
                 source_context=source_context,
-                on_delta=publish_summary_delta,
+                on_delta=publish_summary_delta, on_reasoning_delta=reporter.publish_reasoning_delta,
+                cancel_check=check_cancel,
             )
+        except PipelineCancelled:
+            raise
         except Exception as exc:
             response.timings["summarize"] = _elapsed(summarize_start)
             add_log("summarize", str(exc), "error", response.timings["summarize"])

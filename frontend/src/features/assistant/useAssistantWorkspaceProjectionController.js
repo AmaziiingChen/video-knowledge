@@ -37,6 +37,16 @@ export function useAssistantWorkspaceProjectionController({
       : ''
   ))
 
+  const pipelineGeneratingSummaryReasoning = computed(() => (
+    isPipelineSummaryGenerating.value
+      ? String(activeWorkspaceResult.value?.reasoning_content || '')
+      : ''
+  ))
+
+  const pipelineGeneratingSummaryReasoningTruncated = computed(() => Boolean(
+    isPipelineSummaryGenerating.value && activeWorkspaceResult.value?.reasoning_truncated
+  ))
+
   const currentSummaryText = computed(() => {
     if (activeWorkspaceTab.value) {
       if (isGeneratedReportDocument(activeWorkspaceContent.value)) return ''
@@ -58,6 +68,29 @@ export function useAssistantWorkspaceProjectionController({
     }
     return result.summary ? renderMarkdown(result.summary) : ''
   })
+
+  const currentInsightReasoning = computed(() => {
+    if (isPipelineSummaryGenerating.value) return ''
+    if (activeWorkspaceTab.value) {
+      const taskSummary = String(activeWorkspaceResult.value?.summary || '')
+      if (!taskSummary || taskSummary !== String(currentSummaryText.value || '')) return ''
+      return String(activeWorkspaceResult.value?.reasoning_content || '')
+    }
+    if (!result.summary || String(result.summary) !== String(currentSummaryText.value || '')) return ''
+    return String(result.reasoning_content || '')
+  })
+
+  const currentInsightReasoningTruncated = computed(() => Boolean(
+    currentInsightReasoning.value && (
+      activeWorkspaceTab.value
+        ? activeWorkspaceResult.value?.reasoning_truncated
+        : result.reasoning_truncated
+    )
+  ))
+
+  const pipelineSummaryTaskId = computed(() => String(
+    activeWorkspaceResult.value?.task_id || result.task_id || ''
+  ))
 
   const currentInsightTitle = computed(() => String(
     activeWorkspaceResult.value?.display_title
@@ -112,6 +145,11 @@ export function useAssistantWorkspaceProjectionController({
     currentInsightTitle,
     isPipelineSummaryGenerating,
     pipelineGeneratingSummaryText,
+    pipelineGeneratingSummaryReasoning,
+    pipelineGeneratingSummaryReasoningTruncated,
+    pipelineSummaryTaskId,
+    currentInsightReasoning,
+    currentInsightReasoningTruncated,
     currentQaEnabled,
     currentQaHint,
     activeRegenerableContent,

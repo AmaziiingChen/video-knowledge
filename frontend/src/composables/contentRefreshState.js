@@ -31,6 +31,7 @@ export function progressiveTaskSnapshot(task) {
     transcriptReady ? 'transcript-ready' : '',
     summaryStarted ? 'summary-started' : '',
     `summary-${Number(task?.summary_length || task?.summary?.length || 0)}`,
+    `reasoning-${Number(task?.reasoning_length || task?.reasoning_content?.length || 0)}`,
   ].join('|')
 }
 

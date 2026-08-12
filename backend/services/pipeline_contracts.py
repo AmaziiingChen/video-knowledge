@@ -7,6 +7,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+MAX_REASONING_CONTENT_CHARS = 32_768
+
+
 class PipelineRequest(BaseModel):
     content_item_id: str | None = None
     share_text: str | None = None
@@ -94,6 +97,8 @@ class PipelineResponse(BaseModel):
     video_path: str | None = None
     transcript: str | None = None
     summary: str | None = None
+    reasoning_content: str = Field(default="", max_length=MAX_REASONING_CONTENT_CHARS)
+    reasoning_truncated: bool = False
     obsidian_path: str | None = None
     markdown_draft_path: str | None = None
     whisper_model: str | None = None

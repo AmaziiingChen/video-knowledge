@@ -456,6 +456,8 @@
             :selected-text-context="activeSelectedTextContext"
             :current-insight-html="currentInsightHtml"
             :current-insight-title="currentInsightTitle"
+            :current-insight-reasoning="currentInsightReasoning"
+            :current-insight-reasoning-truncated="currentInsightReasoningTruncated"
             :content-context="activeWorkspaceContent || selectedContentItem"
             :conversation-key="activeWorkspaceContent?.id || result.content_item_id || ''"
             :content-analysis-templates="contentAnalysisTemplates"
@@ -468,10 +470,15 @@
             :article-ocr-status="currentArticleOcrStatus"
             :prioritizing-article-ocr="prioritizingArticleOcr"
             :asking-question="askingQuestion"
-            :generating-ai-summary="generatingAiSummary || isPipelineSummaryGenerating"
-            :generating-summary-text="generatingSummaryText || pipelineGeneratingSummaryText"
+            :generating-ai-summary="generatingAiSummary"
+            :pipeline-generating-ai-summary="isPipelineSummaryGenerating"
+            :generating-summary-text="generatingSummaryText"
+            :pipeline-generating-summary-text="pipelineGeneratingSummaryText"
             :generating-summary-reasoning="generatingSummaryReasoning"
             :generating-summary-reasoning-expanded="generatingSummaryReasoningExpanded"
+            :pipeline-generating-summary-reasoning="pipelineGeneratingSummaryReasoning"
+            :pipeline-generating-summary-reasoning-truncated="pipelineGeneratingSummaryReasoningTruncated"
+            :pipeline-summary-task-id="pipelineSummaryTaskId"
             :suggested-questions="suggestedQuestions"
             :starting-new-chat="startingNewChat"
             :current-qa-enabled="currentQaEnabled"
@@ -946,6 +953,11 @@ const {
   isPipelineSummaryGenerating,
   generatingSummaryText,
   pipelineGeneratingSummaryText,
+  pipelineGeneratingSummaryReasoning,
+  pipelineGeneratingSummaryReasoningTruncated,
+  pipelineSummaryTaskId,
+  currentInsightReasoning,
+  currentInsightReasoningTruncated,
   startingNewChat,
   lastQaSaved,
   clipboardWatching,

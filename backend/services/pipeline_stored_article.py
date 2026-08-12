@@ -9,7 +9,7 @@ from typing import Any
 
 from services.content_source_text import ContentSourceText, load_content_source_text
 from services.database import connect
-from services.pipeline_contracts import PipelineResponse, TextSourceInfo
+from services.pipeline_contracts import PipelineCancelled, PipelineResponse, TextSourceInfo
 from services.pipeline_progress_rules import elapsed
 from services.pipeline_run_reporter import PipelineRunReporter
 from services.repository import ContentItemRecord, ContentRepository
@@ -51,6 +51,7 @@ def run_prepared_stored_article(
     set_content_title: Callable[[str, str], None],
     replace_summary: Callable[[str, str], Any],
     update_search: Callable[..., None],
+    cancel_check: Callable[[], None] | None = None,
 ) -> PipelineResponse:
     """Finish transcript-only or summarized processing for a stored article."""
     item = prepared.item
@@ -93,7 +94,12 @@ def run_prepared_stored_article(
             content_item_id=item.id,
             ai_call_callback=reporter.remember_ai_call("summary"),
             source_context=source_context,
+            on_delta=reporter.publish_summary_delta,
+            on_reasoning_delta=reporter.publish_reasoning_delta,
+            cancel_check=cancel_check,
         )
+    except PipelineCancelled:
+        raise
     except Exception as exc:  # noqa: BLE001 - provider errors use the pipeline failure contract
         return fail("summarize", str(exc))
     if not summary:

@@ -120,7 +120,7 @@ def test_persisted_rss_article_can_use_the_summary_task_path(tmp_path, monkeypat
         cache_dir_for_url(url),
         {"article_info": {"title": item.title, "platform": "rss", "body_text": "这是一段 RSS 正文。", "body_html": "<p>这是一段 RSS 正文。</p>", "images": []}},
     )
-    monkeypatch.setattr(pipeline_runner, "summarize", lambda *_args, **_kwargs: ("RSS 总结标题", "RSS 总结内容"))
+    monkeypatch.setattr(pipeline_runner, "summarize_stream", lambda *_args, **_kwargs: ("RSS 总结标题", "RSS 总结内容"))
     monkeypatch.setattr(pipeline_runner, "replace_content_summary_and_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline_runner, "upsert_search_document", lambda **_kwargs: None)
 

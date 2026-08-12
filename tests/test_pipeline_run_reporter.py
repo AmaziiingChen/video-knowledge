@@ -91,3 +91,19 @@ def test_streamed_summary_updates_state_while_coalescing_live_publication() -> N
     assert response.display_title == "标题"
     assert response.summary == "第三次"
     assert [snapshot.summary for snapshot in snapshots] == ["第", "第三次"]
+
+
+def test_streamed_reasoning_is_separate_bounded_and_coalesced() -> None:
+    response = PipelineResponse(success=False)
+    snapshots: list[PipelineResponse] = []
+    times = iter([1.0, 1.01, 1.04])
+    reporter = PipelineRunReporter(response, snapshots.append, clock=lambda: next(times))
+
+    reporter.publish_reasoning_delta("核")
+    reporter.publish_reasoning_delta("核对")
+    reporter.publish_reasoning_delta("核对材料", truncated=True)
+
+    assert response.summary is None
+    assert response.reasoning_content == "核对材料"
+    assert response.reasoning_truncated is True
+    assert [snapshot.reasoning_content for snapshot in snapshots] == ["核", "核对材料"]

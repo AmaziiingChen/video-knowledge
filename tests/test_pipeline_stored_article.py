@@ -112,6 +112,8 @@ def test_runs_full_stored_article_and_keeps_search_failure_non_fatal() -> None:
     assert summarize_article.call_args.args == (prepared.transcript, prepared.item.title)
     assert summarize_article.call_args.kwargs["task_type"] == "article_summary"
     assert summarize_article.call_args.kwargs["source_context"] == prepared.source_context
+    assert summarize_article.call_args.kwargs["on_delta"] == reporter.publish_summary_delta
+    assert summarize_article.call_args.kwargs["on_reasoning_delta"] == reporter.publish_reasoning_delta
     set_title.assert_called_once_with(prepared.item.id, "AI 标题")
     replace_summary.assert_called_once_with(prepared.item.id, "总结正文")
     set_status.assert_called_once_with(prepared.item.id, "to_read")
