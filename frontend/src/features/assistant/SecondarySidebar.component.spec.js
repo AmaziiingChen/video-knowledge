@@ -95,4 +95,43 @@ describe('SecondarySidebar', () => {
     expect(panel.props('expanded')).toBe(true)
     wrapper.unmount()
   })
+
+  it('keeps completed manual summary reasoning attached to the canonical summary', async () => {
+    const AiReasoningPanel = defineComponent({
+      name: 'AiReasoningPanel',
+      props: ['reasoning', 'expanded'],
+      emits: ['update:expanded'],
+      setup(props) {
+        return () => h('div', {
+          class: 'reasoning-stub',
+          'data-reasoning': props.reasoning,
+          'data-expanded': String(props.expanded),
+        })
+      },
+    })
+    const wrapper = mount(SecondarySidebar, {
+      props: {
+        renderMarkdown: (value) => value,
+        currentInsightHtml: '<p>最终摘要</p>',
+        generatingAiSummary: false,
+        generatingSummaryReasoning: '手动摘要思考',
+        generatingSummaryReasoningExpanded: false,
+      },
+      global: {
+        stubs: {
+          AssistantComposer: true,
+          AiReasoningPanel,
+          AiSkeletonStream: true,
+          SvgMaskIcon: true,
+        },
+      },
+    })
+
+    const panel = wrapper.getComponent(AiReasoningPanel)
+    expect(panel.props('reasoning')).toBe('手动摘要思考')
+    expect(panel.props('expanded')).toBe(false)
+    panel.vm.$emit('update:expanded', true)
+    expect(wrapper.emitted('update:generatingSummaryReasoningExpanded')).toEqual([[true]])
+    wrapper.unmount()
+  })
 })

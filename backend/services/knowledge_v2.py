@@ -14,7 +14,6 @@ from time import perf_counter
 from config import settings
 
 from services.ai_call_logger import record_ai_call
-from services.ai_response_envelope import KNOWLEDGE_FOLLOWUP_RESPONSE_CONTRACT
 from services.database import connect, utc_now_iso
 from services.knowledge_answer_envelope import GroundedAnswer, parse_grounded_answer
 from services.knowledge_answer_evidence import (
@@ -353,7 +352,6 @@ def answer_from_evidence(
     )
     messages = [
         LLMMessage(role="system", content=system),
-        LLMMessage(role="system", content=KNOWLEDGE_FOLLOWUP_RESPONSE_CONTRACT),
         LLMMessage(role="system", content=CONVERSATION_CONTEXT_GUARDRAIL),
         *_conversation_context_messages(conversation_context),
         LLMMessage(role="user", content=user),
@@ -438,7 +436,6 @@ def stream_answer_from_evidence(
     evidence = _answer_evidence_payload(results, question=question, evidence_limit=evidence_limit)
     messages = [
         LLMMessage(role="system", content=managed_prompt_text("knowledge_answer", DEFAULT_KNOWLEDGE_ANSWER_PROMPT)),
-        LLMMessage(role="system", content=KNOWLEDGE_FOLLOWUP_RESPONSE_CONTRACT),
         LLMMessage(role="system", content=CONVERSATION_CONTEXT_GUARDRAIL),
         *_conversation_context_messages(conversation_context),
         LLMMessage(

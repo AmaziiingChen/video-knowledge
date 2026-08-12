@@ -570,6 +570,12 @@ data-integrity, ownership-conflict or test-isolation blocker.
   OCR results and historical rows remain readable. Real-login acceptance still
   requires manual validation with a fresh user session; tests use parser and
   fake-browser fixtures and do not claim the expired local session is valid.
+- [x] Stop presenting follow-up question suggestions as a stable product
+  capability. Provider compliance and the completed-response projection were
+  not reliable enough in real desktop use, so the prompt instructions and UI
+  surfaces are disabled. Existing additive SQLite/API fields remain readable
+  for compatibility and no historical conversation data is deleted. Streaming
+  and completed reasoning remain the supported response-metadata boundary.
 
 ## Non-negotiable compatibility checks
 

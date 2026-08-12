@@ -58,12 +58,6 @@
       <Transition name="knowledge-notice">
         <p v-if="notice" class="knowledge-notice" :class="notice.kind" role="status">{{ notice.text }}</p>
       </Transition>
-      <AssistantFollowUpSuggestions
-        :questions="suggestedQuestions"
-        :disabled="asking"
-        @select="askSuggestion"
-      />
-
       <form class="knowledge-composer" @submit.prevent="ask">
         <div class="knowledge-scope" aria-label="检索范围">
           <span class="knowledge-scope-label">{{ scopeLabel }}</span>
@@ -115,7 +109,6 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowUp } from '../../components/macosSymbolComponents.js'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
 import AiReasoningPanel from '../assistant/AiReasoningPanel.vue'
-import AssistantFollowUpSuggestions from '../assistant/AssistantFollowUpSuggestions.vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 const newChatIcon = 'ellipsis.bubble'
 const exportIcon = 'arrow.down.document'
@@ -376,12 +369,6 @@ function startNewChat() {
   clearFootnoteReturn()
   conversationAutoFollow.value = true
   nextTick(() => questionInput.value?.focus())
-}
-
-function askSuggestion(value) {
-  if (asking.value) return
-  question.value = String(value || '')
-  ask()
 }
 
 function readKnowledgeAnswerModel() {

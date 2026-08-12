@@ -48,12 +48,12 @@
 
       <article v-if="currentInsightHtml" class="assistant-message assistant-message-summary">
         <AiReasoningPanel
-          :reasoning="currentInsightReasoning"
-          :expanded="insightReasoningExpanded"
+          :reasoning="visibleInsightReasoning"
+          :expanded="visibleInsightReasoningExpanded"
           :pending-answer="false"
-          :truncated="currentInsightReasoningTruncated"
+          :truncated="visibleInsightReasoningTruncated"
           :render-markdown="renderMarkdown"
-          @update:expanded="insightReasoningExpanded = $event"
+          @update:expanded="updateVisibleInsightReasoningExpanded"
         />
         <div
           v-if="currentInsightTitle"
@@ -158,11 +158,6 @@
     </section>
 
     <div class="assistant-composer-stack">
-      <AssistantFollowUpSuggestions
-        :questions="suggestedQuestions"
-        :disabled="askingQuestion || isGeneratingAnySummary || startingNewChat"
-        @select="forwardAskQuestion"
-      />
       <AssistantComposer
       :question-input="questionInput"
       :selected-ai-model="selectedAiModel"
@@ -200,7 +195,6 @@ import { computed, ref, watch } from 'vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
 import AiReasoningPanel from './AiReasoningPanel.vue'
-import AssistantFollowUpSuggestions from './AssistantFollowUpSuggestions.vue'
 import AssistantComposer from './AssistantComposer.vue'
 import { useConversationScrollController } from './useConversationScrollController.js'
 import {
@@ -296,7 +290,6 @@ const props = defineProps({
   pipelineGeneratingSummaryReasoning: { type: String, default: '' },
   pipelineGeneratingSummaryReasoningTruncated: { type: Boolean, default: false },
   pipelineSummaryTaskId: { type: String, default: '' },
-  suggestedQuestions: { type: Array, default: () => [] },
   canGenerateAiSummary: {
     type: Boolean,
     default: false
@@ -372,6 +365,29 @@ const visibleGeneratingSummaryReasoningTruncated = computed(() => Boolean(
 ))
 const pipelineReasoningExpanded = ref(false)
 const insightReasoningExpanded = ref(false)
+const usesCompletedManualReasoning = computed(() => Boolean(
+  !props.currentInsightReasoning && props.generatingSummaryReasoning
+))
+const visibleInsightReasoning = computed(() => (
+  props.currentInsightReasoning || props.generatingSummaryReasoning
+))
+const visibleInsightReasoningTruncated = computed(() => (
+  usesCompletedManualReasoning.value ? false : props.currentInsightReasoningTruncated
+))
+const visibleInsightReasoningExpanded = computed(() => (
+  usesCompletedManualReasoning.value
+    ? props.generatingSummaryReasoningExpanded
+    : insightReasoningExpanded.value
+))
+
+function updateVisibleInsightReasoningExpanded(value) {
+  if (usesCompletedManualReasoning.value) {
+    emit('update:generatingSummaryReasoningExpanded', value)
+    return
+  }
+  insightReasoningExpanded.value = Boolean(value)
+}
+
 const visibleGeneratingReasoningExpanded = computed(() => (
   props.pipelineGeneratingAiSummary
     ? pipelineReasoningExpanded.value

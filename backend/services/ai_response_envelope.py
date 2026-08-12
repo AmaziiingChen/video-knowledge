@@ -10,23 +10,6 @@ MAX_SUGGESTION_LENGTH = 120
 MAX_SUGGESTIONS = 3
 MAX_TRAILER_CHARS = 8192
 
-FOLLOWUP_RESPONSE_CONTRACT = f"""回复正文完成后，必须追加以下机器可读尾部；
-正文中不得解释或引用该尾部：
-{SUGGESTIONS_OPEN.strip()}
-{{"questions":["问题一","问题二","问题三"]}}
-{SUGGESTIONS_CLOSE.strip()}
-questions 必须是基于本次材料与回答、用户可能继续追问的中文问题；
-最多 {MAX_SUGGESTIONS} 条，每条不超过 {MAX_SUGGESTION_LENGTH} 个字符；
-没有可靠建议时返回空数组。"""
-
-KNOWLEDGE_FOLLOWUP_RESPONSE_CONTRACT = (
-    "返回对象还必须包含 suggested_questions: string[]。"
-    "它只能包含基于当前证据与回答的后续问题，"
-    f"最多 {MAX_SUGGESTIONS} 条，每条不超过 {MAX_SUGGESTION_LENGTH} 个字符；"
-    "没有可靠建议时返回空数组。"
-)
-
-
 @dataclass(frozen=True)
 class AIResponseEnvelope:
     answer: str

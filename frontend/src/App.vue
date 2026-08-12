@@ -479,7 +479,6 @@
             :pipeline-generating-summary-reasoning="pipelineGeneratingSummaryReasoning"
             :pipeline-generating-summary-reasoning-truncated="pipelineGeneratingSummaryReasoningTruncated"
             :pipeline-summary-task-id="pipelineSummaryTaskId"
-            :suggested-questions="suggestedQuestions"
             :starting-new-chat="startingNewChat"
             :current-qa-enabled="currentQaEnabled"
             :current-qa-hint="currentQaHint"

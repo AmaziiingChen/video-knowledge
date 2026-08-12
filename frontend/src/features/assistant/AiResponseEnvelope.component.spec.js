@@ -2,7 +2,6 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import AiReasoningPanel from './AiReasoningPanel.vue'
-import AssistantFollowUpSuggestions from './AssistantFollowUpSuggestions.vue'
 import KnowledgeWorkspace from '../knowledge/KnowledgeWorkspace.vue'
 
 describe('AI response envelope UI', () => {
@@ -24,24 +23,6 @@ describe('AI response envelope UI', () => {
     expect(calls).toEqual(['**核对依据**'])
     await wrapper.find('details').trigger('toggle')
     expect(wrapper.emitted('update:expanded')).toBeTruthy()
-  })
-
-  it('exposes at most three keyboard buttons and emits one selected question', async () => {
-    const wrapper = mount(AssistantFollowUpSuggestions, {
-      props: { questions: ['一？', '二？', '三？', '四？'] },
-    })
-    const buttons = wrapper.findAll('button')
-    expect(buttons).toHaveLength(3)
-    expect(wrapper.attributes('aria-label')).toBe('还有什么想问的')
-    await buttons[1].trigger('click')
-    expect(wrapper.emitted('select')).toEqual([['二？']])
-  })
-
-  it('disables suggestion actions while another request is active', () => {
-    const wrapper = mount(AssistantFollowUpSuggestions, {
-      props: { questions: ['继续？'], disabled: true },
-    })
-    expect(wrapper.find('button').attributes('disabled')).toBeDefined()
   })
 
   it('does not let an old Knowledge EOF overwrite the newly selected scope', async () => {
@@ -89,7 +70,6 @@ describe('AI response envelope UI', () => {
       await flushPromises()
       await flushPromises()
 
-      expect(wrapper.find('[aria-label="还有什么想问的"]').exists()).toBe(false)
       expect(wrapper.emitted('conversation-activated') || []).not.toContainEqual(['old-conversation'])
       expect(wrapper.emitted('conversation-usage-changed') || []).not.toContainEqual([
         expect.objectContaining({ call_count: 9 }),

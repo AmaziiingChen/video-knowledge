@@ -7,7 +7,6 @@ from config import settings
 
 from services.ai_call_logger import AICallRecord, record_ai_call
 from services.ai_response_envelope import (
-    FOLLOWUP_RESPONSE_CONTRACT,
     AIResponseEnvelope,
     AIResponseStreamEvent,
     SuggestionTrailerParser,
@@ -594,7 +593,6 @@ def _build_regeneration_messages(
             role=source_message.role,
             content=f"{source_message.content}\n\n{context_material}",
         )
-    messages.insert(1, LLMMessage(role="system", content=FOLLOWUP_RESPONSE_CONTRACT))
     return messages
 
 
@@ -977,7 +975,6 @@ def build_qa_messages(
 """
     messages = [
         LLMMessage(role="system", content=system_prompt),
-        LLMMessage(role="system", content=FOLLOWUP_RESPONSE_CONTRACT),
     ]
     if context_material:
         messages.append(LLMMessage(role="system", content=active_source_context_system_prompt()))

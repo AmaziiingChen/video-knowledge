@@ -2,6 +2,16 @@ import { computed } from 'vue'
 
 import { assistantSummaryFromMarkdown } from './assistantMarkdown.js'
 
+function normalizedSummaryText(value) {
+  return String(value || '').replace(/\s+/gu, ' ').trim()
+}
+
+function taskSummaryContainsCurrentSummary(taskSummary, currentSummary) {
+  const taskText = normalizedSummaryText(taskSummary)
+  const currentText = normalizedSummaryText(currentSummary)
+  return Boolean(taskText && currentText && (taskText === currentText || taskText.endsWith(currentText)))
+}
+
 export function useAssistantWorkspaceProjectionController({
   activeWorkspaceTab,
   activeWorkspaceContent,
@@ -73,10 +83,13 @@ export function useAssistantWorkspaceProjectionController({
     if (isPipelineSummaryGenerating.value) return ''
     if (activeWorkspaceTab.value) {
       const taskSummary = String(activeWorkspaceResult.value?.summary || '')
-      if (!taskSummary || taskSummary !== String(currentSummaryText.value || '')) return ''
+      // The Markdown writer may intentionally omit a leading transcript note
+      // from the canonical AI summary. Keep the task reasoning attached when
+      // the visible summary is the normalized final portion of that result.
+      if (!taskSummaryContainsCurrentSummary(taskSummary, currentSummaryText.value)) return ''
       return String(activeWorkspaceResult.value?.reasoning_content || '')
     }
-    if (!result.summary || String(result.summary) !== String(currentSummaryText.value || '')) return ''
+    if (!taskSummaryContainsCurrentSummary(result.summary, currentSummaryText.value)) return ''
     return String(result.reasoning_content || '')
   })
 

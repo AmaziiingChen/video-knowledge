@@ -84,9 +84,10 @@ test('mirrors a running pipeline summary once and restores the static insight af
   assert.equal(state.controller.pipelineSummaryTaskId.value, 'task-1')
   assert.equal(state.controller.currentInsightHtml.value, '')
 
+  state.markdownState.markdown = '# 标题\n\n## AI 摘要\n\n最终摘要'
   state.activeWorkspaceResult.value = {
     status: 'succeeded',
-    summary: '最终摘要',
+    summary: '> 转写说明：已核对术语。\n\n最终摘要',
     reasoning_content: '最终思考',
   }
   assert.equal(state.controller.isPipelineSummaryGenerating.value, false)

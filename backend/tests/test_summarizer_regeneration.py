@@ -15,9 +15,9 @@ def test_regeneration_prompt_accepts_source_context_without_mutating_message():
         },
     )
 
-    assert len(messages) == 4
+    assert len(messages) == 3
     assert messages[1].role == "system"
-    assert "KNOWLEDGEHUB_FOLLOWUPS_V1" in messages[1].content
+    assert "辅助材料" in messages[1].content
     assert messages[-1].role == "user"
     assert "完整字幕" in messages[-1].content
     assert "平台辅助材料" in messages[-1].content
