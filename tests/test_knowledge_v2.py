@@ -230,7 +230,7 @@ def test_v2_answer_rejects_out_of_scope_evidence_ids(monkeypatch):
         score=1,
     )
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: FakeProvider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: FakeProvider())
 
     try:
         answer_from_evidence("怎么融合召回？", [result])
@@ -259,7 +259,7 @@ def test_v2_answer_stream_exposes_only_answer_text_before_validated_result(monke
         child_text="RRF 融合两个召回通道。", parent_text="RRF 融合两个召回通道。", score=1,
     )
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: FakeProvider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: FakeProvider())
 
     events = list(stream_answer_from_evidence("怎么融合召回？", [result], task_id="knowledge:stream"))
 
@@ -267,6 +267,21 @@ def test_v2_answer_stream_exposes_only_answer_text_before_validated_result(monke
     done = next(payload for event, payload in events if event == "done")
     assert done.answer == "RRF 融合召回。 [E001]"
     assert done.citations[0]["evidence_id"] == "E001"
+
+
+def test_selected_provider_construction_type_error_never_falls_back_to_default(monkeypatch):
+    calls = []
+
+    def fail_selected(model=None):
+        calls.append(model)
+        if model is None:
+            raise AssertionError("must not fall back to the default provider")
+        raise TypeError("selected provider construction failed")
+
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", fail_selected)
+    with pytest.raises(TypeError, match="selected provider construction failed"):
+        knowledge_v2._knowledge_llm_provider("qwen::qwen3.7-plus:enabled")
+    assert calls == ["qwen::qwen3.7-plus:enabled"]
 
 
 def test_citation_excerpt_skips_image_and_page_chrome_for_matching_passage():
@@ -349,7 +364,7 @@ def test_v2_answer_prompt_requires_complete_list_answers(monkeypatch):
         score=1,
     )
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: FakeProvider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: FakeProvider())
 
     answer = answer_from_evidence("主要有哪些要点？", [result])
 
@@ -411,7 +426,7 @@ def test_v2_answer_retries_an_empty_flash_response(monkeypatch):
         child_text="RRF 融合两个召回通道。", parent_text="RRF 融合两个召回通道。", score=1,
     )
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: provider)
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: provider)
 
     answer = answer_from_evidence("怎么融合召回？", [result])
 
@@ -448,7 +463,7 @@ def test_v2_answer_limits_context_to_highest_ranked_evidence(monkeypatch):
         for index in range(7)
     ]
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: provider)
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: provider)
 
     answer_from_evidence("怎么融合召回？", results, evidence_limit=6)
 
@@ -485,7 +500,7 @@ def test_v2_answer_uses_all_ranked_evidence_by_default(monkeypatch):
         for index in range(7)
     ]
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: provider)
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: provider)
 
     answer = answer_from_evidence("有哪些结论？", results)
 
@@ -514,7 +529,7 @@ def test_v2_answer_accepts_server_generated_evidence_excerpt(monkeypatch):
         child_text="RRF 融合两个召回通道。", parent_text="RRF 融合两个召回通道，并保留原始上下文。", score=1,
     )
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: FakeProvider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: FakeProvider())
 
     answer = answer_from_evidence("怎么融合召回？", [result])
 
@@ -542,7 +557,7 @@ def test_v2_answer_treats_cited_partial_answer_as_not_globally_insufficient(monk
         child_text="RRF 融合两个召回通道。", parent_text="RRF 融合两个召回通道。", score=1,
     )
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: FakeProvider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: FakeProvider())
 
     answer = answer_from_evidence("有哪些结论？", [result])
 
@@ -572,7 +587,7 @@ def test_v2_answer_uses_streaming_for_thinking_provider(monkeypatch):
         child_text="RRF 融合两个召回通道。", parent_text="RRF 融合两个召回通道。", score=1,
     )
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: StreamingProvider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: StreamingProvider())
 
     answer = answer_from_evidence("怎么融合召回？", [result])
 
@@ -590,7 +605,7 @@ def test_rewrite_query_uses_flash_output_and_falls_back_on_invalid_json(monkeypa
             return LLMResponse(content='{"search_query":"Agent Harness 架构 记忆 工具 编排"}', provider=self.name, model=self.model)
 
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: Provider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: Provider())
     assert rewrite_query("Agent Harness 怎么搭？") == "Agent Harness 架构 记忆 工具 编排"
 
     class InvalidProvider(Provider):
@@ -598,7 +613,7 @@ def test_rewrite_query_uses_flash_output_and_falls_back_on_invalid_json(monkeypa
             from services.llm_provider import LLMResponse
             return LLMResponse(content="", provider=self.name, model=self.model)
 
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: InvalidProvider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: InvalidProvider())
     assert rewrite_query("Agent Harness 怎么搭？") == "Agent Harness 怎么搭？"
 
 
@@ -661,7 +676,7 @@ def test_v2_query_and_answer_use_editable_managed_prompts(monkeypatch):
         "knowledge_answer_retry": "自定义格式重试",
     }
     monkeypatch.setattr(knowledge_v2.settings, "deepseek_api_key", "test-key")
-    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda: Provider())
+    monkeypatch.setattr(knowledge_v2, "default_llm_provider", lambda _model=None: Provider())
     monkeypatch.setattr(knowledge_v2, "managed_prompt_text", lambda task_type, fallback: prompts.get(task_type, fallback))
 
     assert rewrite_query("RRF 怎么融合？") == "RRF 混合检索"

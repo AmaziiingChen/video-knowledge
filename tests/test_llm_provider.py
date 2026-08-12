@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-import sys
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -133,3 +134,107 @@ def test_stream_events_separate_reasoning_from_json_content():
     assert request["response_format"] == {"type": "json_object"}
     assert "tools" not in request
     assert "tool_choice" not in request
+
+
+def test_qwen_uses_enable_thinking_while_custom_sends_no_vendor_parameter():
+    completions = _FakeCompletions()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.name = "qwen"
+    provider.model = "qwen3.7-plus"
+    provider.thinking_type = "enabled"
+    provider.thinking_parameter = "enable_thinking"
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    provider.chat([LLMMessage(role="user", content="test")])
+    assert completions.calls[-1]["extra_body"] == {"enable_thinking": True}
+
+    provider.name = "custom"
+    provider.thinking_parameter = "none"
+    provider.chat([LLMMessage(role="user", content="test")])
+    assert "extra_body" not in completions.calls[-1]
+
+
+@pytest.mark.parametrize(
+    (
+        "provider_name",
+        "thinking_parameter",
+        "send_temperature",
+        "stream_options",
+        "response_format",
+        "expected_extra_body",
+    ),
+    [
+        ("deepseek", "thinking", False, True, True, {"thinking": {"type": "enabled"}}),
+        ("qwen", "enable_thinking", False, True, True, {"enable_thinking": True}),
+        ("mimo", "thinking", False, False, True, {"thinking": {"type": "enabled"}}),
+        ("custom", "none", False, False, False, None),
+    ],
+)
+def test_provider_capabilities_control_request_shape(
+    provider_name,
+    thinking_parameter,
+    send_temperature,
+    stream_options,
+    response_format,
+    expected_extra_body,
+):
+    completions = _FakeCompletions()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.name = provider_name
+    provider.model = "test-model"
+    provider.thinking_type = "enabled"
+    provider.thinking_parameter = thinking_parameter
+    provider.send_temperature = send_temperature
+    provider.supports_stream_options = stream_options
+    provider.supports_response_format = response_format
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    if response_format:
+        list(provider.chat_stream_events(
+            [LLMMessage(role="user", content="test")],
+            temperature=0.7,
+            response_format="json_object",
+        ))
+    else:
+        with pytest.raises(ValueError, match="未声明支持"):
+            list(provider.chat_stream_events(
+                [LLMMessage(role="user", content="test")],
+                response_format="json_object",
+            ))
+        list(provider.chat_stream_events([LLMMessage(role="user", content="test")]))
+
+    request = completions.calls[-1]
+    assert ("temperature" in request) is send_temperature
+    assert ("stream_options" in request) is stream_options
+    assert ("response_format" in request) is response_format
+    if expected_extra_body is None:
+        assert "extra_body" not in request
+    else:
+        assert request["extra_body"] == expected_extra_body
+
+
+def test_provider_error_is_redacted_at_boundary_and_not_retried():
+    secret = "provider-secret"
+
+    class FailingCompletions:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **_request):
+            self.calls += 1
+            raise RuntimeError(f"authorization failed for {secret}")
+
+    completions = FailingCompletions()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.name = "custom"
+    provider.model = "test-model"
+    provider.thinking_type = "enabled"
+    provider.thinking_parameter = "none"
+    provider.send_temperature = False
+    provider.supports_response_format = False
+    provider._api_key_redaction = secret
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    with pytest.raises(RuntimeError) as error:
+        provider.chat([LLMMessage(role="user", content="test")])
+    assert secret not in str(error.value)
+    assert completions.calls == 1

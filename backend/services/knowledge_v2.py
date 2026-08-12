@@ -87,6 +87,7 @@ from services.llm_provider import (
     LLMUsage,
     default_llm_provider,
 )
+from services.llm_settings import text_model_configured
 from services.prompt_file_store import managed_prompt_text
 from services.prompt_templates import (
     DEFAULT_KNOWLEDGE_ANSWER_PROMPT,
@@ -139,17 +140,8 @@ class GroundedAnswer:
 
 
 def _knowledge_llm_provider(model: str):
-    """Build the selected model provider while keeping test doubles compatible."""
-    try:
-        return default_llm_provider(model)
-    except TypeError as model_error:
-        # Existing integrations may replace the provider factory with a
-        # zero-argument function. Its configured default model remains a
-        # valid fallback; only use it when the factory itself rejects model.
-        try:
-            return default_llm_provider()
-        except TypeError:
-            raise model_error
+    """Build exactly the selected provider; failures must not cross providers."""
+    return default_llm_provider(model)
 
 
 def rebuild_documents(
@@ -347,8 +339,8 @@ def answer_from_evidence(
             citations=[],
             insufficient_evidence=True,
         )
-    if not settings.deepseek_api_key:
-        raise ValueError("请先在设置中配置 DeepSeek API Key")
+    if not text_model_configured(model):
+        raise ValueError("请先在设置中配置所选文本模型的 API Key")
     evidence = _answer_evidence_payload(
         results,
         question=question,
@@ -440,7 +432,7 @@ def answer_from_evidence(
             task_id=task_id,
             error=str(exc),
         )
-        raise RuntimeError(f"DeepSeek API 调用失败: {exc}") from exc
+        raise RuntimeError(f"文本模型 API 调用失败: {exc}") from exc
     selected = [
         {**item, "excerpt": quotes_by_id[str(item["evidence_id"])]}
         for item in evidence
@@ -471,8 +463,8 @@ def stream_answer_from_evidence(
             insufficient_evidence=True,
         )
         return
-    if not settings.deepseek_api_key:
-        raise ValueError("请先在设置中配置 DeepSeek API Key")
+    if not text_model_configured(model):
+        raise ValueError("请先在设置中配置所选文本模型的 API Key")
     evidence = _answer_evidence_payload(results, question=question, evidence_limit=evidence_limit)
     permitted_ids = {str(item["evidence_id"]) for item in evidence}
     messages = [
@@ -535,7 +527,7 @@ def stream_answer_from_evidence(
                 task_id=task_id,
                 error=str(exc),
             )
-            raise RuntimeError(f"DeepSeek API 调用失败: {exc}") from exc
+            raise RuntimeError(f"文本模型 API 调用失败: {exc}") from exc
         response = LLMResponse(
             content="".join(response_parts).strip(),
             provider=str(getattr(provider, "name", "unknown")),

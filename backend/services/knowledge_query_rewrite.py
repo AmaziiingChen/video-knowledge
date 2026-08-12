@@ -6,9 +6,8 @@ import re
 from time import perf_counter
 from typing import Callable, Iterable
 
-from config import settings
-
 from services.llm_provider import LLMMessage
+from services.llm_settings import text_model_configured
 from services.prompt_templates import DEFAULT_KNOWLEDGE_QUERY_REWRITE_PROMPT
 
 
@@ -39,7 +38,7 @@ def rewrite_knowledge_query(
 ) -> str:
     """Rewrite vague questions without letting model failure block retrieval."""
     original = str(question or "").strip()
-    if not original or not settings.deepseek_api_key:
+    if not original or not text_model_configured(model):
         return original
     messages = [
         LLMMessage(

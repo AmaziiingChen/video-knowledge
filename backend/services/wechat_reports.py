@@ -31,6 +31,7 @@ from services.group_report_pipeline import (
     generate_group_report,
 )
 from services.group_report_markdown import _source_footnote
+from services.llm_settings import text_model_configured
 from services.prompt_file_store import remove_report_prompt_files, sync_report_prompt_files, write_report_prompt_file
 from services.report_naming import (
     report_document_name as _report_document_name,
@@ -52,7 +53,6 @@ GENERATABLE_REPORT_TYPES = ("daily", "weekly", LEGACY_REPORT_PROMPT_TYPE)
 DEFAULT_REPORT_PROMPT_VERSION = "group-report-editorial-v17"
 CUSTOM_REPORT_PROMPT_VERSION = "custom"
 ReportProgressCallback = Callable[[dict[str, object]], None]
-
 
 def _source_material(source: dict) -> str:
     """Keep the historical patch point while injecting the managed-text reader."""
@@ -691,8 +691,8 @@ def generate_report(
 ) -> dict:
     if report_type not in GENERATABLE_REPORT_TYPES:
         raise ValueError("报告类型无效")
-    if not settings.deepseek_api_key:
-        raise ValueError("请先在设置 → 处理与 AI 中配置 DeepSeek API Key")
+    if any(not text_model_configured(model) for model in set(GROUP_REPORT_MODEL_CHAIN.values())):
+        raise ValueError("请先在设置 → AI 服务中配置报告所需的 DeepSeek API Key")
     ensure_database_initialized()
     tracking_task_id = f"report:{new_id()}"
     if (window_start is None) != (window_end is None):

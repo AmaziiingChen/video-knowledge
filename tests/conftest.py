@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from config import settings
 from services.task_manager import task_manager
+from services.text_model_secrets import InMemoryTextModelSecretStore, set_text_model_secret_store
 
 
 def _reset_global_task_manager() -> None:
@@ -57,5 +58,7 @@ def isolate_runtime_settings(tmp_path, monkeypatch):
     # Production launchers always inject a per-session local API token.
     # TestClient calls deliberately exercise routers without a browser shell.
     monkeypatch.setenv("KNOWLEDGEHUB_ALLOW_UNAUTHENTICATED_LOCAL_API", "1")
+    previous_secret_store = set_text_model_secret_store(InMemoryTextModelSecretStore())
     yield
+    set_text_model_secret_store(previous_secret_store)
     _reset_global_task_manager()

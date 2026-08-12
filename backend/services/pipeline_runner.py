@@ -72,6 +72,7 @@ from services.repository import ContentRepository
 from services.downloader import DownloadProgress, download_video, get_video_info
 from services.douyin_context import fetch_douyin_source_context
 from services.markdown_sync import replace_content_summary_and_sync, save_markdown_draft_and_sync
+from services.llm_settings import text_model_configured
 from services.search_index import upsert_search_document
 from services.source_context_store import save_source_context
 from services.summarizer import generate_article_markdown, generate_markdown, summarize, summarize_stream
@@ -79,7 +80,6 @@ from services.subtitles import fetch_bilibili_subtitle, parse_subtitle_text
 from services.transcriber import ASR_BACKENDS, extract_audio_with_details, transcribe_with_details
 from services.url_parser import parse_share_text, redact_sensitive_url
 from services.video_download_settings import should_auto_download_bilibili_video
-
 
 ProgressCallback = Callable[[PipelineResponse], None]
 CancelCheck = Callable[[], bool]
@@ -303,7 +303,7 @@ def run_pipeline_sync(
                 reporter=reporter,
                 fail=fail,
                 processing_mode=processing_mode,
-                api_key_configured=bool(settings.deepseek_api_key),
+                api_key_configured=text_model_configured(ai_model),
                 ai_model=ai_model,
                 total_started_at=total_start,
                 summarize_article=summarize,
@@ -866,13 +866,13 @@ def run_pipeline_sync(
         )
 
         check_cancel()
-        if not settings.deepseek_api_key:
-            error = "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）"
+        if not text_model_configured(ai_model):
+            error = "未配置所选文本模型 API Key（请在设置 → AI 服务中填写）"
             add_log("summarize", error, "error")
             return fail("summarize", error)
 
         summarize_start = time.perf_counter()
-        add_log("summarize", "调用 DeepSeek 生成总结...")
+        add_log("summarize", "调用所选文本模型生成总结...")
         set_progress("summarize", 30)
         content_title = (
             str((article_info or {}).get("title") or "").strip()

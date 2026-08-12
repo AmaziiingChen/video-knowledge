@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from services.summarizer import summarize, generate_markdown
 from config import settings
+from services.llm_settings import text_model_configured
 from datetime import datetime
 from services.obsidian_settings import automatic_markdown_write_enabled
 
@@ -22,8 +23,8 @@ class SummarizeResponse(BaseModel):
 
 @router.post("/summarize", response_model=SummarizeResponse)
 def summarize_transcript(req: SummarizeRequest):
-    if not settings.deepseek_api_key:
-        raise HTTPException(status_code=500, detail="未配置 DeepSeek API Key")
+    if not text_model_configured():
+        raise HTTPException(status_code=500, detail="未配置默认文本模型 API Key")
     
     try:
         ai_title, summary = summarize(req.transcript, req.video_title)

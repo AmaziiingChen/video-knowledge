@@ -144,7 +144,7 @@ def summarize(
                 content_item_id=content_item_id,
                 error=str(e),
             )
-        raise Exception(f"DeepSeek API 调用失败: {str(e)}")
+        raise Exception(f"文本模型 API 调用失败: {str(e)}")
 
 
 def summarize_stream(
@@ -257,7 +257,7 @@ def summarize_stream(
                 content_item_id=content_item_id,
                 error=str(exc),
             )
-        raise Exception(f"DeepSeek API 调用失败: {str(exc)}") from exc
+        raise Exception(f"文本模型 API 调用失败: {str(exc)}") from exc
 
 
 def _trim_transcript_for_qa(transcript: str) -> str:
@@ -355,7 +355,7 @@ def stream_regenerated_content_summary(
             content_item_id=content_item_id,
             error=error_message,
         )
-        raise Exception(f"DeepSeek API 调用失败: {error_message}") from exc
+        raise Exception(f"文本模型 API 调用失败: {error_message}") from exc
 
 
 def stream_regenerated_article_summary(
@@ -627,7 +627,7 @@ def answer_question(
                 content_item_id=content_item_id,
                 error=str(e),
             )
-        raise Exception(f"DeepSeek API 调用失败: {str(e)}")
+        raise Exception(f"文本模型 API 调用失败: {str(e)}")
 
 
 def stream_answer_question(
@@ -691,7 +691,7 @@ def stream_answer_question(
             content_item_id=content_item_id,
             error=str(e),
         )
-        raise Exception(f"DeepSeek API 调用失败: {str(e)}")
+        raise Exception(f"文本模型 API 调用失败: {str(e)}")
 
 
 def build_qa_messages(

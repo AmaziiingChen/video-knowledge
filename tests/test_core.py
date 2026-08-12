@@ -1324,7 +1324,8 @@ class CredentialSettingsTests(unittest.TestCase):
                 )
 
                 saved = load_llm_settings()
-                self.assertEqual(saved["deepseek_api_key"], "saved-deepseek-key")
+                self.assertNotIn("deepseek_api_key", saved)
+                self.assertEqual(reveal_deepseek_api_key(), "saved-deepseek-key")
                 self.assertEqual(saved["deepseek_base_url"], "https://proxy.example.test/v1")
         finally:
             settings.data_dir = old_data_dir
@@ -1435,6 +1436,10 @@ class CredentialSettingsTests(unittest.TestCase):
                 base_url="https://proxy.example.test/v1",
                 model="deepseek-v4-flash",
                 thinking_type="enabled",
+                thinking_parameter="thinking",
+                send_temperature=False,
+                supports_stream_options=True,
+                supports_response_format=True,
                 provider_name="deepseek",
                 request_timeout_seconds=20,
             )

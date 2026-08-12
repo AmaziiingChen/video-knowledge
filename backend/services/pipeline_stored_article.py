@@ -79,10 +79,10 @@ def run_prepared_stored_article(
         return response
 
     if not api_key_configured:
-        return fail("summarize", "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）")
+        return fail("summarize", "未配置所选文本模型 API Key（请在设置 → AI 服务中填写）")
 
     summarize_started_at = time.perf_counter()
-    reporter.add_log("summarize", "调用 DeepSeek 生成文章总结...")
+    reporter.add_log("summarize", "调用所选文本模型生成文章总结...")
     try:
         ai_title, summary = summarize_article(
             transcript,

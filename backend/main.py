@@ -10,7 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from router_registry import register_api_routers
 from services.application_lifecycle import start_application, stop_application
-from services.llm_provider import DEEPSEEK_MODEL_OPTIONS, deepseek_model_option_value
+from services.llm_provider import deepseek_model_option_value
+from services.llm_settings import (
+    available_text_model_options,
+    default_text_model_selection,
+    text_model_configured,
+)
 from services.mcp_bridge_security import (
     MCP_TOKEN_ENV,
     MCP_TOKEN_HEADER,
@@ -141,7 +146,9 @@ async def get_config():
         "deepseek_configured": bool(settings.deepseek_api_key),
         "deepseek_model": settings.deepseek_model,
         "deepseek_model_option": deepseek_model_option_value(settings.deepseek_model),
-        "available_ai_models": DEEPSEEK_MODEL_OPTIONS,
+        "text_model_configured": text_model_configured(),
+        "default_ai_model": default_text_model_selection(),
+        "available_ai_models": available_text_model_options(),
         "whisper_model": settings.whisper_model,
         "available_whisper_models": sorted(WHISPER_MODELS),
         "asr_backend": settings.asr_backend,

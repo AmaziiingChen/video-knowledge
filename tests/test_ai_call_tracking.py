@@ -1,8 +1,7 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from fastapi.testclient import TestClient
-
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -10,7 +9,12 @@ sys.path.insert(0, str(BACKEND))
 
 from config import settings
 from main import app
-from services.ai_call_logger import ai_call_usage_detail_for_task, ai_call_usage_for_task, estimate_cost, tracked_llm_provider
+from services.ai_call_logger import (
+    ai_call_usage_detail_for_task,
+    ai_call_usage_for_task,
+    estimate_cost,
+    tracked_llm_provider,
+)
 from services.campus_digest_generation import CampusEventEmbedder
 from services.database import connect
 from services.llm_provider import LLMMessage, LLMResponse, LLMUsage
@@ -128,6 +132,22 @@ def test_deepseek_peak_multiplier_defaults_to_base_price_until_enabled(monkeypat
         prompt_cache_miss_tokens=1_000_000,
         billed_at=peak_billed_at,
     ) == 6.0
+
+
+def test_non_deepseek_provider_never_uses_deepseek_price_card(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "deepseek_pricing",
+        {"shared-model": {"input_cache_hit": 1, "input_cache_miss": 2, "output": 3}},
+    )
+    monkeypatch.setattr(settings, "llm_input_cost_per_million_tokens", 0.0)
+    monkeypatch.setattr(settings, "llm_output_cost_per_million_tokens", 0.0)
+    assert estimate_cost(
+        1_000_000,
+        1_000_000,
+        provider="qwen",
+        model="shared-model",
+    ) is None
 
 
 def test_campus_embedding_api_is_not_called_while_the_feature_is_paused(tmp_path, monkeypatch):

@@ -128,7 +128,7 @@ def test_runs_full_stored_article_and_keeps_search_failure_non_fatal() -> None:
 @pytest.mark.parametrize(
     ("api_key_configured", "summary_result", "expected_error"),
     [
-        (False, ("", ""), "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）"),
+        (False, ("", ""), "未配置所选文本模型 API Key（请在设置 → AI 服务中填写）"),
         (True, ("标题", ""), "总结生成失败"),
     ],
 )

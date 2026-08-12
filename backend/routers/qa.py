@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from config import settings
+from services.llm_settings import text_model_configured
 from services.cache import cache_dir_for_url, read_cached_transcript_segments
 from services.content_source_text import load_content_source_text
 from services.database import connect, initialize_database, utc_now_iso
@@ -622,8 +622,8 @@ def ask_video_note(req: QARequest):
     question = req.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="请输入追问内容")
-    if not settings.deepseek_api_key:
-        raise HTTPException(status_code=500, detail="未配置 DeepSeek API Key")
+    if not text_model_configured(req.ai_model):
+        raise HTTPException(status_code=500, detail="未配置所选文本模型 API Key")
     summary, transcript, video_title = _resolve_qa_source(req)
     transcript, timestamp_seconds = _timestamped_qa_transcript(req.content_item_id, transcript)
     source_context = load_source_context(req.content_item_id) if req.content_item_id else {}
@@ -703,8 +703,8 @@ async def ask_video_note_stream(req: QARequest):
     question = req.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="请输入追问内容")
-    if not settings.deepseek_api_key:
-        raise HTTPException(status_code=500, detail="未配置 DeepSeek API Key")
+    if not text_model_configured(req.ai_model):
+        raise HTTPException(status_code=500, detail="未配置所选文本模型 API Key")
     if req.regenerate_summary and req.regenerate_assistant_message_id:
         raise HTTPException(status_code=400, detail="不能同时重新生成摘要和追问回答")
     regeneration_target = None
