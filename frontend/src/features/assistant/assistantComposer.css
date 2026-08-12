@@ -357,7 +357,6 @@
   cursor: pointer;
 }
 
-.assistant-model-option small { color: var(--vk-muted); font-size: var(--vk-type-meta-size); }
 .assistant-model-option:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .assistant-model-option:hover,

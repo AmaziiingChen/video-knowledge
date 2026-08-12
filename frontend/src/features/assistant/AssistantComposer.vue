@@ -11,7 +11,6 @@
             <div v-if="modelMenuOpen" class="assistant-model-options">
               <button v-for="model in aiModelOptions" :key="model.value" class="assistant-model-option" :class="{ active: model.value === selectedAiModel }" type="button" :disabled="model.disabled" @click="selectAiModel(model.value)">
                 <span>{{ model.label }}</span>
-                <small>{{ model.providerLabel }}</small>
               </button>
             </div>
           </Transition>

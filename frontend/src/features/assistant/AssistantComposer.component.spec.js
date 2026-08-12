@@ -48,6 +48,35 @@ describe('AssistantComposer', () => {
     expect(wrapper.emitted('insert-shortcut')).toEqual([['总结']])
   })
 
+  it('shows model names only while preserving provider-qualified selection values', async () => {
+    const wrapper = mountComposer({
+      selectedAiModel: 'qwen::qwen3.7-plus:enabled',
+      availableAiModels: [
+        {
+          value: 'qwen::qwen3.7-plus:enabled',
+          label: 'Qwen3.7 Plus',
+          provider: 'qwen',
+          provider_label: '阿里云百炼 · 千问',
+        },
+        {
+          value: 'mimo::mimo-v2-pro:enabled',
+          label: 'MiMo V2 Pro',
+          provider: 'mimo',
+          provider_label: 'Xiaomi MiMo',
+        },
+      ],
+    })
+
+    expect(wrapper.get('[aria-label="切换模型"]').text()).toContain('Qwen3.7 Plus')
+    expect(wrapper.get('[aria-label="切换模型"]').text()).not.toContain('千问')
+    await wrapper.get('[aria-label="切换模型"]').trigger('click')
+    const options = wrapper.findAll('.assistant-model-option')
+    expect(options.map((option) => option.text())).toContain('MiMo V2 Pro')
+    expect(wrapper.get('.assistant-model-options').text()).not.toContain('Xiaomi MiMo')
+    await options.find((option) => option.text() === 'MiMo V2 Pro').trigger('click')
+    expect(wrapper.emitted('update:selectedAiModel')).toEqual([['mimo::mimo-v2-pro:enabled']])
+  })
+
   it('preserves OCR and contextual action gates and events', async () => {
     const wrapper = mountComposer({
       articleOcrStatus: { status: 'queued', priority: false },

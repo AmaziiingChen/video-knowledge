@@ -45,7 +45,7 @@ export function assistantAiModelOptions(selectedModel, availableModels) {
 
 export function assistantSelectedModelLabel(selectedModel, options) {
   const selected = options.find((model) => model.value === selectedModel) || normalizeAiModelOption(selectedModel)
-  return selected ? `${selected.providerLabel} · ${selected.label}` : 'DeepSeek · V4 Flash'
+  return selected?.label || 'V4 Flash'
 }
 
 export function summaryTitleMarkdown(title) {

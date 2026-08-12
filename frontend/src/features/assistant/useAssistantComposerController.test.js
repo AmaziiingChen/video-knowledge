@@ -98,7 +98,7 @@ test('projects composer choices, shortcuts, OCR hints and action availability', 
     'deepseek-v4-flash:enabled',
     'deepseek-v4-pro:enabled',
   ])
-  assert.equal(controller.selectedAiModelLabel.value, 'DeepSeek · V4 Flash Thinking')
+  assert.equal(controller.selectedAiModelLabel.value, 'V4 Flash Thinking')
   assert.equal(controller.customActionLabel.value, '提炼观点')
   assert.equal(controller.qaShortcutButtons.value[0].name, '总结')
   props.questionInput = '请 @总'
