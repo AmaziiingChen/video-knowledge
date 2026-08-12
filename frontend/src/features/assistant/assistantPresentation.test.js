@@ -16,8 +16,16 @@ import {
 test('normalizes legacy models, deduplicates options, and escapes summary titles', () => {
   const options = assistantAiModelOptions('deepseek-chat', [{ value: 'deepseek-v4-flash:disabled', label: '旧标签' }])
   assert.deepEqual(options.map((option) => option.value), ['deepseek-v4-flash:enabled', 'deepseek-v4-pro:enabled'])
-  assert.equal(assistantSelectedModelLabel('deepseek-chat', options), 'V4 Flash Thinking')
+  assert.equal(assistantSelectedModelLabel('deepseek-chat', options), 'DeepSeek · V4 Flash Thinking')
   assert.equal(summaryTitleMarkdown('标题 #1\n'), '# 标题 \\#1')
+})
+
+test('retains disabled metadata for the selected provider model', () => {
+  const options = assistantAiModelOptions('qwen::qwen3.7-plus:enabled', [{
+    value: 'qwen::qwen3.7-plus:enabled', label: 'Qwen Plus', provider: 'qwen', disabled: true,
+  }])
+  assert.equal(options[0].value, 'qwen::qwen3.7-plus:enabled')
+  assert.equal(options[0].disabled, true)
 })
 
 test('keeps external citations and shortcut filtering bounded', () => {

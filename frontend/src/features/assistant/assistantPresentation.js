@@ -13,16 +13,28 @@ function normalizeAiModelOption(option) {
   if (value === 'deepseek-v4-flash' || value === 'deepseek-v4-pro') value = `${value}:enabled`
   if (value.endsWith(':disabled')) value = value.replace(':disabled', ':enabled')
   const defaultLabel = DEFAULT_MODELS.find((model) => model.value === value)?.label
+  const provider = (typeof option === 'object' && option?.provider)
+    || (value.includes('::') ? value.split('::', 1)[0] : 'deepseek')
+  const providerLabel = (typeof option === 'object' && option?.provider_label)
+    || ({ deepseek: 'DeepSeek', qwen: '阿里云百炼 · 千问', mimo: 'Xiaomi MiMo' })[provider]
+    || provider
   return {
     value,
     label: (typeof option === 'object' && option?.label) || defaultLabel || value,
+    provider,
+    providerLabel,
+    disabled: typeof option === 'object' && option?.disabled === true,
   }
 }
 
 export function assistantAiModelOptions(selectedModel, availableModels) {
   const seen = new Set()
   const options = []
-  for (const candidate of [selectedModel, ...(availableModels || []), ...DEFAULT_MODELS]) {
+  const normalizedSelected = normalizeAiModelOption(selectedModel)
+  const canonicalSelected = (availableModels || []).find((option) => (
+    normalizeAiModelOption(option)?.value === normalizedSelected?.value
+  )) || selectedModel
+  for (const candidate of [canonicalSelected, ...(availableModels || []), ...DEFAULT_MODELS]) {
     const model = normalizeAiModelOption(candidate)
     if (!model || seen.has(model.value)) continue
     seen.add(model.value)
@@ -32,9 +44,8 @@ export function assistantAiModelOptions(selectedModel, availableModels) {
 }
 
 export function assistantSelectedModelLabel(selectedModel, options) {
-  return options.find((model) => model.value === selectedModel)?.label
-    || normalizeAiModelOption(selectedModel)?.label
-    || 'V4 Flash'
+  const selected = options.find((model) => model.value === selectedModel) || normalizeAiModelOption(selectedModel)
+  return selected ? `${selected.providerLabel} · ${selected.label}` : 'DeepSeek · V4 Flash'
 }
 
 export function summaryTitleMarkdown(title) {

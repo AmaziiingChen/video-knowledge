@@ -526,8 +526,6 @@
         :initial-section="settingsInitialSection"
         v-model:selected-theme="selectedTheme"
         v-model:selected-ai-model="selectedAiModel"
-        v-model:deepseek-api-key="deepseekApiKey"
-        v-model:deepseek-base-url="deepseekBaseUrl"
         v-model:deepseek-pricing="deepseekPricing"
         v-model:deepseek-peak-pricing-multiplier="deepseekPeakPricingMultiplier"
         v-model:embedding-api-key="embeddingApiKey"
@@ -613,7 +611,6 @@
         :runtime-components-loading="loadingRuntimeComponents"
         :deepseek-configured="deepseekConfigured"
         :saving-deepseek-settings="savingDeepSeekSettings"
-        :testing-deepseek-connection="testingDeepSeekConnection"
         :embedding-configured="embeddingConfigured"
         :saving-embedding-settings="savingEmbeddingSettings"
         :testing-embedding-connection="testingEmbeddingConnection"
@@ -659,7 +656,7 @@
         @download-asr-model="downloadAsrModel"
         @delete-asr-model="deleteAsrModel"
         @save-deepseek-settings="saveDeepSeekSettings"
-        @test-deepseek-connection="testDeepSeekConnection"
+        @text-model-options-updated="handleTextModelOptionsUpdated"
         @save-embedding-settings="saveEmbeddingSettings"
         @test-embedding-connection="testEmbeddingConnection"
         @save-paddle-ocr-settings="savePaddleOcrSettings"
@@ -1244,13 +1241,10 @@ const {
   savingMediaTools,
   runtimeComponents,
   loadingRuntimeComponents,
-  deepseekApiKey,
-  deepseekBaseUrl,
   deepseekPricing,
   deepseekPeakPricingMultiplier,
   deepseekConfigured,
   savingDeepSeekSettings,
-  testingDeepSeekConnection,
   embeddingApiKey,
   embeddingBaseUrl,
   embeddingModel,
@@ -1267,7 +1261,6 @@ const {
   saveManualCollectionSettings,
   loadDeepSeekSettings,
   saveDeepSeekSettings,
-  testDeepSeekConnection,
   saveEmbeddingSettings,
   testEmbeddingConnection,
   loadPaddleOcrSettings,
@@ -1284,6 +1277,24 @@ const {
   loadAiTokenUsageSummary,
   requestDestructiveConfirmation
 })
+
+function handleTextModelOptionsUpdated(options) {
+  const nextOptions = Array.isArray(options) ? options : []
+  availableAiModels.value = nextOptions
+  const enabledValues = nextOptions
+    .filter((option) => option?.disabled !== true)
+    .map((option) => String(option?.value || option || ''))
+    .filter(Boolean)
+  if (!enabledValues.includes(assistantAiModel.value)) {
+    assistantAiModel.value = enabledValues.includes(selectedAiModel.value)
+      ? selectedAiModel.value
+      : enabledValues[0] || assistantAiModel.value
+  }
+  // Keep the legacy pricing editor in sync when the DeepSeek provider URL is
+  // changed through the provider editor. The request remains local and does
+  // not reveal the Keychain secret.
+  void loadDeepSeekSettings().catch(() => null)
+}
 
 const WORKSPACE_PANE_VISIBILITY_KEY = 'knowledgehub.workspace-pane-visibility.v1'
 

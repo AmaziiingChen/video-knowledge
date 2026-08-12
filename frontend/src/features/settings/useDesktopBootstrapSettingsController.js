@@ -3,6 +3,11 @@ import { ref } from 'vue'
 
 import { API_BASE as API } from '../../utils/localApiAuth.js'
 
+function selectionProvider(selection) {
+  const withoutThinking = String(selection || '').replace(/:(?:enabled|disabled)$/u, '')
+  return withoutThinking.includes('::') ? withoutThinking.split('::', 1)[0] : 'deepseek'
+}
+
 export function useDesktopBootstrapSettingsController({
   selectedAiModel,
   normalizeAiModelValue,
@@ -27,15 +32,43 @@ export function useDesktopBootstrapSettingsController({
       if (Array.isArray(config.available_whisper_models)) {
         availableModels.value = config.available_whisper_models
       }
-      if (!hasLocalAiSettings && config.deepseek_model_option) {
-        selectedAiModel.value = config.deepseek_model_option
-      } else if (!hasLocalAiSettings && config.deepseek_model) {
-        selectedAiModel.value = normalizeAiModelValue(config.deepseek_model)
-      }
       if (Array.isArray(config.available_ai_models)) {
         availableAiModels.value = config.available_ai_models
       } else if (config.deepseek_model) {
         availableAiModels.value = [normalizeAiModelValue(config.deepseek_model)]
+      }
+      const serverDefault = String(
+        config.default_ai_model
+        || config.deepseek_model_option
+        || (config.deepseek_model ? normalizeAiModelValue(config.deepseek_model) : ''),
+      )
+      const providerResponse = await request.get(`${apiBase}/llm-settings/text-providers`).catch(() => ({ data: {} }))
+      const providers = Array.isArray(providerResponse.data?.providers) ? providerResponse.data.providers : []
+      const providerStates = Object.fromEntries(providers.map((provider) => [
+        provider.id,
+        { configured: provider.enabled !== false && provider.configured === true, label: provider.label },
+      ]))
+      const defaultProvider = selectionProvider(serverDefault)
+      availableAiModels.value = availableAiModels.value.map((option) => {
+        const source = typeof option === 'object' ? option : { value: option, label: option }
+        const provider = String(source.provider || selectionProvider(source.value))
+        const knownState = providerStates[provider]
+        const configured = knownState
+          ? knownState.configured
+          : provider === defaultProvider && config.text_model_configured !== false
+        return {
+          ...source,
+          provider,
+          provider_label: source.provider_label || knownState?.label || provider,
+          disabled: !configured,
+        }
+      })
+      const optionValues = availableAiModels.value
+        .filter((option) => option?.disabled !== true)
+        .map((option) => String(option?.value || option || ''))
+        .filter(Boolean)
+      if (!hasLocalAiSettings || !optionValues.includes(selectedAiModel.value)) {
+        selectedAiModel.value = serverDefault || optionValues[0] || selectedAiModel.value
       }
 
       void checkManualUpdate()

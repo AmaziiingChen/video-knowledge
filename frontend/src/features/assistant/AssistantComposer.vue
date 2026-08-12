@@ -3,14 +3,15 @@
     <div class="assistant-input-panel">
       <div class="assistant-input-tools">
         <div ref="modelMenuRef" class="assistant-model-menu" @focusout="handleMenuFocusOut('model', $event)">
-          <button class="assistant-model-pill" :class="{ open: modelMenuOpen }" type="button" aria-label="切换模型" :aria-expanded="modelMenuOpen" @click="toggleModelMenu" @keydown.esc="closeAssistantMenus">
+          <button class="assistant-model-pill" :class="{ open: modelMenuOpen }" type="button" aria-label="切换模型" :aria-expanded="modelMenuOpen" :disabled="modelSwitchDisabled" @click="toggleModelMenu" @keydown.esc="closeAssistantMenus">
             <span>{{ selectedAiModelLabel }}</span>
             <SvgMaskIcon class="assistant-menu-chevron" src="chevron.down" :size="14" />
           </button>
           <Transition name="assistant-model-pop">
             <div v-if="modelMenuOpen" class="assistant-model-options">
-              <button v-for="model in aiModelOptions" :key="model.value" class="assistant-model-option" :class="{ active: model.value === selectedAiModel }" type="button" @click="selectAiModel(model.value)">
-                {{ model.label }}
+              <button v-for="model in aiModelOptions" :key="model.value" class="assistant-model-option" :class="{ active: model.value === selectedAiModel }" type="button" :disabled="model.disabled" @click="selectAiModel(model.value)">
+                <span>{{ model.label }}</span>
+                <small>{{ model.providerLabel }}</small>
               </button>
             </div>
           </Transition>
@@ -78,7 +79,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import { useAssistantComposerController } from './useAssistantComposerController.js'
 
@@ -112,6 +113,8 @@ const emit = defineEmits([
   'update:questionInput', 'update:selectedAiModel', 'prioritize-ocr', 'insert-shortcut',
   'new-chat', 'generate-ai-summary', 'export-markdown', 'run-content-analysis', 'ask-question',
 ])
+
+const modelSwitchDisabled = computed(() => props.askingQuestion || props.generatingAiSummary || props.startingNewChat)
 
 const {
   modelMenuOpen, shortcutMenuOpen, modelMenuRef, shortcutMenuRef, shortcutSuggestionsRef,

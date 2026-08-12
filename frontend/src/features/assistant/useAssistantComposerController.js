@@ -61,6 +61,7 @@ export function useAssistantComposerController({
   }))
 
   function selectAiModel(model) {
+    if (props.askingQuestion || props.generatingAiSummary || props.startingNewChat) return
     emit('update:selectedAiModel', model)
     modelMenuOpen.value = false
   }
@@ -71,6 +72,10 @@ export function useAssistantComposerController({
   }
 
   function toggleModelMenu() {
+    if (props.askingQuestion || props.generatingAiSummary || props.startingNewChat) {
+      closeAssistantMenus()
+      return
+    }
     const shouldOpen = !modelMenuOpen.value
     closeAssistantMenus()
     modelMenuOpen.value = shouldOpen
@@ -167,6 +172,11 @@ export function useAssistantComposerController({
   watch(() => props.questionInput, () => {
     scheduleNextTick(() => resizeQuestionInput())
   })
+
+  watch(
+    () => props.askingQuestion || props.generatingAiSummary || props.startingNewChat,
+    (busy) => { if (busy) closeAssistantMenus() },
+  )
 
   return {
     modelMenuOpen,

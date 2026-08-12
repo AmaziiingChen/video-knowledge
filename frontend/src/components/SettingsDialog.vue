@@ -123,30 +123,17 @@
             <div class="settings-group-head">文本模型</div>
             <div class="settings-ai-field settings-ai-service">
               <div class="settings-ai-field-heading">
-                <h3>DeepSeek 大语言模型</h3>
-                <p>用于文章总结与追问。密钥只保存在本机。</p>
+                <h3>文本模型服务</h3>
+                <p>管理 DeepSeek、千问、MiMo 与其他 OpenAI 兼容服务。不会自动切换服务。</p>
               </div>
-              <label class="settings-ai-input-label" for="default-ai-model">Model</label>
-              <el-select id="default-ai-model" v-model="selectedAiModel" class="settings-ai-select" name="default-ai-model" filterable allow-create default-first-option aria-label="默认 AI 模型" placeholder="选择或输入模型">
-                <el-option v-for="option in aiModelOptions" :key="option.value" :label="option.label" :value="option.value" />
-              </el-select>
-              <label class="settings-ai-input-label" for="deepseek-api-key">API Key</label>
-              <el-input id="deepseek-api-key" v-model="deepseekApiKey" class="settings-ai-icon-input" :type="showDeepseekApiKey ? 'text' : 'password'" name="deepseek-api-key" autocomplete="off" spellcheck="false" aria-label="DeepSeek API Key" :placeholder="credentialPlaceholder(deepseekConfigured, 'API Key')">
-                <template #prefix><SvgMaskIcon :src="keyCircleIcon" :size="17" /></template>
-                <template #suffix><button class="settings-ai-input-icon-button" type="button" :aria-label="showDeepseekApiKey ? '隐藏 DeepSeek API Key' : '显示 DeepSeek API Key'" @mousedown.prevent @click="toggleDeepseekApiKeyVisibility"><SvgMaskIcon :src="showDeepseekApiKey ? eyeSlashIcon : eyeIcon" :size="17" /></button></template>
-              </el-input>
-              <label class="settings-ai-input-label" for="deepseek-base-url">Base URL</label>
-              <el-input id="deepseek-base-url" v-model="deepseekBaseUrl" class="settings-ai-icon-input" type="url" name="deepseek-base-url" autocomplete="off" inputmode="url" spellcheck="false" aria-label="DeepSeek Base URL" placeholder="https://api.deepseek.com">
-                <template #prefix><SvgMaskIcon :src="globeIcon" :size="17" /></template>
-              </el-input>
-              <div class="settings-ai-field-actions">
-                <el-button size="small" :loading="testingDeepseekConnection" :disabled="savingDeepseekSettings" @click="emit('test-deepseek-connection')">测试连接</el-button>
-                <el-button size="small" type="primary" :loading="savingDeepseekSettings" :disabled="testingDeepseekConnection" @click="emit('save-deepseek-settings')">保存</el-button>
-              </div>
+              <TextModelProviderSettings
+                v-model:selected-model="selectedAiModel"
+                @options-updated="emit('text-model-options-updated', $event)"
+              />
             </div>
             <div class="settings-ai-field settings-ai-pricing-field">
               <details class="settings-ai-pricing-disclosure" open>
-                <summary><span>Token 估算价格</span></summary>
+                <summary><span>DeepSeek Token 估算价格</span></summary>
                 <p>单位为元／百万 tokens；仅用于本机估算，最终扣费以服务商账单为准。</p>
                 <div class="settings-pricing-control">
                   <div v-for="model in textPricingModels" :key="model.key" class="settings-pricing-card">
@@ -159,6 +146,9 @@
                     <span><strong>高峰计价</strong> 如服务商账单启用，北京时间每日 9:00–12:00、14:00–18:00</span>
                     <label>高峰倍率<el-input-number v-model="deepseekPeakPricingMultiplier" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /></label>
                   </div>
+                </div>
+                <div class="settings-actions settings-ai-actions">
+                  <el-button type="primary" size="small" :loading="savingDeepseekSettings" :disabled="savingDeepseekSettings" @click="emit('save-deepseek-settings')">保存估算价格</el-button>
                 </div>
               </details>
             </div>
@@ -505,6 +495,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { IconX } from './macosSymbolComponents.js'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
+import TextModelProviderSettings from '../features/settings/TextModelProviderSettings.vue'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import { API_BASE as API } from '../utils/localApiAuth.js'
 import SvgMaskIcon from './SvgMaskIcon.vue'
@@ -522,8 +513,6 @@ import { requestDestructiveConfirmation } from '../composables/useDestructiveCon
 const modelValue = defineModel({ type: Boolean, default: false })
 const selectedTheme = defineModel('selectedTheme', { type: String, default: '' })
 const selectedAiModel = defineModel('selectedAiModel', { type: String, default: '' })
-const deepseekApiKey = defineModel('deepseekApiKey', { type: String, default: '' })
-const deepseekBaseUrl = defineModel('deepseekBaseUrl', { type: String, default: 'https://api.deepseek.com' })
 const deepseekPricing = defineModel('deepseekPricing', {
   type: Object,
   default: () => ({
@@ -538,7 +527,6 @@ const embeddingModel = defineModel('embeddingModel', { type: String, default: 'q
 const paddleOcrAccessToken = defineModel('paddleOcrAccessToken', { type: String, default: '' })
 const paddleOcrBaseUrl = defineModel('paddleOcrBaseUrl', { type: String, default: 'https://paddleocr.aistudio-app.com/api/v2/ocr/jobs' })
 const paddleOcrModel = defineModel('paddleOcrModel', { type: String, default: 'PaddleOCR-VL-1.6' })
-const showDeepseekApiKey = ref(false)
 const showEmbeddingApiKey = ref(false)
 const showPaddleOcrAccessToken = ref(false)
 const showWechatQwenCoverApiKey = ref(false)
@@ -616,7 +604,6 @@ const {
   savingMediaTools,
   deepseekConfigured,
   savingDeepseekSettings,
-  testingDeepseekConnection,
   embeddingConfigured,
   savingEmbeddingSettings,
   testingEmbeddingConnection,
@@ -677,7 +664,6 @@ const {
   savingMediaTools: Boolean,
   deepseekConfigured: Boolean,
   savingDeepseekSettings: Boolean,
-  testingDeepseekConnection: Boolean,
   embeddingConfigured: Boolean,
   savingEmbeddingSettings: Boolean,
   testingEmbeddingConnection: Boolean,
@@ -753,7 +739,7 @@ const emit = defineEmits([
   'save-media-tools',
   'choose-media-tool',
   'save-deepseek-settings',
-  'test-deepseek-connection',
+  'text-model-options-updated',
   'save-embedding-settings',
   'test-embedding-connection',
   'save-paddle-ocr-settings',
@@ -773,11 +759,12 @@ const builtInTextPricingModels = [
 ]
 const selectedTextModelName = computed(() => {
   const configured = String(selectedAiModel.value || 'deepseek-v4-flash:enabled').trim()
-  return configured.split(':', 1)[0] || 'deepseek-v4-flash'
+  const withoutThinking = configured.replace(/:(?:enabled|disabled)$/u, '')
+  return withoutThinking.includes('::') ? '' : withoutThinking || 'deepseek-v4-flash'
 })
 const textPricingModels = computed(() => {
   const selected = selectedTextModelName.value
-  return builtInTextPricingModels.some((model) => model.key === selected)
+  return !selected || builtInTextPricingModels.some((model) => model.key === selected)
     ? builtInTextPricingModels
     : [...builtInTextPricingModels, { key: selected, label: selected }]
 })
@@ -796,7 +783,6 @@ watch([selectedTextModelName, deepseekPricing], ensureTextModelPricing, { immedi
 const FAVORITE_API = `${API}/favorite-sources`
 const XIAOHONGSHU_COOKIE_API = `${API}/xiaohongshu-cookie`
 const TELEMETRY_API = `${API}/telemetry`
-const DEEPSEEK_SECRET_REVEAL_API = `${API}/llm-settings/deepseek/reveal`
 const EMBEDDING_SECRET_REVEAL_API = `${API}/llm-settings/campus-embedding/reveal`
 const PADDLE_OCR_SECRET_REVEAL_API = `${API}/paddle-ocr-settings/reveal`
 const VISUAL_MODEL_SECRET_REVEAL_API = `${API}/wechat-publishing/cover-settings/reveal`
@@ -934,19 +920,6 @@ async function revealStoredSecret(endpoint, credentialName) {
     ElMessage.error(favoriteErrorMessage(error, `无法显示 ${credentialName}`))
     return ''
   }
-}
-
-async function toggleDeepseekApiKeyVisibility() {
-  if (showDeepseekApiKey.value) {
-    showDeepseekApiKey.value = false
-    return
-  }
-  if (!deepseekApiKey.value && deepseekConfigured) {
-    const secret = await revealStoredSecret(DEEPSEEK_SECRET_REVEAL_API, 'DeepSeek API Key')
-    if (!secret) return
-    deepseekApiKey.value = secret
-  }
-  showDeepseekApiKey.value = true
 }
 
 async function toggleEmbeddingApiKeyVisibility() {

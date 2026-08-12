@@ -126,3 +126,24 @@ test('persists changed AI, assistant, and appearance preferences without alterin
     globalThis.document = priorDocument
   }
 })
+
+test('preserves opaque provider selections without storing credentials', async () => {
+  const priorStorage = globalThis.localStorage
+  const priorDocument = globalThis.document
+  const selection = 'qwen::qwen3.7-plus:enabled'
+  const storage = createStorage({ [AI_SETTINGS_KEY]: JSON.stringify({ ai_model: selection }) })
+  globalThis.localStorage = storage
+  installDocument()
+  try {
+    const controller = useAppSettingsController()
+    controller.startSettingsPersistence()
+    assert.deepEqual(controller.restoreSettings(), { hasLocalAiSettings: true })
+    assert.equal(controller.selectedAiModel.value, selection)
+    await nextTick()
+    assert.equal(storage.getItem(AI_SETTINGS_KEY), JSON.stringify({ ai_model: selection }))
+    assert.equal(storage.getItem('text-provider-api-key'), null)
+  } finally {
+    globalThis.localStorage = priorStorage
+    globalThis.document = priorDocument
+  }
+})

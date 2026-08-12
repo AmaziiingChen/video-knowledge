@@ -9,7 +9,7 @@ function mountComposer(props = {}) {
     props: {
       currentQaEnabled: true,
       canGenerateAiSummary: true,
-      availableAiModels: [{ value: 'deepseek-v4-pro:enabled', label: 'V4 Pro Thinking' }],
+      availableAiModels: [{ value: 'deepseek-v4-pro:enabled', label: 'V4 Pro Thinking', provider_label: 'DeepSeek' }],
       qaShortcutTemplates: [{ id: 'summary', name: '总结', template: '总结正文' }],
       contentAnalysisTemplates: [{ id: 'analysis', name: '提炼观点', is_active: true }],
       ...props,
@@ -38,7 +38,7 @@ describe('AssistantComposer', () => {
     expect(wrapper.emitted('ask-question')).toEqual([[]])
 
     await wrapper.get('[aria-label="切换模型"]').trigger('click')
-    const model = wrapper.findAll('.assistant-model-option').find((item) => item.text() === 'V4 Pro Thinking')
+    const model = wrapper.findAll('.assistant-model-option').find((item) => item.text().includes('V4 Pro Thinking'))
     await model.trigger('click')
     expect(wrapper.emitted('update:selectedAiModel')).toEqual([['deepseek-v4-pro:enabled']])
     expect(wrapper.find('.assistant-model-options').exists()).toBe(false)
@@ -65,6 +65,7 @@ describe('AssistantComposer', () => {
     expect(wrapper.emitted('run-content-analysis')).toEqual([[]])
 
     await wrapper.setProps({ askingQuestion: true })
+    expect(wrapper.get('[aria-label="切换模型"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="开启新对话"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="生成 AI 摘要"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="在当前对话中使用提炼观点"]').attributes('disabled')).toBeDefined()

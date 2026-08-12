@@ -98,7 +98,7 @@ test('projects composer choices, shortcuts, OCR hints and action availability', 
     'deepseek-v4-flash:enabled',
     'deepseek-v4-pro:enabled',
   ])
-  assert.equal(controller.selectedAiModelLabel.value, 'V4 Flash Thinking')
+  assert.equal(controller.selectedAiModelLabel.value, 'DeepSeek · V4 Flash Thinking')
   assert.equal(controller.customActionLabel.value, '提炼观点')
   assert.equal(controller.qaShortcutButtons.value[0].name, '总结')
   props.questionInput = '请 @总'
@@ -113,6 +113,21 @@ test('projects composer choices, shortcuts, OCR hints and action availability', 
   props.currentInsightHtml = '<p>摘要</p>'
   await nextTick()
   assert.equal(controller.hasExportableConversation.value, true)
+  scope.stop()
+})
+
+test('closes the model menu and rejects switches while a request is active', async () => {
+  const { controller, props, events, scope } = createHarness()
+  controller.toggleModelMenu()
+  assert.equal(controller.modelMenuOpen.value, true)
+
+  props.askingQuestion = true
+  await nextTick()
+  assert.equal(controller.modelMenuOpen.value, false)
+  controller.toggleModelMenu()
+  controller.selectAiModel('deepseek-v4-pro:enabled')
+  assert.equal(controller.modelMenuOpen.value, false)
+  assert.deepEqual(events, [])
   scope.stop()
 })
 

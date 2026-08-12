@@ -285,6 +285,8 @@
   white-space: nowrap;
 }
 
+.assistant-model-pill:disabled { cursor: default; opacity: 0.48; }
+
 .assistant-model-options {
   position: absolute;
   left: 0;
@@ -340,7 +342,9 @@
   min-width: 0;
   min-height: 32px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
   padding: 0 10px;
   border: 0;
   border-radius: 5px;
@@ -352,6 +356,9 @@
   text-align: left;
   cursor: pointer;
 }
+
+.assistant-model-option small { color: var(--vk-muted); font-size: var(--vk-type-meta-size); }
+.assistant-model-option:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .assistant-model-option:hover,
 .assistant-model-option.active {
