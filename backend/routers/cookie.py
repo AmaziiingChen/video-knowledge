@@ -1,11 +1,12 @@
 from pathlib import Path
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from config import settings
 from services.bilibili_auth import clear_saved_bilibili_cookie, get_bilibili_cookie_status, save_bilibili_cookie
 from services.cookie_files import write_cookie_pairs_to_netscape
 from services.douyin_cookie_status import get_douyin_cookie_status, invalidate_douyin_cookie_status
 from services.xiaohongshu_client import clear_xiaohongshu_cookie, save_xiaohongshu_cookie, xiaohongshu_cookie_status
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_collector
 
 router = APIRouter()
 
@@ -83,8 +84,11 @@ def get_xiaohongshu_cookie(refresh: bool = Query(default=False)):
 @router.post("/xiaohongshu-cookie", response_model=CookieResponse)
 def set_xiaohongshu_cookie(req: CookieRequest):
     try:
+        require_xiaohongshu_collector()
         save_xiaohongshu_cookie(req.cookie)
         return CookieResponse(success=True, message="小红书 Cookie 已保存")
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OSError, ValueError) as exc:
         return CookieResponse(success=False, message=f"保存失败: {exc}")
 

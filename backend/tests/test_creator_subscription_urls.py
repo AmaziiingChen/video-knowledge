@@ -24,6 +24,16 @@ from services.database import (
 )
 
 
+@pytest.fixture(autouse=True)
+def available_xiaohongshu_collector(tmp_path, monkeypatch):
+    vendor_root = tmp_path / "Spider_XHS"
+    (vendor_root / "apis").mkdir(parents=True)
+    (vendor_root / "xhs_utils").mkdir(parents=True)
+    (vendor_root / "apis" / "xhs_pc_apis.py").touch()
+    (vendor_root / "xhs_utils" / "xhs_pc.py").touch()
+    monkeypatch.setattr("services.xiaohongshu_capability.xiaohongshu_vendor_root", lambda: vendor_root)
+
+
 def test_douyin_likes_and_favorites_urls_have_distinct_subscription_identities():
     likes = _parse_creator_url("https://www.douyin.com/user/MS4wLjABAAAA?showTab=like")
     favorites = _parse_creator_url(

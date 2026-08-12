@@ -11,9 +11,9 @@
             autocomplete="url"
             spellcheck="false"
             clearable
-            placeholder="粘贴 B站、抖音链接，或小红书个人主页的收藏页链接"
+            placeholder="粘贴 B站或抖音的主页、合集、收藏夹链接"
           />
-          <el-button type="primary" native-type="submit" :loading="previewing" :disabled="syncingPreview || Boolean(syncingSourceId)">{{ previewing ? '正在搜索' : '搜索' }}</el-button>
+          <el-button type="primary" native-type="submit" :loading="previewing" :disabled="syncingPreview || Boolean(syncingSourceId) || isUnavailableXiaohongshuUrl">{{ previewing ? '正在搜索' : '搜索' }}</el-button>
         </div>
       </label>
       <div class="creator-form-options">
@@ -70,7 +70,7 @@
           </el-select>
         </label>
       </div>
-      <p class="creator-policy-note">首次订阅最多读取这里设置的数量；之后每次检查都会从最新作品向前读取，直到遇到本订阅已记录的作品为止。个人喜欢、收藏仅使用当前设备的本地登录态读取；小红书采集目前暂不开放。</p>
+      <p class="creator-policy-note">首次订阅最多读取这里设置的数量；之后每次检查都会从最新作品向前读取，直到遇到本订阅已记录的作品为止。个人喜欢、收藏仅使用当前设备的本地登录态读取。公开版未携带小红书采集组件，已缓存资料仍可阅读。</p>
     </form>
 
     <section v-if="previewData" class="creator-preview" aria-labelledby="creator-preview-title">
@@ -156,7 +156,11 @@
             </button>
           </span>
           <span class="creator-source-activity column-activity">
-            <el-tooltip v-if="source.last_error" placement="top" :show-after="160" popper-class="creator-source-error-tooltip">
+            <template v-if="source.provider === 'xiaohongshu'">
+              <strong>仅历史与缓存</strong>
+              <small>公开版不自动检查</small>
+            </template>
+            <el-tooltip v-else-if="source.last_error" placement="top" :show-after="160" popper-class="creator-source-error-tooltip">
               <template #content><div class="creator-source-error-tooltip-copy">{{ source.last_error }}</div></template>
               <button type="button" class="creator-source-error-trigger" :aria-label="`查看 ${source.creator_name || '创作者'} 的同步失败原因`">
                 <strong class="is-error">同步失败</strong>
@@ -166,27 +170,27 @@
             <small>{{ source.last_error ? '悬浮查看原因' : `上次 ${formatTime(source.last_sync_at)}` }}</small>
           </span>
           <span class="creator-source-setting-cell column-analysis">
-            <el-select :model-value="source.processing_mode || (source.auto_process ? 'full' : 'metadata')" size="small" :disabled="sourceBusy(source)" :aria-label="`${source.creator_name || '创作者'}的处理方式`" @update:model-value="updateSource(source, { processing_mode: $event })">
+            <el-select :model-value="source.processing_mode || (source.auto_process ? 'full' : 'metadata')" size="small" :disabled="sourceBusy(source) || source.provider === 'xiaohongshu'" :aria-label="`${source.creator_name || '创作者'}的处理方式`" @update:model-value="updateSource(source, { processing_mode: $event })">
               <el-option v-for="option in processingOptions" :key="option.value" :label="option.shortLabel" :value="option.value" />
             </el-select>
           </span>
           <span class="creator-source-setting-cell column-enabled">
-            <el-switch :model-value="source.enabled" :disabled="sourceBusy(source)" :aria-label="`${source.creator_name || '创作者'}自动检查`" @update:model-value="updateSource(source, { enabled: $event })" />
+            <el-switch :model-value="source.enabled" :disabled="sourceBusy(source) || source.provider === 'xiaohongshu'" :aria-label="`${source.creator_name || '创作者'}自动检查`" @update:model-value="updateSource(source, { enabled: $event })" />
           </span>
           <span class="creator-source-setting-cell column-frequency">
-            <el-select :model-value="source.sync_interval_minutes" size="small" :disabled="sourceBusy(source)" :aria-label="`${source.creator_name || '创作者'}的检查频率`" @update:model-value="updateSource(source, { sync_interval_minutes: Number($event) })">
+            <el-select :model-value="source.sync_interval_minutes" size="small" :disabled="sourceBusy(source) || source.provider === 'xiaohongshu'" :aria-label="`${source.creator_name || '创作者'}的检查频率`" @update:model-value="updateSource(source, { sync_interval_minutes: Number($event) })">
               <el-option v-for="option in intervalOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </span>
           <span class="creator-source-actions column-actions">
-            <el-button text size="small" :loading="syncingSourceId === source.id" :disabled="!source.enabled || previewing || syncingPreview || Boolean(syncingSourceId)" @click="syncSource(source)">检查</el-button>
+            <el-button text size="small" :loading="syncingSourceId === source.id" :disabled="!source.enabled || source.provider === 'xiaohongshu' || previewing || syncingPreview || Boolean(syncingSourceId)" @click="syncSource(source)">检查</el-button>
             <el-dropdown trigger="click" placement="bottom-end" @command="handleSourceAction($event, source)">
               <button type="button" class="creator-source-more" :disabled="sourceBusy(source)" :aria-label="`${source.creator_name || '创作者'}的更多操作`">
                 <el-icon><MoreFilled /></el-icon>
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="retry" :disabled="sourceBusy(source)">重试失败项</el-dropdown-item>
+                  <el-dropdown-item command="retry" :disabled="sourceBusy(source) || source.provider === 'xiaohongshu'">重试失败项</el-dropdown-item>
                   <el-dropdown-item divided command="remove" :disabled="sourceBusy(source)" class="creator-source-remove-menu-item">取消订阅</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -282,6 +286,7 @@ const selectedDurationLabel = computed(() => {
 })
 const primaryActionLabel = computed(() => '订阅')
 const previewModeLabel = computed(() => `首次最多读取 ${previewLimit.value} 条`)
+const isUnavailableXiaohongshuUrl = computed(() => /(?:xiaohongshu\.com|xhslink\.(?:com|cn))/i.test(sourceUrl.value))
 
 function sourceKindLabel(kind) {
   return ({ profile: '主页作品', profile_compilations: '主页合集', collection: '合集', series: '系列', channel_series: '频道系列', channel_collection: '频道合集', favorites: '收藏夹', likes: '喜欢' })[kind] || '作品来源'
@@ -333,6 +338,7 @@ async function preview() {
 }
 
 function handleSourceAction(command, source) {
+  if (command === 'retry' && source.provider === 'xiaohongshu') return
   if (command === 'retry') return syncSource(source, { retryFailedItems: true })
   if (command === 'remove') return removeSource(source)
 }

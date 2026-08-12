@@ -19,7 +19,9 @@ KNOWN_DEBT_BUDGETS = {
     "frontend/src/workbench/LibrarySidebar.vue": 1_134,
     "backend/services/wechat_publishing.py": 1_415,
     "backend/routers/content.py": 201,
-    "backend/services/creator_sync.py": 985,
+    # Public builds add explicit collector preflight while retaining the
+    # module's established router/test helper exports.
+    "backend/services/creator_sync.py": 997,
     "backend/services/knowledge_v2.py": 661,
     "backend/services/campus_digest_generation.py": 984,
     "backend/services/campus_sources.py": 992,
@@ -33,7 +35,9 @@ KNOWN_DEBT_BUDGETS = {
     # in this dialog rather than duplicating a second settings surface.
     "frontend/src/components/SettingsDialog.vue": 1_313,
     "frontend/src/styles/settings.css": 1_269,
-    "backend/services/task_manager.py": 1_106,
+    # Recovery and every queue-control mutation now enforce the optional
+    # collector capability before touching durable task/content state.
+    "backend/services/task_manager.py": 1_133,
     "frontend/src/workbench/WorkbenchShell.vue": 1_095,
     "backend/services/content_index.py": 1_083,
 }

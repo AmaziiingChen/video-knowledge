@@ -8,6 +8,7 @@ const chromeSource = await readFile(new URL('../workbench/WorkspaceChromeActions
 const controllerSource = await readFile(new URL('../composables/useAppController.js', import.meta.url), 'utf8')
 const appSettingsControllerSource = await readFile(new URL('../features/settings/useAppSettingsController.js', import.meta.url), 'utf8')
 const desktopPresentationSource = await readFile(new URL('../config/desktopPresentation.js', import.meta.url), 'utf8')
+const creatorSource = await readFile(new URL('../features/creator/CreatorWorkspace.vue', import.meta.url), 'utf8')
 
 test('appearance settings show theme choices without a redundant heading', () => {
   assert.doesNotMatch(source, /settings-appearance-heading/)
@@ -43,4 +44,20 @@ test('settings omit retired cache, conversation-mirror, and Telegram controls', 
 test('Telegram controls are absent from the desktop UI', () => {
   assert.doesNotMatch(appSource, /telegram-/)
   assert.doesNotMatch(chromeSource, /Telegram|telegram/)
+})
+
+test('public Xiaohongshu capability disables collector-only settings without touching other platforms', () => {
+  assert.match(source, /公开版未携带采集组件，已缓存资料仍可阅读/)
+  assert.match(source, /:disabled="!platformAuthAvailable \|\| !xiaohongshuCollectorAvailable"/)
+  assert.match(source, /:disabled="!xiaohongshuCollectorAvailable" @click="loadXiaohongshuCookieStatus/)
+  assert.match(source, /v-if="xiaohongshuCollectorAvailable" class="settings-manual-credential"/)
+  assert.match(source, /collector_available/)
+  assert.match(source, /if \(!xiaohongshuCollectorAvailable\.value\) return/)
+  assert.match(source, /emit\('check-platform-auth', 'bilibili'\)/)
+  assert.match(source, /emit\('check-platform-auth', 'douyin'\)/)
+  assert.match(creatorSource, /xhslink\\\.\(\?:com\|cn\)/)
+  assert.match(creatorSource, /source\.provider === 'xiaohongshu'/)
+  assert.match(creatorSource, /仅历史与缓存/)
+  assert.match(creatorSource, /sourceBusy\(source\) \|\| source\.provider === 'xiaohongshu'/)
+  assert.doesNotMatch(creatorSource, /小红书个人主页的收藏页链接/)
 })

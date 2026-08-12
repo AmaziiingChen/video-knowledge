@@ -15,13 +15,12 @@ from urllib.parse import parse_qs, urlparse
 
 from config import settings
 from services.source_context import MAX_STORED_COMMENTS
-
-
-_VENDOR_ROOT = (
-    Path(getattr(sys, "_MEIPASS")) / "vendor" / "Spider_XHS"
-    if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None)
-    else Path(__file__).resolve().parents[1] / "vendor" / "Spider_XHS"
+from services.xiaohongshu_capability import (
+    require_xiaohongshu_collector,
+    xiaohongshu_collector_capability,
 )
+
+
 _IMPORT_LOCK = Lock()
 
 
@@ -79,12 +78,26 @@ def _is_guest_session(profile_data: object) -> bool:
 def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
     path = xiaohongshu_cookie_path()
     configured = path.is_file() and bool(path.read_text(encoding="utf-8", errors="ignore").strip())
+    capability = xiaohongshu_collector_capability()
+    capability_fields = {
+        "collector_available": bool(capability["available"]),
+        "collector_reason": str(capability["reason"]),
+    }
+    if not capability["available"]:
+        return {
+            "configured": configured,
+            "state": "unavailable",
+            "label": "小红书采集不可用",
+            "detail": str(capability["reason"]),
+            **capability_fields,
+        }
     if not configured:
         return {
             "configured": False,
             "state": "missing",
             "label": "小红书登录态未连接",
             "detail": "请在应用内登录，或手动粘贴 Cookie。",
+            **capability_fields,
         }
     if not probe:
         return {
@@ -92,6 +105,7 @@ def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
             "state": "unknown",
             "label": "小红书登录态已保存",
             "detail": "已保存到本机；点击“检查可用性”验证。",
+            **capability_fields,
         }
     try:
         success, message, profile = _api().get_user_me()
@@ -103,6 +117,7 @@ def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
                 "state": "valid",
                 "label": "小红书登录态可用",
                 "detail": "会话已验证，可读取图文和“我的收藏”。",
+                **capability_fields,
             }
         if success and _is_guest_session(profile_data):
             return {
@@ -110,12 +125,14 @@ def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
                 "state": "invalid",
                 "label": "小红书登录态需要更新",
                 "detail": "当前 Cookie 被小红书识别为访客会话，请重新登录并完成授权。",
+                **capability_fields,
             }
         return {
             "configured": True,
             "state": "invalid",
             "label": "小红书登录态需要更新",
             "detail": str(message or "平台未确认当前会话")[:300],
+            **capability_fields,
         }
     except Exception as exc:
         return {
@@ -123,6 +140,7 @@ def xiaohongshu_cookie_status(*, probe: bool = False) -> dict[str, object]:
             "state": "unknown",
             "label": "小红书登录态待确认",
             "detail": str(exc)[:300],
+            **capability_fields,
         }
 
 
@@ -270,6 +288,7 @@ def fetch_my_favorites_preview(
 
 
 def _api():
+    vendor_root = require_xiaohongshu_collector()
     cookie_path = xiaohongshu_cookie_path()
     try:
         cookie = cookie_path.read_text(encoding="utf-8").strip()
@@ -277,10 +296,8 @@ def _api():
         raise XiaohongshuClientError("请先在设置中填写小红书 Cookie") from exc
     if not cookie:
         raise XiaohongshuClientError("请先在设置中填写小红书 Cookie")
-    if not _VENDOR_ROOT.is_dir():
-        raise XiaohongshuClientError("小红书采集组件未安装")
     with _IMPORT_LOCK:
-        vendor = str(_VENDOR_ROOT)
+        vendor = str(vendor_root)
         if vendor not in sys.path:
             sys.path.insert(0, vendor)
         from apis.xhs_pc_apis import XHS_Apis

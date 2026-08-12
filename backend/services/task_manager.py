@@ -23,6 +23,7 @@ from services.pipeline_runner import PipelineLog, PipelineRequest, PipelineRespo
 from services.repository import ContentRepository, TaskRepository
 from config import settings
 from services.telemetry import record as record_telemetry
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_request
 
 
 TaskStatus = Literal["queued", "running", "paused", "succeeded", "failed", "cancelled"]
@@ -162,6 +163,7 @@ class TaskManager:
         *,
         task_type: str = "process_video",
     ) -> TaskRecord:
+        require_xiaohongshu_request(request)
         task_id = str(uuid.uuid4())[:8]
         record = self._record_from_request(task_id, request, task_type=task_type)
         # A task is not accepted until its queue record is durable. Otherwise
@@ -270,13 +272,28 @@ class TaskManager:
         except Exception:
             return
 
+        recoverable: list[TaskRecord] = []
+        read_only_task_ids: set[str] = set()
+        for row in reversed(rows):
+            if row.task_type not in {"process_video", "generate_wechat_cover", "import_document", "source_sync"}:
+                continue
+            record = self._record_from_row(row)
+            if record is None:
+                continue
+            try:
+                require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
+            except XiaohongshuCollectorUnavailable:
+                if record.status in {"queued", "running", "paused"}:
+                    # Public builds leave unsupported active work byte-for-byte
+                    # untouched. Terminal history is still loaded read-only.
+                    continue
+                read_only_task_ids.add(record.task_id)
+            recoverable.append(record)
+
         recovered_state_changes: list[TaskRecord] = []
         with self._lock:
-            for row in reversed(rows):
-                if row.task_type not in {"process_video", "generate_wechat_cover", "import_document", "source_sync"} or row.id in self._tasks:
-                    continue
-                record = self._record_from_row(row)
-                if record is None:
+            for record in recoverable:
+                if record.task_id in self._tasks:
                     continue
                 if record.status == "running":
                     if record.task_type == "process_video" and record.execution_mode == "background":
@@ -300,7 +317,7 @@ class TaskManager:
         # tasks on startup, while preserving an item a user has already moved
         # out of the processing state.
         for record in self.list():
-            if record.status in {"succeeded", "failed", "cancelled"}:
+            if record.status in {"succeeded", "failed", "cancelled"} and record.task_id not in read_only_task_ids:
                 self._persist_content_status(record, only_if_processing=True)
         self._schedule_next()
 
@@ -308,13 +325,14 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status not in {"failed", "cancelled"}:
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.status = "queued"
             record.cancel_requested = False
             if record.share_text and not record.local_video_path and not record.local_subtitle_path:
@@ -333,13 +351,14 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status != "queued":
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.status = "paused"
             record.updated_at = _now_iso()
             if record.future:
@@ -358,13 +377,14 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status != "paused":
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.status = "queued"
             record.cancel_requested = False
             record.updated_at = _now_iso()
@@ -380,19 +400,26 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status not in {"queued", "paused"}:
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.priority = priority
             record.updated_at = _now_iso()
             snapshot = self._copy_record(record)
         self._persist_priority(snapshot)
         self._schedule_next()
         return self.get(task_id)
+
+    def _load_record_for_control(self, task_id: str) -> TaskRecord | None:
+        record = self._load_record_from_database(task_id)
+        if record is not None and record.status in {"queued", "running", "paused"}:
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
+        return record
 
     def list(self) -> list[TaskRecord]:
         with self._lock:

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from presentation.task_responses import TaskResponse, to_task_response
 from services.task_manager import task_manager
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_collector
 
 
 router = APIRouter()
@@ -49,12 +50,20 @@ class SourceSyncTaskRequest(BaseModel):
 
 @router.post("/source-sync-tasks", response_model=TaskResponse, status_code=202)
 async def create_source_sync_task(req: SourceSyncTaskRequest):
+    if req.kind == "favorite_xiaohongshu":
+        try:
+            require_xiaohongshu_collector()
+        except XiaohongshuCollectorUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     request = req.model_dump(exclude_none=True)
     if req.source_url_input:
         request["source_url"] = req.source_url_input
-    task = task_manager.create_source_sync(
-        request,
-        source_title=req.source_title,
-        source_url=req.source_url,
-    )
+    try:
+        task = task_manager.create_source_sync(
+            request,
+            source_title=req.source_title,
+            source_url=req.source_url,
+        )
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return to_task_response(task)

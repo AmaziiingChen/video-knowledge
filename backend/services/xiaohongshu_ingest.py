@@ -23,6 +23,7 @@ from services.content_index import ensure_managed_folder
 from services.database import utc_now_iso
 from services.xiaohongshu_cache import promote_xiaohongshu_cache, xiaohongshu_cache_dir
 from services.xiaohongshu_client import XiaohongshuClientError, fetch_note
+from services.xiaohongshu_capability import require_xiaohongshu_collector, xiaohongshu_collector_capability
 
 
 _SYNC_LOCK = Lock()
@@ -31,6 +32,7 @@ _XHS_TAG_RE = re.compile(r"(?<![\w#])#(?P<tag>[\w\-\u4e00-\u9fff]{1,32})(?:\[[^\
 
 
 def capture_xiaohongshu_note(content_item_id: str) -> dict[str, object]:
+    require_xiaohongshu_collector()
     initialize_database()
     with connect() as connection:
         item = ContentRepository(connection).get_content_item(content_item_id)
@@ -123,6 +125,7 @@ def sync_xiaohongshu_favorites(*, auto_analyze: bool = True, source_id: str | No
     from services.xiaohongshu_client import fetch_my_favorites
     from services.pipeline_runner import PipelineRequest
 
+    require_xiaohongshu_collector()
     initialize_database()
     with _SYNC_LOCK:
         with connect() as connection:
@@ -240,6 +243,8 @@ def update_xiaohongshu_favorite_source(*, enabled: bool | None = None, auto_anal
 
 
 def sync_due_xiaohongshu_favorites() -> list[str]:
+    if not xiaohongshu_collector_capability()["available"]:
+        return []
     initialize_database()
     with connect() as connection:
         rows = connection.execute(

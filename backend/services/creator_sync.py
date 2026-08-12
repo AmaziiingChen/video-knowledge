@@ -3,14 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from threading import Lock
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 from config import settings
 from services.content_index import ensure_creator_folder
-from services.creator_capture_status import (
-    creator_capture_status,
-    record_creator_list_check as _record_creator_list_check,
-)
+from services.creator_capture_status import creator_capture_status, record_creator_list_check as _record_creator_list_check
 from services.creator_metadata import save_creator_work_metadata
 from services.creator_sync_models import CreatorPreview, CreatorSyncError, CreatorSyncResult, CreatorVideo
 from services.creator_sync_policy import (
@@ -18,7 +14,6 @@ from services.creator_sync_policy import (
     creator_retry_minutes as _creator_retry_minutes,
     effective_processing_mode as _effective_processing_mode,
     valid_interval as _valid_interval,
-    valid_processing_mode as _valid_processing_mode,
     valid_queue_limit as _valid_queue_limit,
 )
 from services.creator_source_registry import (
@@ -41,18 +36,11 @@ from services.creator_source_urls import (
     parse_creator_url as _parse_creator_url,
 )
 from services.creator_remote_payloads import (
-    as_float as _as_float,
     as_int as _as_int,
-    bilibili_author_name as _bilibili_author_name,
     bilibili_video as _bilibili_video,
     collection_name_from_payload as _collection_name_from_payload,
-    douyin_tags as _douyin_tags,
     douyin_video as _douyin_video,
-    duration_from_bilibili as _duration_from_bilibili,
-    normalized_stats as _normalized_stats,
     parse_creator_page as _parse_page,
-    string_list as _string_list,
-    timestamp_iso as _timestamp_iso,
 )
 from services.creator_browser_capture import (
     capture_creator_browser_pages,
@@ -62,9 +50,7 @@ from services.creator_sync_selection import (
     MAX_CREATOR_CAPTURE_RESPONSE_PAGES,
     append_new_videos as _append_new_videos,
     latest_published_at as _latest_published_at,
-    page_reaches_watermark as _page_reaches_watermark,
     parse_cutoff as _parse_cutoff,
-    parse_timestamp as _parse_timestamp,
     preview_within_date_range as _preview_within_date_range,
     selected_preview_videos as _selected_preview_videos,
     should_continue_creator_capture as _should_continue_creator_capture,
@@ -97,6 +83,10 @@ def preview_creator_source(
 ) -> CreatorPreview:
     """Read a public creator page through the application's bundled browser."""
     provider, source_kind, creator_key = _parse_creator_url(source_url.strip())
+    if provider == "xiaohongshu":
+        from services.xiaohongshu_capability import require_xiaohongshu_collector
+
+        require_xiaohongshu_collector()
     normalized_url = _canonical_creator_url(provider, source_kind, creator_key)
     capture_url = _creator_capture_url(source_url, provider=provider, source_kind=source_kind, creator_key=creator_key)
     max_items = max(1, min(int(limit), MAX_CREATOR_SCAN_ITEMS))
@@ -468,6 +458,10 @@ def sync_saved_creator_source(
     execution_mode: Literal["foreground", "background"] = "foreground",
 ) -> CreatorSyncResult:
     source = get_creator_source(source_id)
+    if source.get("provider") == "xiaohongshu":
+        from services.xiaohongshu_capability import require_xiaohongshu_collector
+
+        require_xiaohongshu_collector()
     if not source["enabled"]:
         raise CreatorSyncError("该创作者订阅已暂停；恢复后再同步")
     known_item_ids = _creator_source_item_ids(source_id)
@@ -499,10 +493,14 @@ def sync_saved_creator_source(
 def sync_due_creator_sources() -> list[str]:
     source_ids = due_creator_source_ids(utc_now_iso())
     from services.task_manager import task_manager
+    from services.xiaohongshu_capability import xiaohongshu_collector_capability
 
     completed: list[str] = []
     for source_id in source_ids:
         try:
+            source = get_creator_source(source_id)
+            if source.get("provider") == "xiaohongshu" and not xiaohongshu_collector_capability()["available"]:
+                continue
             task_manager.create_source_sync(
                 {"kind": "creator_saved", "source_id": source_id},
                 source_title="自动检查创作者",

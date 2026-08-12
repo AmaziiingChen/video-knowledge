@@ -560,6 +560,13 @@ data-integrity, ownership-conflict or test-isolation blocker.
   cycle. The checked-in Worker accepts only the fixed opt-in schema; the desktop
   release keeps its collector URL blank and therefore makes no telemetry network
   request.
+- [x] Make the public-build Xiaohongshu boundary explicit. The release does not
+  ship the unlicensed `Spider_XHS` collector: new captures, processing tasks,
+  login validation and automatic subscription retries are rejected before any
+  durable work is created. Existing Cookie metadata is retained locally, and
+  cached articles, images, OCR results and historical library rows remain
+  readable. Restoring collection is deliberately deferred until a licensed,
+  reviewable collector can be distributed without weakening the public tree.
 
 ## Non-negotiable compatibility checks
 

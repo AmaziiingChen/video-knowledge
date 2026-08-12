@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -25,6 +27,16 @@ from services.xiaohongshu_links import XiaohongshuShareLinkError, resolve_xiaoho
 from config import settings
 from services import xiaohongshu_client
 from services.database import _migration_092_repair_placeholder_content_items
+
+
+@pytest.fixture(autouse=True)
+def available_xiaohongshu_collector(tmp_path, monkeypatch):
+    vendor_root = tmp_path / "Spider_XHS"
+    (vendor_root / "apis").mkdir(parents=True)
+    (vendor_root / "xhs_utils").mkdir(parents=True)
+    (vendor_root / "apis" / "xhs_pc_apis.py").touch()
+    (vendor_root / "xhs_utils" / "xhs_pc.py").touch()
+    monkeypatch.setattr("services.xiaohongshu_capability.xiaohongshu_vendor_root", lambda: vendor_root)
 
 
 def test_xiaohongshu_share_link_enters_the_manual_ingest_contract():
