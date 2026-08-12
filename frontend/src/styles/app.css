@@ -140,6 +140,8 @@
   --vk-media-spinner: color-mix(in srgb, var(--vk-on-media) 32%, transparent);
   --vk-highlight: #F2C14E;
   --vk-highlight-surface: color-mix(in srgb, var(--vk-highlight) 48%, transparent);
+  --vk-ai-stream-track: color-mix(in srgb, var(--vk-border) 62%, var(--vk-bg-panel));
+  --vk-ai-stream-highlight: color-mix(in srgb, var(--vk-bg-panel) 56%, var(--vk-border));
   --vk-switch-off: color-mix(in srgb, var(--vk-muted) 42%, var(--vk-bg-panel));
   --vk-theme-accent: #93B259;
   --vk-theme-bg: #FDF6E3;

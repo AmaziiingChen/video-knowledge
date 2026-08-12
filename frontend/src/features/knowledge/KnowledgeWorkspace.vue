@@ -31,12 +31,11 @@
               v-html="renderAnswer(item)"
               @click="handleAnswerFootnoteClick($event, item)"
             />
-            <div v-else-if="item.pending" class="knowledge-answer knowledge-answer-skeleton" role="status" aria-label="AI 正在生成回答">
-              <span class="skeleton-line wide"></span>
-              <span class="skeleton-line"></span>
-              <span class="skeleton-line medium"></span>
-              <span class="skeleton-line short"></span>
-            </div>
+            <AiSkeletonStream
+              v-else-if="item.pending"
+              class="knowledge-answer knowledge-answer-skeleton"
+              aria-label="AI 正在生成回答"
+            />
             <p v-else class="knowledge-answer error">{{ item.error || '回答暂不可用' }}</p>
           </article>
         </template>
@@ -102,6 +101,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowUp } from '../../components/macosSymbolComponents.js'
+import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 const newChatIcon = 'ellipsis.bubble'
 const exportIcon = 'arrow.down.document'
@@ -568,33 +568,9 @@ defineExpose({ openConversation, setKnowledgeScope, selectedSources })
 .knowledge-answer :deep(tr:last-child td) { border-bottom: 0; }
 
 .knowledge-answer-skeleton {
-  display: grid;
-  gap: 10px;
-  width: min(100%, 460px);
-  padding-top: 4px;
+  --ai-skeleton-stream-width: min(100%, 460px);
+  --ai-skeleton-stream-padding: 4px 0 0;
 }
-
-.skeleton-line {
-  position: relative;
-  height: 10px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--vk-border) 62%, var(--vk-bg-panel));
-}
-
-.skeleton-line::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--vk-bg-panel) 58%, var(--vk-border)), transparent);
-  transform: translateX(-110%);
-  animation: knowledge-skeleton-shimmer 1.2s linear infinite;
-}
-
-.skeleton-line.wide { width: 96%; }
-.skeleton-line:not(.wide):not(.medium):not(.short) { width: 76%; }
-.skeleton-line.medium { width: 57%; }
-.skeleton-line.short { width: 35%; }
 
 .knowledge-composer-shell {
   position: relative;
@@ -741,11 +717,8 @@ defineExpose({ openConversation, setKnowledgeScope, selectedSources })
 .knowledge-notice-enter-from, .knowledge-notice-leave-to { opacity: 0; transform: translateY(3px); }
 
 @keyframes knowledge-answer-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes knowledge-skeleton-shimmer { to { transform: translateX(110%); } }
-
 @media (prefers-reduced-motion: reduce) {
   .knowledge-message-new, .knowledge-notice-enter-active, .knowledge-notice-leave-active { animation: none; transition: opacity var(--vk-motion-fast) ease; }
-  .skeleton-line::after { animation: none; opacity: .7; }
 }
 
 @media (prefers-reduced-transparency: reduce) {

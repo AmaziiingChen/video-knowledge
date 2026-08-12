@@ -126,7 +126,7 @@
   height: 10px;
   overflow: hidden;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--vk-border) 62%, var(--vk-bg-panel));
+  background: var(--vk-ai-stream-track);
 }
 
 .transcript-generation-line > i::after {
@@ -136,7 +136,7 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in srgb, #ffffff 56%, var(--vk-border)) 48%,
+    var(--vk-ai-stream-highlight) 48%,
     transparent 100%
   );
   transform: translateX(-110%);
