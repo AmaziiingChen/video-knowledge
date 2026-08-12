@@ -1,22 +1,31 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
-from main import app
+import pytest
 from config import settings
-from services.database import connect, initialize_database
+from fastapi.testclient import TestClient
+from main import app
 from services.cache import write_cache_meta
 from services.content_source_text import load_content_source_text
 from services.creator_sync import preview_creator_source, sync_saved_creator_source
+from services.database import connect, initialize_database
 from services.pipeline_runner import PipelineRequest
 from services.repository import ContentRepository
-from services.task_manager import task_manager
 from services.source_context_refresh import refresh_source_context
-from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_request
+from services.task_manager import task_manager
 from services.xiaohongshu_cache import xiaohongshu_cache_dir
-from services.xiaohongshu_capability import PUBLIC_COLLECTOR_UNAVAILABLE_REASON
+from services.xiaohongshu_capability import (
+    PUBLIC_COLLECTOR_UNAVAILABLE_REASON,
+    XiaohongshuCollectorUnavailable,
+    require_xiaohongshu_request,
+)
 from services.xiaohongshu_client import xiaohongshu_cookie_status
 from services.xiaohongshu_ingest import sync_due_xiaohongshu_favorites
+
+
+@pytest.fixture(autouse=True)
+def unavailable_xiaohongshu_browser(monkeypatch):
+    monkeypatch.setattr("services.runtime_components.browser_executable", lambda: None)
+    monkeypatch.setattr("services.xiaohongshu_browser_collector.browser_executable", lambda: None)
 
 
 def test_public_cookie_status_preserves_configured_metadata(tmp_path):
@@ -26,14 +35,14 @@ def test_public_cookie_status_preserves_configured_metadata(tmp_path):
 
     status = xiaohongshu_cookie_status(probe=True)
 
-    assert status == {
-        "configured": True,
-        "state": "unavailable",
-        "label": "小红书采集不可用",
-        "detail": PUBLIC_COLLECTOR_UNAVAILABLE_REASON,
-        "collector_available": False,
-        "collector_reason": PUBLIC_COLLECTOR_UNAVAILABLE_REASON,
-    }
+    assert status["configured"] is True
+    assert status["state"] == "unavailable"
+    assert status["label"] == "小红书浏览器组件未准备"
+    assert status["detail"] == PUBLIC_COLLECTOR_UNAVAILABLE_REASON
+    assert status["collector_available"] is False
+    assert status["capabilities"]["credential_storage"]["available"] is True
+    assert status["capabilities"]["note_capture"]["available"] is False
+    assert status["capabilities"]["favorites_sync"]["available"] is False
     assert cookie_path.read_text(encoding="utf-8") == "a=legacy-cookie"
 
 
@@ -51,12 +60,58 @@ def test_public_capture_and_task_endpoints_reject_without_persistence():
         client.post("/api/tasks", json={"share_text": url, "source_url": url}),
         client.post("/api/tasks", json={"share_text": "https://xhslink.cn/a/abc"}),
         client.post("/api/source-sync-tasks", json={"kind": "favorite_xiaohongshu", "source_title": "XHS"}),
+        client.post(
+            "/api/source-sync-tasks",
+            json={
+                "kind": "creator_new",
+                "source_title": "XHS creator",
+                "source_url": "https://www.xiaohongshu.com/user/profile/creator-1",
+            },
+        ),
     ]
 
-    assert [response.status_code for response in responses] == [400, 409, 409, 409, 409]
-    assert all(PUBLIC_COLLECTOR_UNAVAILABLE_REASON in response.text for response in responses)
+    assert [response.status_code for response in responses] == [400, 409, 409, 409, 409, 409]
+    assert all(
+        reason in response.text
+        for response, reason in zip(
+            responses,
+            [
+                PUBLIC_COLLECTOR_UNAVAILABLE_REASON,
+                PUBLIC_COLLECTOR_UNAVAILABLE_REASON,
+                PUBLIC_COLLECTOR_UNAVAILABLE_REASON,
+                PUBLIC_COLLECTOR_UNAVAILABLE_REASON,
+                "主动导入单篇图文",
+                "创作者同步暂未开放",
+            ],
+            strict=True,
+        )
+    )
     with connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM content_items").fetchone()[0] == before_items
+        assert connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == before_tasks
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.xiaohongshu.com/user/profile/creator-1",
+        "https://www.xiaohongshu.com/explore/note-1",
+        "https://xhslink.cn/a/short",
+    ],
+)
+def test_creator_new_xhs_shapes_reject_before_task_persistence(url):
+    initialize_database()
+    with connect() as connection:
+        before_tasks = connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+
+    response = TestClient(app).post(
+        "/api/source-sync-tasks",
+        json={"kind": "creator_new", "source_title": "XHS creator", "source_url": url},
+    )
+
+    assert response.status_code == 409
+    assert "创作者同步暂未开放" in response.text
+    with connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == before_tasks
 
 

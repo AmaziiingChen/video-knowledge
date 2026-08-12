@@ -70,7 +70,7 @@
           </el-select>
         </label>
       </div>
-      <p class="creator-policy-note">首次订阅最多读取这里设置的数量；之后每次检查都会从最新作品向前读取，直到遇到本订阅已记录的作品为止。个人喜欢、收藏仅使用当前设备的本地登录态读取。公开版未携带小红书采集组件，已缓存资料仍可阅读。</p>
+      <p class="creator-policy-note">首次订阅最多读取这里设置的数量；之后每次检查都会从最新作品向前读取，直到遇到本订阅已记录的作品为止。个人喜欢、收藏仅使用当前设备的本地登录态读取。小红书当前仅支持在资料库主动导入单篇图文，收藏与创作者订阅暂未开放；历史缓存仍可阅读。</p>
     </form>
 
     <section v-if="previewData" class="creator-preview" aria-labelledby="creator-preview-title">
@@ -158,7 +158,7 @@
           <span class="creator-source-activity column-activity">
             <template v-if="source.provider === 'xiaohongshu'">
               <strong>仅历史与缓存</strong>
-              <small>公开版不自动检查</small>
+              <small>收藏与创作者同步暂未开放</small>
             </template>
             <el-tooltip v-else-if="source.last_error" placement="top" :show-after="160" popper-class="creator-source-error-tooltip">
               <template #content><div class="creator-source-error-tooltip-copy">{{ source.last_error }}</div></template>

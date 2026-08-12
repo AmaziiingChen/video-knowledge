@@ -11,7 +11,7 @@ from services.repository import ContentItemRecord, ContentRepository
 from services.task_manager import TaskRecord, task_manager
 from services.url_parser import parse_share_text
 from services.xiaohongshu_links import XiaohongshuShareLinkError, resolve_xiaohongshu_share_url
-from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_collector
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_feature
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ def capture_link_to_inbox(
     parsed = parse_share_text(url)
     if parsed and parsed.platform == "xiaohongshu":
         try:
-            require_xiaohongshu_collector()
+            require_xiaohongshu_feature("note_capture")
             url = resolve_xiaohongshu_share_url(parsed.url)
         except (XiaohongshuCollectorUnavailable, XiaohongshuShareLinkError) as exc:
             return InboxCaptureResult(item=None, created=False, duplicate=False, error=str(exc))
@@ -146,7 +146,7 @@ def process_inbox_item(
         if not item.source_url:
             raise ValueError("收件箱条目缺少来源链接")
         if item.source_provider == "xiaohongshu":
-            require_xiaohongshu_collector()
+            require_xiaohongshu_feature("note_capture")
         item = repository.update_status(item.id, "processing")
         connection.commit()
 

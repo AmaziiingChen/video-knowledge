@@ -84,9 +84,9 @@ def preview_creator_source(
     """Read a public creator page through the application's bundled browser."""
     provider, source_kind, creator_key = _parse_creator_url(source_url.strip())
     if provider == "xiaohongshu":
-        from services.xiaohongshu_capability import require_xiaohongshu_collector
+        from services.xiaohongshu_capability import require_xiaohongshu_feature
 
-        require_xiaohongshu_collector()
+        require_xiaohongshu_feature("creator_sync")
     normalized_url = _canonical_creator_url(provider, source_kind, creator_key)
     capture_url = _creator_capture_url(source_url, provider=provider, source_kind=source_kind, creator_key=creator_key)
     max_items = max(1, min(int(limit), MAX_CREATOR_SCAN_ITEMS))
@@ -459,9 +459,9 @@ def sync_saved_creator_source(
 ) -> CreatorSyncResult:
     source = get_creator_source(source_id)
     if source.get("provider") == "xiaohongshu":
-        from services.xiaohongshu_capability import require_xiaohongshu_collector
+        from services.xiaohongshu_capability import require_xiaohongshu_feature
 
-        require_xiaohongshu_collector()
+        require_xiaohongshu_feature("creator_sync")
     if not source["enabled"]:
         raise CreatorSyncError("该创作者订阅已暂停；恢复后再同步")
     known_item_ids = _creator_source_item_ids(source_id)
@@ -493,13 +493,13 @@ def sync_saved_creator_source(
 def sync_due_creator_sources() -> list[str]:
     source_ids = due_creator_source_ids(utc_now_iso())
     from services.task_manager import task_manager
-    from services.xiaohongshu_capability import xiaohongshu_collector_capability
+    from services.xiaohongshu_capability import xiaohongshu_capabilities
 
     completed: list[str] = []
     for source_id in source_ids:
         try:
             source = get_creator_source(source_id)
-            if source.get("provider") == "xiaohongshu" and not xiaohongshu_collector_capability()["available"]:
+            if source.get("provider") == "xiaohongshu" and not xiaohongshu_capabilities()["creator_sync"]["available"]:
                 continue
             task_manager.create_source_sync(
                 {"kind": "creator_saved", "source_id": source_id},

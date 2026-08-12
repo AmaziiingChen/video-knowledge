@@ -466,21 +466,21 @@
             <div class="settings-platform-credential">
               <div class="settings-row-copy">
                 <h3>小红书登录凭据</h3>
-                <p>{{ xiaohongshuCollectorAvailable ? (xiaohongshuCookieConfigured ? '已保存，可用于读取主动导入的图文。' : '在应用内登录后自动保存，不需要复制浏览器 Cookie。') : xiaohongshuCollectorReason }}</p>
+                <p>{{ xiaohongshuNoteCaptureAvailable ? (xiaohongshuCookieConfigured ? '已保存，可用于主动导入单篇图文。' : '在应用内登录后自动保存，不需要复制浏览器 Cookie。') : xiaohongshuNoteCaptureReason }}</p>
               </div>
               <div class="settings-platform-credential-meta">
                 <span class="settings-status" :class="`is-${xiaohongshuCookieState}`">{{ xiaohongshuCookieStatusText }}</span>
                 <span class="settings-credential-domain">xiaohongshu.com</span>
               </div>
               <div class="settings-platform-credential-actions">
-                <span>{{ xiaohongshuCollectorAvailable ? '登录窗口与主应用隔离；只保存本机小红书会话，不会展示原始 Cookie。' : '当前公开版不会使用或自动删除已保存凭据；已有缓存、正文与 OCR 结果仍可阅读。' }}</span>
+                <span>登录窗口与主应用隔离；凭据仅保存在本机且不会展示。当前仅支持主动导入单篇图文，收藏、创作者同步与评论采集暂未开放。</span>
                 <div class="settings-platform-credential-buttons">
-                  <el-button size="small" type="primary" round :loading="xiaohongshuAuthConnecting" :disabled="!platformAuthAvailable || !xiaohongshuCollectorAvailable" @click="connectXiaohongshuAuth">登录并连接</el-button>
-                  <el-button size="small" plain round :loading="xiaohongshuCookieState === 'loading'" :disabled="!xiaohongshuCollectorAvailable" @click="loadXiaohongshuCookieStatus(true)">检查可用性</el-button>
+                  <el-button size="small" type="primary" round :loading="xiaohongshuAuthConnecting" :disabled="!platformAuthAvailable || !xiaohongshuSessionProbeAvailable" @click="connectXiaohongshuAuth">登录并连接</el-button>
+                  <el-button size="small" plain round :loading="xiaohongshuCookieState === 'loading'" :disabled="!xiaohongshuSessionProbeAvailable" @click="loadXiaohongshuCookieStatus(true)">检查可用性</el-button>
                   <el-button v-if="xiaohongshuCookieConfigured && platformAuthAvailable" size="small" text class="settings-disconnect-button" :disabled="xiaohongshuAuthConnecting" @click="disconnectXiaohongshuAuth">断开</el-button>
                 </div>
               </div>
-              <details v-if="xiaohongshuCollectorAvailable" class="settings-manual-credential"><summary>手动粘贴 Cookie（备用）</summary><div class="settings-platform-credential-input"><div class="settings-input-group"><span class="settings-input-group-addon">Cookie</span><el-input class="settings-cookie-input" v-model="xiaohongshuCookieInput" type="password" name="xiaohongshu-cookie" autocomplete="off" spellcheck="false" aria-label="小红书 Cookie" :placeholder="credentialPlaceholder(xiaohongshuCookieConfigured, 'Cookie')" /><el-button class="settings-input-group-action" type="primary" :loading="savingXiaohongshuCookie" :disabled="!xiaohongshuCookieInput.trim()" @click="saveXiaohongshuCookie">保存</el-button></div></div></details>
+              <details v-if="xiaohongshuCredentialStorageAvailable" class="settings-manual-credential"><summary>手动粘贴 Cookie（备用）</summary><div class="settings-platform-credential-input"><div class="settings-input-group"><span class="settings-input-group-addon">Cookie</span><el-input class="settings-cookie-input" v-model="xiaohongshuCookieInput" type="password" name="xiaohongshu-cookie" autocomplete="off" spellcheck="false" aria-label="小红书 Cookie" :placeholder="credentialPlaceholder(xiaohongshuCookieConfigured, 'Cookie')" /><el-button class="settings-input-group-action" type="primary" :loading="savingXiaohongshuCookie" :disabled="!xiaohongshuCookieInput.trim()" @click="saveXiaohongshuCookie">保存</el-button></div></div></details>
             </div>
           </div>
         </section>
@@ -801,8 +801,12 @@ const xiaohongshuCookieInput = ref('')
 const xiaohongshuCookieConfigured = ref(false)
 const xiaohongshuCookieState = ref('loading')
 const xiaohongshuCookieStatusText = ref('正在读取小红书登录态')
-const xiaohongshuCollectorAvailable = ref(false)
-const xiaohongshuCollectorReason = ref('公开版未携带采集组件，已缓存资料仍可阅读')
+const xiaohongshuCapabilities = ref({})
+const xiaohongshuCredentialStorageAvailable = computed(() => xiaohongshuCapabilities.value.credential_storage?.available !== false)
+const xiaohongshuSessionProbeAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.session_probe?.available))
+const xiaohongshuNoteCaptureAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.note_capture?.available))
+const xiaohongshuFavoritesAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.favorites_sync?.available))
+const xiaohongshuNoteCaptureReason = computed(() => xiaohongshuCapabilities.value.note_capture?.reason || '小红书单篇图文读取暂不可用；已缓存资料仍可阅读')
 const savingXiaohongshuCookie = ref(false)
 const xiaohongshuAuthConnecting = ref(false)
 const syncingXiaohongshuFavorites = ref(false)
@@ -994,10 +998,15 @@ async function loadFavoriteSources() {
 async function loadXiaohongshuCookieStatus(refresh = false) {
   xiaohongshuCookieState.value = 'loading'
   try {
-    const response = await axios.get(XIAOHONGSHU_COOKIE_API, { params: refresh ? { refresh: true } : undefined, timeout: refresh ? 30000 : 5000 })
+    const response = await axios.get(XIAOHONGSHU_COOKIE_API, { params: refresh ? { refresh: true } : undefined, timeout: refresh ? 35000 : 5000 })
     xiaohongshuCookieConfigured.value = Boolean(response.data?.configured)
-    xiaohongshuCollectorAvailable.value = response.data?.collector_available !== false
-    xiaohongshuCollectorReason.value = response.data?.collector_reason || '公开版未携带采集组件，已缓存资料仍可阅读'
+    const fallbackAvailable = response.data?.collector_available !== false
+    xiaohongshuCapabilities.value = response.data?.capabilities || {
+      credential_storage: { available: true },
+      session_probe: { available: fallbackAvailable, reason: response.data?.collector_reason || '' },
+      note_capture: { available: fallbackAvailable, reason: response.data?.collector_reason || '' },
+      favorites_sync: { available: false, reason: '个人收藏同步暂未开放' },
+    }
     xiaohongshuCookieState.value = response.data?.state || (xiaohongshuCookieConfigured.value ? 'unknown' : 'missing')
     xiaohongshuCookieStatusText.value = response.data?.detail || response.data?.label || (xiaohongshuCookieConfigured.value ? '小红书登录态已保存' : '小红书登录态未连接')
   } catch (error) {
@@ -1008,7 +1017,7 @@ async function loadXiaohongshuCookieStatus(refresh = false) {
 }
 
 async function saveXiaohongshuCookie() {
-  if (!xiaohongshuCollectorAvailable.value) return
+  if (!xiaohongshuCredentialStorageAvailable.value) return
   savingXiaohongshuCookie.value = true
   try {
     const response = await axios.post(XIAOHONGSHU_COOKIE_API, { cookie: xiaohongshuCookieInput.value }, { timeout: 10000 })
@@ -1033,7 +1042,7 @@ async function saveXiaohongshuCookie() {
 }
 
 async function connectXiaohongshuAuth() {
-  if (!xiaohongshuCollectorAvailable.value) return
+  if (!xiaohongshuSessionProbeAvailable.value) return
   const connect = window.knowledgeHubDesktop?.connectPlatformAuth
   if (!connect) {
     ElMessage.warning('请使用桌面版在应用内登录；浏览器版仍可手动粘贴 Cookie。')
@@ -1064,9 +1073,7 @@ async function disconnectXiaohongshuAuth() {
   if (!disconnect) return
   const confirmed = await requestDestructiveConfirmation({
     title: '断开小红书登录态',
-    message: xiaohongshuCollectorAvailable.value
-      ? '这会清除本应用保存的小红书登录会话；之后需要重新登录才能读取受限图文和“我的收藏”。'
-      : '这只会清除本应用保留的旧凭据；当前公开版无法重新连接小红书，已缓存资料仍会保留。',
+    message: '这会清除本应用保存的小红书登录会话；之后需要重新登录才能主动导入受限单篇图文。已缓存资料不会删除。',
     confirmLabel: '断开登录态',
   })
   if (!confirmed) return
@@ -1083,7 +1090,7 @@ async function disconnectXiaohongshuAuth() {
 }
 
 async function syncXiaohongshuFavorites() {
-  if (!xiaohongshuCollectorAvailable.value) return
+  if (!xiaohongshuFavoritesAvailable.value) return
   syncingXiaohongshuFavorites.value = true
   try {
     const task = await enqueueSourceSyncTask({ kind: 'favorite_xiaohongshu', source_title: '小红书个人收藏', source_id: xiaohongshuFavoriteSource.value?.id, auto_analyze: true })

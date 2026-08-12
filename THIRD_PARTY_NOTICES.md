@@ -20,15 +20,18 @@ repository root. Dependencies keep their own licenses and notices.
   user-installed executables are independent projects with their own licenses
   and distribution conditions.
 
-## Excluded collector
+## Excluded collector and independent clean-room reader
 
 `backend/vendor/Spider_XHS` is intentionally excluded from this public source
 tree and from macOS packaging. Its copied source lacked a verifiable upstream
 license file, so it is not redistributed or represented as MIT code here. The
-optional Xiaohongshu collector therefore reports that its component is not
-installed in this open-source build. Do not restore or redistribute it unless
-its upstream license, provenance, notices and redistribution terms have been
-verified and recorded here.
+KnowledgeHub's own clean-room browser reader does not copy, import or call that
+vendor source. It loads a user-supplied Xiaohongshu note page and observes only
+narrowly allowlisted JSON responses initiated by the page itself. The current
+boundary supports session probing and active single-note import only; favorites,
+creator subscriptions and comments remain disabled. Do not restore or
+redistribute `Spider_XHS` unless its upstream license, provenance, notices and
+redistribution terms have been verified and recorded here.
 
 This file is a release record, not legal advice.
 

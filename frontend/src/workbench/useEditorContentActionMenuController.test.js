@@ -84,6 +84,31 @@ test('keeps remote video eligibility and action payloads on the existing contrac
   ])
 })
 
+test('offers context refresh only for the supported Bilibili and Douyin providers', () => {
+  for (const provider of ['bilibili', 'douyin']) {
+    const { controller } = createHarness({
+      id: `content:${provider}`,
+      content_type: 'video',
+      source_provider: provider,
+      source_url: `https://${provider}.example/item`,
+    })
+    assert.equal(
+      controller.activeContentActionMenuModel.value.actions.some((action) => action.id === 'refresh-source-context'),
+      true,
+    )
+  }
+  const { controller } = createHarness({
+    id: 'content:xhs',
+    content_type: 'article',
+    source_provider: 'xiaohongshu',
+    source_url: 'https://www.xiaohongshu.com/explore/note-1',
+  })
+  assert.equal(
+    controller.activeContentActionMenuModel.value.actions.some((action) => action.id === 'refresh-source-context'),
+    false,
+  )
+})
+
 test('keeps the expired video cache predicate available to the preview surface', () => {
   const content = {
     id: 'content:video', content_type: 'video', video_cache_status: 'expired',

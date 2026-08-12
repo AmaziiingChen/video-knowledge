@@ -23,7 +23,7 @@ from services.pipeline_runner import PipelineLog, PipelineRequest, PipelineRespo
 from services.repository import ContentRepository, TaskRepository
 from config import settings
 from services.telemetry import record as record_telemetry
-from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_request
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_request, xiaohongshu_capabilities
 
 
 TaskStatus = Literal["queued", "running", "paused", "succeeded", "failed", "cancelled"]
@@ -274,6 +274,7 @@ class TaskManager:
 
         recoverable: list[TaskRecord] = []
         read_only_task_ids: set[str] = set()
+        xiaohongshu_features = xiaohongshu_capabilities()
         for row in reversed(rows):
             if row.task_type not in {"process_video", "generate_wechat_cover", "import_document", "source_sync"}:
                 continue
@@ -281,11 +282,10 @@ class TaskManager:
             if record is None:
                 continue
             try:
-                require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
+                require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)), capabilities=xiaohongshu_features)
             except XiaohongshuCollectorUnavailable:
                 if record.status in {"queued", "running", "paused"}:
-                    # Public builds leave unsupported active work byte-for-byte
-                    # untouched. Terminal history is still loaded read-only.
+                    # Leave active work untouched; terminal history loads read-only.
                     continue
                 read_only_task_ids.add(record.task_id)
             recoverable.append(record)

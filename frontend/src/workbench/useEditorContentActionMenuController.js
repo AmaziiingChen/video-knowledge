@@ -53,7 +53,7 @@ export function useEditorContentActionMenuController({
 
   function canRefreshSourceContext(tabId) {
     const content = contentForTab(tabId)
-    return ['bilibili', 'douyin', 'xiaohongshu'].includes(content?.source_provider)
+    return ['bilibili', 'douyin'].includes(content?.source_provider)
       && Boolean(content?.source_url)
   }
 

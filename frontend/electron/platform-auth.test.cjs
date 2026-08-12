@@ -14,7 +14,9 @@ test('小红书登录桥只接受本站会话，并以 web_session 判断已登�
 
   assert.equal(config.apiPath, '/api/xiaohongshu-cookie')
   assert.equal(config.statusPath, '/api/xiaohongshu-cookie')
+  assert.equal(config.requestTimeoutMs, 35000)
   assert.equal(config.allowedHost('www.xiaohongshu.com'), true)
+  assert.equal(config.allowedHost('www.xhslink.cn'), true)
   assert.equal(config.allowedHost('example.com'), false)
   assert.equal(config.isSignedIn([{ name: 'a1', value: 'visitor' }]), false)
   assert.equal(config.isSignedIn([{ name: 'web_session', value: 'session' }]), true)
@@ -39,6 +41,7 @@ test('平台登录后端的 GET、POST 和 DELETE 请求都携带桌面实例令
         path: target.pathname,
         token: options.headers['X-KnowledgeHub-Token'],
         body: Buffer.concat(chunks).toString('utf8'),
+        timeout: options.timeout,
       })
       const response = new EventEmitter()
       response.statusCode = 200
@@ -50,7 +53,7 @@ test('平台登录后端的 GET、POST 和 DELETE 请求都携带桌面实例令
   }
   const baseUrl = 'http://127.0.0.1:8000'
 
-  await requestJson(baseUrl, '/api/status', { token: 'desktop-token', requestImpl })
+  await requestJson(baseUrl, '/api/status', { token: 'desktop-token', timeoutMs: 35000, requestImpl })
   await requestJson(baseUrl, '/api/credential', {
     method: 'POST',
     body: { cookie: 'private-cookie' },
@@ -60,9 +63,9 @@ test('平台登录后端的 GET、POST 和 DELETE 请求都携带桌面实例令
   await requestJson(baseUrl, '/api/credential', { method: 'DELETE', token: 'desktop-token', requestImpl })
 
   assert.deepEqual(requests, [
-    { method: 'GET', path: '/api/status', token: 'desktop-token', body: '' },
-    { method: 'POST', path: '/api/credential', token: 'desktop-token', body: '{"cookie":"private-cookie"}' },
-    { method: 'DELETE', path: '/api/credential', token: 'desktop-token', body: '' },
+    { method: 'GET', path: '/api/status', token: 'desktop-token', body: '', timeout: 35000 },
+    { method: 'POST', path: '/api/credential', token: 'desktop-token', body: '{"cookie":"private-cookie"}', timeout: 15000 },
+    { method: 'DELETE', path: '/api/credential', token: 'desktop-token', body: '', timeout: 15000 },
   ])
 })
 

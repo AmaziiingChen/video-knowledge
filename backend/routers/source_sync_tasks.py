@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from presentation.task_responses import TaskResponse, to_task_response
 from services.task_manager import task_manager
-from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_collector
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_feature
 
 
 router = APIRouter()
@@ -52,7 +52,7 @@ class SourceSyncTaskRequest(BaseModel):
 async def create_source_sync_task(req: SourceSyncTaskRequest):
     if req.kind == "favorite_xiaohongshu":
         try:
-            require_xiaohongshu_collector()
+            require_xiaohongshu_feature("favorites_sync")
         except XiaohongshuCollectorUnavailable as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     request = req.model_dump(exclude_none=True)

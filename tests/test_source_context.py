@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 import httpx
-
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -460,114 +460,24 @@ def test_douyin_context_uses_browser_capture_when_public_metadata_is_empty(monke
     ]
 
 
-def test_xiaohongshu_note_fetch_includes_first_page_comments(monkeypatch):
-    class FakeApi:
-        def get_note_info(self, _url):
-            return (
-                True,
-                "success",
-                {
-                    "data": {
-                        "items": [
-                            {
-                                "id": "note-1",
-                                "note_card": {
-                                    "title": "图文标题",
-                                    "desc": "图文正文",
-                                    "time": 1_700_000_000_000,
-                                    "user": {"nickname": "作者", "user_id": "u1"},
-                                    "interact_info": {"liked_count": "10", "comment_count": "3"},
-                                },
-                            }
-                        ]
-                    }
-                },
-            )
+def test_xiaohongshu_comment_fetch_is_rejected_before_browser_read(monkeypatch):
+    from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
 
-        def get_note_out_comment(self, note_id, cursor, token):
-            assert note_id == "note-1"
-            assert cursor == ""
-            assert token == "access-token"
-            return (
-                True,
-                "success",
-                {
-                    "data": {
-                        "has_more": True,
-                        "comments": [
-                            {
-                                "id": "comment-1",
-                                "content": "评论内容",
-                                "like_count": "5",
-                                "create_time": 1_700_000_000_000,
-                                "user_info": {"nickname": "读者"},
-                            }
-                        ],
-                    }
-                },
-            )
+    called = False
 
-    monkeypatch.setattr(xiaohongshu_client, "_api", lambda: FakeApi())
+    def browser_fetch(*_args, **_kwargs):
+        nonlocal called
+        called = True
 
-    note = xiaohongshu_client.fetch_note(
-        "https://www.xiaohongshu.com/explore/note-1?xsec_token=access-token"
+    monkeypatch.setattr(
+        "services.xiaohongshu_browser_collector.fetch_xiaohongshu_note",
+        browser_fetch,
     )
-
-    assert note.stats["comment"] == 3
-    assert note.comment_sample[0]["text"] == "评论内容"
-    assert note.comment_sample[0]["author"] == "读者"
-    assert note.comments_complete is False
-
-
-def test_xiaohongshu_note_fetch_follows_a_bounded_comment_cursor(monkeypatch):
-    class FakeApi:
-        def get_note_info(self, _url):
-            return (
-                True,
-                "success",
-                {
-                    "data": {
-                        "items": [
-                            {
-                                "id": "note-1",
-                                "note_card": {
-                                    "title": "图文标题",
-                                    "desc": "图文正文",
-                                    "user": {"nickname": "作者"},
-                                    "interact_info": {"comment_count": "2"},
-                                },
-                            }
-                        ]
-                    }
-                },
-            )
-
-        def get_note_out_comment(self, _note_id, cursor, _token):
-            return (
-                True,
-                "success",
-                {
-                    "data": {
-                        "cursor": "page-2" if cursor == "" else "done",
-                        "has_more": cursor == "",
-                        "comments": [
-                            {
-                                "id": f"comment-{cursor or 'first'}",
-                                "content": "第一页评论" if cursor == "" else "第二页评论",
-                                "user_info": {"nickname": "读者"},
-                            }
-                        ],
-                    }
-                },
-            )
-
-    monkeypatch.setattr(xiaohongshu_client, "_api", lambda: FakeApi())
-
-    note = xiaohongshu_client.fetch_note(
-        "https://www.xiaohongshu.com/explore/note-1?xsec_token=access-token",
-        comment_limit=60,
-        comment_pages=3,
-    )
-
-    assert [item["text"] for item in note.comment_sample] == ["第一页评论", "第二页评论"]
-    assert note.comments_complete is True
+    with pytest.raises(XiaohongshuCollectorUnavailable, match="暂不采集小红书评论"):
+        xiaohongshu_client.fetch_note(
+            "https://www.xiaohongshu.com/explore/note-1?xsec_token=access-token",
+            include_comments=True,
+            comment_limit=60,
+            comment_pages=3,
+        )
+    assert called is False

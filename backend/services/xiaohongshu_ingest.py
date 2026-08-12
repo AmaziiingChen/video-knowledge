@@ -9,22 +9,21 @@ from pathlib import Path
 from threading import Lock
 from urllib.parse import urlparse
 
-import httpx
-
 from services.article_image_storage import write_article_image_preview
 from services.cache import write_cache_meta
-from services.database import connect, initialize_database
+from services.content_index import ensure_managed_folder
+from services.database import connect, initialize_database, utc_now_iso
 from services.paddle_ocr import is_paddle_ocr_configured, recognize_local_image
-from services.repository import ContentItemRecord, ContentRepository
-from services.repository import new_id
+from services.public_url import get_public_http_response
+from services.repository import ContentItemRecord, ContentRepository, new_id
 from services.source_context import build_source_context
 from services.task_manager import task_manager
-from services.content_index import ensure_managed_folder
-from services.database import utc_now_iso
 from services.xiaohongshu_cache import promote_xiaohongshu_cache, xiaohongshu_cache_dir
+from services.xiaohongshu_capability import (
+    require_xiaohongshu_feature,
+    xiaohongshu_capabilities,
+)
 from services.xiaohongshu_client import XiaohongshuClientError, fetch_note
-from services.xiaohongshu_capability import require_xiaohongshu_collector, xiaohongshu_collector_capability
-
 
 _SYNC_LOCK = Lock()
 _DEFAULT_SYNC_INTERVAL_MINUTES = 360
@@ -32,7 +31,7 @@ _XHS_TAG_RE = re.compile(r"(?<![\w#])#(?P<tag>[\w\-\u4e00-\u9fff]{1,32})(?:\[[^\
 
 
 def capture_xiaohongshu_note(content_item_id: str) -> dict[str, object]:
-    require_xiaohongshu_collector()
+    require_xiaohongshu_feature("note_capture")
     initialize_database()
     with connect() as connection:
         item = ContentRepository(connection).get_content_item(content_item_id)
@@ -122,10 +121,10 @@ def refresh_xiaohongshu_ocr(item: ContentItemRecord) -> dict[str, object]:
 
 def sync_xiaohongshu_favorites(*, auto_analyze: bool = True, source_id: str | None = None) -> dict[str, object]:
     """Low-frequency, deduplicated sync for the current account's favorites."""
-    from services.xiaohongshu_client import fetch_my_favorites
     from services.pipeline_runner import PipelineRequest
+    from services.xiaohongshu_client import fetch_my_favorites
 
-    require_xiaohongshu_collector()
+    require_xiaohongshu_feature("favorites_sync")
     initialize_database()
     with _SYNC_LOCK:
         with connect() as connection:
@@ -243,7 +242,7 @@ def update_xiaohongshu_favorite_source(*, enabled: bool | None = None, auto_anal
 
 
 def sync_due_xiaohongshu_favorites() -> list[str]:
-    if not xiaohongshu_collector_capability()["available"]:
+    if not xiaohongshu_capabilities()["favorites_sync"]["available"]:
         return []
     initialize_database()
     with connect() as connection:
@@ -309,7 +308,7 @@ def _serialize_favorite_source(row) -> dict[str, object]:
 def _capture_image(url: str, *, index: int, image_dir: Path, content_item_id: str) -> dict[str, object]:
     entry: dict[str, object] = {"index": index, "source_url": url, "cached_path": "", "ocr_text": "", "ocr_status": "not_configured"}
     try:
-        payload, content_type = _download_image(url)
+        payload, _content_type = _download_image(url)
         preview = write_article_image_preview(payload, filename_stem=f"xhs-{index:02d}", image_cache_dir=image_dir)
         if not preview:
             suffix = Path(urlparse(url).path).suffix or ".jpg"
@@ -322,23 +321,42 @@ def _capture_image(url: str, *, index: int, image_dir: Path, content_item_id: st
             result = recognize_local_image(Path(preview), content_item_id=content_item_id)
             entry["ocr_text"] = result.text.strip()
             entry["ocr_status"] = result.status
-    except Exception as exc:
+    # Image, preview and OCR backends have heterogeneous exceptions. Persist
+    # only a fixed safe failure, never remote URLs or local runtime details.
+    except Exception:  # noqa: BLE001
         entry["ocr_status"] = "failed"
-        entry["error"] = str(exc)[:240]
+        entry["error"] = "图片读取失败"
     return entry
 
 
 def _download_image(url: str) -> tuple[bytes, str]:
-    with httpx.Client(timeout=30, follow_redirects=True, trust_env=False, headers={"Referer": "https://www.xiaohongshu.com/"}) as client:
-        response = client.get(url)
+    response, _final_url = get_public_http_response(
+        url,
+        invalid_message="小红书图片链接无效",
+        blocked_message="小红书图片链接不可访问",
+        redirect_invalid_message="小红书图片重定向地址无效",
+        redirect_limit_message="小红书图片重定向次数过多",
+        max_redirects=5,
+        timeout=30.0,
+        headers={"Referer": "https://www.xiaohongshu.com/"},
+    )
+    try:
         response.raise_for_status()
+        try:
+            content_length = int(response.headers.get("content-length") or 0)
+        except (TypeError, ValueError):
+            content_length = 0
+        if content_length > 20 * 1024 * 1024:
+            raise ValueError("图片为空或超过 20MB")
         payload = response.content
         if not payload or len(payload) > 20 * 1024 * 1024:
             raise ValueError("图片为空或超过 20MB")
         content_type = str(response.headers.get("content-type") or "image/jpeg").split(";", 1)[0]
-        if not content_type.startswith("image/"):
+        if content_type.lower() not in {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}:
             raise ValueError("笔记图片地址未返回图片")
         return payload, content_type
+    finally:
+        response.close()
 
 
 def _source_text(description: str, gallery: list[dict[str, object]]) -> str:

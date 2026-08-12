@@ -27,9 +27,10 @@ const PLATFORM_CONFIG = {
     loginUrl: 'https://www.xiaohongshu.com/',
     apiPath: '/api/xiaohongshu-cookie',
     statusPath: '/api/xiaohongshu-cookie',
-    allowedHost: (host) => host === 'xiaohongshu.com' || host.endsWith('.xiaohongshu.com') || host === 'xhslink.com' || host.endsWith('.xhslink.com'),
-    // `web_session` is the server-issued login credential accepted by the
-    // bundled PC collector; anonymous device cookies alone are insufficient.
+    requestTimeoutMs: 35000,
+    allowedHost: (host) => host === 'xiaohongshu.com' || host.endsWith('.xiaohongshu.com') || host === 'xhslink.com' || host.endsWith('.xhslink.com') || host === 'xhslink.cn' || host.endsWith('.xhslink.cn'),
+    // `web_session` is required before the clean-room browser probe runs;
+    // anonymous device cookies alone are insufficient.
     isSignedIn: (cookies) => cookies.some((cookie) => cookie.name === 'web_session'),
   },
 }
@@ -84,7 +85,10 @@ function createPlatformAuthController({
     const sessionCookies = await platformCookies(platform)
     const endpoint = `${config.statusPath}${refresh ? '?refresh=true' : ''}`
     try {
-      const response = await request(backendUrl, endpoint, { token: backendToken })
+      const response = await request(backendUrl, endpoint, {
+        token: backendToken,
+        timeoutMs: config.requestTimeoutMs,
+      })
       const backendStatus = platform === 'bilibili'
         ? (response.cookies?.bilibili || {})
         : response
@@ -118,6 +122,7 @@ function createPlatformAuthController({
         method: 'POST',
         body: { cookie: cookieHeader },
         token: backendToken,
+        timeoutMs: config.requestTimeoutMs,
       })
     }
     return { fingerprint, status: await status(platform, { refresh: true }) }
@@ -215,7 +220,11 @@ function createPlatformAuthController({
     const window = loginWindows.get(platform)
     if (window && !window.isDestroyed()) window.close()
     await platformSession(platform).clearStorageData()
-    await request(backendUrl, config.apiPath, { method: 'DELETE', token: backendToken })
+    await request(backendUrl, config.apiPath, {
+      method: 'DELETE',
+      token: backendToken,
+      timeoutMs: config.requestTimeoutMs,
+    })
     return status(platform, { refresh: true })
   }
 
@@ -226,6 +235,7 @@ function requestJson(baseUrl, path, {
   method = 'GET',
   body = null,
   token = '',
+  timeoutMs = 15000,
   requestImpl = http.request,
 } = {}) {
   const target = new URL(path, baseUrl)
@@ -237,7 +247,7 @@ function requestJson(baseUrl, path, {
         payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
         token,
       ),
-      timeout: 15000,
+      timeout: timeoutMs,
     }, (response) => {
       const chunks = []
       response.on('data', (chunk) => chunks.push(chunk))
