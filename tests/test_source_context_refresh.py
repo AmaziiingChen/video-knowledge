@@ -170,9 +170,8 @@ def test_qa_prompt_treats_saved_comments_as_untrusted_auxiliary_material():
         source_context=context,
     )
 
-    assert messages[1].role == "system"
-    assert messages[1].content == SOURCE_CONTEXT_GUARDRAIL
-    assert "评论区的代表问题" in messages[2].content
+    assert any(message.role == "system" and message.content == SOURCE_CONTEXT_GUARDRAIL for message in messages)
+    assert any("评论区的代表问题" in message.content for message in messages if message.role == "user")
 
 
 def test_source_text_refresh_preserves_indexed_comment_evidence():
@@ -233,10 +232,9 @@ def test_source_context_analysis_prompt_is_editable_and_used_by_qa():
         source_context=context,
     )
 
-    assert messages[1].role == "system"
-    assert SOURCE_CONTEXT_CORE_GUARDRAIL in messages[1].content
-    assert custom_rule in messages[1].content
-    assert DEFAULT_SOURCE_CONTEXT_ANALYSIS_PROMPT not in messages[1].content
+    source_guardrail = next(message.content for message in messages if SOURCE_CONTEXT_CORE_GUARDRAIL in message.content)
+    assert custom_rule in source_guardrail
+    assert DEFAULT_SOURCE_CONTEXT_ANALYSIS_PROMPT not in source_guardrail
 
 
 def test_context_section_updates_a_manual_document_without_claiming_its_edits():

@@ -11,6 +11,9 @@ export function createQaSession() {
     asking: false,
     generatingSummary: false,
     generatingSummaryText: '',
+    generatingSummaryReasoning: '',
+    generatingSummaryReasoningExpanded: false,
+    suggestedQuestions: [],
     lastSaved: false,
     historyLoaded: false,
     historyLoading: false,
@@ -29,6 +32,9 @@ export function clearQaSessionState(session) {
   session.asking = false
   session.generatingSummary = false
   session.generatingSummaryText = ''
+  session.generatingSummaryReasoning = ''
+  session.generatingSummaryReasoningExpanded = false
+  session.suggestedQuestions = []
   session.lastSaved = false
   session.historyLoading = false
   session.historyLoadingMore = false

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from services.database_migrations.common import _add_column_if_missing
 
+
 def _migration_080_structural_knowledge_index(connection: sqlite3.Connection) -> None:
     """Add the V2 source snapshot and parent/child retrieval index.
 
@@ -369,3 +370,11 @@ def _migration_089_wechat_album_subscriptions(connection: sqlite3.Connection) ->
         ON wechat_public_sources(source_kind, enabled, next_sync_at)
         """
     )
+
+
+def _migration_093_ai_response_envelopes(connection: sqlite3.Connection) -> None:
+    """Persist optional reasoning and follow-up metadata outside answer text."""
+    _add_column_if_missing(connection, "qa_messages", "reasoning_content", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(connection, "qa_messages", "suggested_questions_json", "TEXT NOT NULL DEFAULT '[]'")
+    _add_column_if_missing(connection, "knowledge_conversation_messages", "reasoning_content", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(connection, "knowledge_conversation_messages", "suggested_questions_json", "TEXT NOT NULL DEFAULT '[]'")

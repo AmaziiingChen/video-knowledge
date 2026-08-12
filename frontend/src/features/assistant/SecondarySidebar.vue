@@ -47,6 +47,13 @@
       </Transition>
 
       <article v-if="currentInsightHtml" class="assistant-message assistant-message-summary">
+        <AiReasoningPanel
+          :reasoning="generatingSummaryReasoning"
+          :expanded="generatingSummaryReasoningExpanded"
+          :pending-answer="false"
+          :render-markdown="renderMarkdown"
+          @update:expanded="$emit('update:generatingSummaryReasoningExpanded', $event)"
+        />
         <div
           v-if="currentInsightTitle"
           class="assistant-message-body insight-summary assistant-summary-title"
@@ -59,13 +66,20 @@
         v-if="generatingAiSummary || (!currentInsightHtml && generatingSummaryText)"
         class="assistant-message assistant-message-answer assistant-message-new"
       >
+        <AiReasoningPanel
+          :reasoning="generatingSummaryReasoning"
+          :expanded="generatingSummaryReasoningExpanded"
+          :pending-answer="!generatingSummaryText"
+          :render-markdown="renderMarkdown"
+          @update:expanded="$emit('update:generatingSummaryReasoningExpanded', $event)"
+        />
         <div
           v-if="generatingSummaryText"
           class="assistant-message-body qa-answer"
           v-html="renderMarkdown(generatingSummaryText)"
         />
         <AiSkeletonStream
-          v-else
+          v-else-if="!generatingSummaryReasoning"
           class="assistant-message-body qa-answer"
           label="正在生成 AI 摘要"
           aria-label="AI 正在生成摘要"
@@ -85,13 +99,20 @@
           class="assistant-message assistant-message-answer"
           :class="{ 'assistant-message-new': item.pending && index === qaHistory.length - 1 }"
         >
+          <AiReasoningPanel
+            :reasoning="item.reasoning"
+            :expanded="item.reasoningExpanded"
+            :pending-answer="item.pending && !item.answer"
+            :render-markdown="renderMarkdown"
+            @update:expanded="item.reasoningExpanded = $event"
+          />
           <div
             v-if="item.answer"
             class="assistant-message-body qa-answer"
             v-html="renderMarkdown(item.answer)"
           />
           <AiSkeletonStream
-            v-else-if="item.pending"
+            v-else-if="item.pending && !item.reasoning"
             class="assistant-message-body qa-answer"
             aria-label="AI 正在生成回答"
           />
@@ -134,7 +155,13 @@
 
     </section>
 
-    <AssistantComposer
+    <div class="assistant-composer-stack">
+      <AssistantFollowUpSuggestions
+        :questions="suggestedQuestions"
+        :disabled="askingQuestion || generatingAiSummary || startingNewChat"
+        @select="forwardAskQuestion"
+      />
+      <AssistantComposer
       :question-input="questionInput"
       :selected-ai-model="selectedAiModel"
       :available-ai-models="availableAiModels"
@@ -160,8 +187,9 @@
       @generate-ai-summary="$emit('generate-ai-summary')"
       @export-markdown="$emit('export-markdown')"
       @run-content-analysis="$emit('run-content-analysis')"
-      @ask-question="forwardAskQuestion"
-    />
+        @ask-question="forwardAskQuestion"
+      />
+    </div>
   </aside>
 </template>
 
@@ -169,6 +197,8 @@
 import { computed } from 'vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
+import AiReasoningPanel from './AiReasoningPanel.vue'
+import AssistantFollowUpSuggestions from './AssistantFollowUpSuggestions.vue'
 import AssistantComposer from './AssistantComposer.vue'
 import { useConversationScrollController } from './useConversationScrollController.js'
 import {
@@ -255,6 +285,9 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  generatingSummaryReasoning: { type: String, default: '' },
+  generatingSummaryReasoningExpanded: { type: Boolean, default: false },
+  suggestedQuestions: { type: Array, default: () => [] },
   canGenerateAiSummary: {
     type: Boolean,
     default: false
@@ -295,6 +328,7 @@ const props = defineProps({
 const emit = defineEmits([
   'update:questionInput',
   'update:selectedAiModel',
+  'update:generatingSummaryReasoningExpanded',
   'new-chat',
   'generate-ai-summary',
   'ask-question',
@@ -364,6 +398,7 @@ function forwardAskQuestion(...args) {
   border-left: 0;
   color: var(--vk-text);
 }
+.assistant-composer-stack { min-width: 0; }
 
 .assistant-conversation {
   width: 100%;

@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 
 from config import settings
+
 from services.ai_call_logger import ai_call_usage_detail_for_task
+from services.ai_response_envelope import (
+    suggested_questions_from_json,
+    suggested_questions_json,
+)
 from services.database import connect, initialize_database, utc_now_iso
 from services.repository import new_id
 
@@ -32,7 +37,8 @@ def conversation_detail(conversation_id: str) -> dict[str, object]:
         if conversation is None:
             raise LookupError(conversation_id)
         messages = db.execute(
-            """SELECT id,role,content,citations_json,error,created_at
+            """SELECT id,role,content,citations_json,error,created_at,
+                      reasoning_content,suggested_questions_json
                FROM knowledge_conversation_messages
                WHERE conversation_id=? ORDER BY created_at,id""",
             (conversation_id,),
@@ -82,7 +88,15 @@ def start_exchange(*, question: str, scope: dict[str, object], conversation_id: 
     return conversation_detail(identifier)
 
 
-def finish_exchange(conversation_id: str, *, answer: str, citations: list[dict[str, object]], error: str = "") -> dict[str, object]:
+def finish_exchange(
+    conversation_id: str,
+    *,
+    answer: str,
+    citations: list[dict[str, object]],
+    error: str = "",
+    reasoning_content: str = "",
+    suggested_questions: list[str] | None = None,
+) -> dict[str, object]:
     """Commit the complete assistant outcome after the streamed response finishes."""
     initialize_database()
     now = utc_now_iso()
@@ -92,9 +106,14 @@ def finish_exchange(conversation_id: str, *, answer: str, citations: list[dict[s
             raise LookupError(conversation_id)
         db.execute(
             """INSERT INTO knowledge_conversation_messages
-               (id,conversation_id,role,content,citations_json,error,created_at)
-               VALUES (?,?,'assistant',?,?,?,?)""",
-            (new_id(), conversation_id, str(answer or ""), _json(citations), str(error or ""), now),
+               (id,conversation_id,role,content,citations_json,error,created_at,
+                reasoning_content,suggested_questions_json)
+               VALUES (?,?,'assistant',?,?,?,?,?,?)""",
+            (
+                new_id(), conversation_id, str(answer or ""), _json(citations),
+                str(error or ""), now, str(reasoning_content or ""),
+                suggested_questions_json(suggested_questions),
+            ),
         )
         db.execute("UPDATE knowledge_conversations SET updated_at=? WHERE id=?", (now, conversation_id))
         db.commit()
@@ -164,6 +183,10 @@ def _message_payload(row) -> dict[str, object]:
         payload["citations"] = json.loads(payload.pop("citations_json") or "[]")
     except json.JSONDecodeError:
         payload["citations"] = []
+    payload["suggested_questions"] = suggested_questions_from_json(
+        payload.pop("suggested_questions_json", "[]")
+    )
+    payload["reasoning_content"] = str(payload.get("reasoning_content") or "")
     return payload
 
 

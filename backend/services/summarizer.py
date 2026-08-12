@@ -1,12 +1,26 @@
-from pathlib import Path
 import time
-from collections.abc import Callable
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
 from config import settings
+
 from services.ai_call_logger import AICallRecord, record_ai_call
+from services.ai_response_envelope import (
+    FOLLOWUP_RESPONSE_CONTRACT,
+    AIResponseEnvelope,
+    AIResponseStreamEvent,
+    SuggestionTrailerParser,
+)
 from services.database import connect, initialize_database
-from services.llm_provider import LLMMessage, LLMProvider, LLMResponse, LLMUsage, default_llm_provider
+from services.llm_provider import (
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    LLMStreamChunk,
+    LLMUsage,
+    default_llm_provider,
+)
+from services.prompt_file_store import sync_prompt_files
 from services.prompt_templates import (
     DEFAULT_ARTICLE_MATERIAL_REDUCTION_PROMPT,
     DEFAULT_ARTICLE_SUMMARY_PROMPT,
@@ -14,13 +28,15 @@ from services.prompt_templates import (
     DEFAULT_SUMMARY_PROMPT,
     PromptTemplateRepository,
 )
-from services.prompt_file_store import sync_prompt_files
 from services.source_context import (
     render_source_context_for_prompt,
     render_source_context_markdown,
 )
 from services.source_context_prompt import active_source_context_system_prompt
-from services.video_timestamps import normalize_video_summary_timestamps, timestamped_video_transcript
+from services.video_timestamps import (
+    normalize_video_summary_timestamps,
+    timestamped_video_transcript,
+)
 
 SYSTEM_PROMPT = DEFAULT_SUMMARY_PROMPT
 ARTICLE_SYSTEM_PROMPT = DEFAULT_ARTICLE_SUMMARY_PROMPT
@@ -30,6 +46,23 @@ MAX_QA_TRANSCRIPT_CHARS = 60000
 MAX_REGENERATION_DIRECT_SOURCE_CHARS = 54_000
 MAX_REGENERATION_CHUNK_SOURCE_CHARS = 36_000
 MAX_REGENERATION_FINAL_MATERIAL_CHARS = 54_000
+
+
+def _stream_provider_events(llm: LLMProvider, messages: list[LLMMessage], *, temperature: float) -> Iterator[LLMStreamChunk]:
+    stream_events = getattr(llm, "chat_stream_events", None)
+    if callable(stream_events):
+        yield from stream_events(messages, temperature=temperature)
+        return
+    usage: LLMUsage | None = None
+
+    def remember(value: LLMUsage) -> None:
+        nonlocal usage
+        usage = value
+
+    for text in llm.chat_stream(messages, temperature=temperature, on_usage=remember):
+        yield LLMStreamChunk(content=text)
+    if usage:
+        yield LLMStreamChunk(usage=usage)
 
 # Re-generation is intentionally separate from ordinary QA. The normal QA
 # path keeps a short, responsive context; this path must account for every
@@ -284,6 +317,33 @@ def stream_regenerated_content_summary(
     source_context: dict[str, object] | None = None,
 ) -> Iterator[str]:
     """Stream a fresh article, video, or audio summary from the whole source."""
+    for event in stream_regenerated_content_summary_events(
+        transcript=transcript,
+        video_title=video_title,
+        content_kind=content_kind,
+        provider=provider,
+        model=model,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        transcript_segments=transcript_segments,
+        source_context=source_context,
+    ):
+        if event.kind == "answer_delta":
+            yield event.text
+
+
+def stream_regenerated_content_summary_events(
+    transcript: str,
+    video_title: str = "",
+    content_kind: str = "article",
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    transcript_segments: list[dict] | None = None,
+    source_context: dict[str, object] | None = None,
+) -> Iterator[AIResponseStreamEvent]:
+    """Stream a fresh summary with reasoning and follow-up metadata separated."""
     source_text = str(transcript or "").strip()
     if not source_text:
         raise ValueError("缺少可重新总结的正文、字幕或转写文本")
@@ -317,6 +377,7 @@ def stream_regenerated_content_summary(
     input_chars = sum(len(message.content) for message in messages)
     started_at = time.perf_counter()
     chunks: list[str] = []
+    reasoning_chunks: list[str] = []
     stream_usage: LLMUsage | None = None
 
     def remember_usage(usage: LLMUsage) -> None:
@@ -324,25 +385,46 @@ def stream_regenerated_content_summary(
         stream_usage = usage
 
     try:
-        for chunk in llm.chat_stream(messages, temperature=0.25, on_usage=remember_usage):
-            chunks.append(chunk)
-            yield chunk
+        parser = SuggestionTrailerParser()
+        visible_chars = 0
+        for chunk in _stream_provider_events(llm, messages, temperature=0.25):
+            if chunk.usage:
+                remember_usage(chunk.usage)
+            if chunk.reasoning_content:
+                reasoning_chunks.append(chunk.reasoning_content)
+                yield AIResponseStreamEvent(kind="reasoning_delta", text=chunk.reasoning_content)
+            if chunk.content:
+                chunks.append(chunk.content)
+                visible = parser.feed(chunk.content)
+                if visible:
+                    visible_chars += len(visible)
+                    yield AIResponseStreamEvent(kind="answer_delta", text=visible)
+        envelope = parser.finish()
+        if len(envelope.answer) > visible_chars:
+            yield AIResponseStreamEvent(kind="answer_delta", text=envelope.answer[visible_chars:])
+        envelope = type(envelope)(
+            answer=envelope.answer,
+            reasoning_content="".join(reasoning_chunks),
+            suggested_questions=envelope.suggested_questions,
+        )
         provider_response = LLMResponse(
             content="",
             provider=llm.name,
             model=llm.model,
             usage=stream_usage,
+            reasoning_content=envelope.reasoning_content,
         ) if stream_usage else None
         record = record_ai_call(
             call_type="article_regeneration",
             provider_response=provider_response,
             input_chars=input_chars,
-            output_chars=len("".join(chunks)),
+            output_chars=len("".join(chunks)) + len(envelope.reasoning_content),
             elapsed_seconds=time.perf_counter() - started_at,
             content_item_id=content_item_id,
         )
         if record and ai_call_callback:
             ai_call_callback(record)
+        yield AIResponseStreamEvent(kind="done", envelope=envelope)
     except Exception as exc:
         error_message = str(exc)
         if "timed out" in error_message.lower() or "timeout" in error_message.lower():
@@ -427,6 +509,7 @@ def _build_regeneration_messages(
             role=source_message.role,
             content=f"{source_message.content}\n\n{context_material}",
         )
+    messages.insert(1, LLMMessage(role="system", content=FOLLOWUP_RESPONSE_CONTRACT))
     return messages
 
 
@@ -586,6 +669,27 @@ def answer_question(
     ai_call_callback: Callable[[AICallRecord], None] | None = None,
     source_context: dict[str, object] | None = None,
 ) -> str:
+    return answer_question_envelope(
+        question=question, summary=summary, transcript=transcript,
+        video_title=video_title, history=history, provider=provider, model=model,
+        task_id=task_id, content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback, source_context=source_context,
+    ).answer
+
+
+def answer_question_envelope(
+    question: str,
+    summary: str,
+    transcript: str,
+    video_title: str = "",
+    history: list[dict] | None = None,
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    task_id: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    source_context: dict[str, object] | None = None,
+) -> AIResponseEnvelope:
     should_record = provider is None or ai_call_callback is not None
     llm = provider or default_llm_provider(model)
     messages, input_chars = build_qa_messages(
@@ -615,7 +719,14 @@ def answer_question(
             )
             if record and ai_call_callback:
                 ai_call_callback(record)
-        return response.content.strip()
+        parser = SuggestionTrailerParser()
+        parser.feed(response.content)
+        parsed = parser.finish()
+        return AIResponseEnvelope(
+            answer=parsed.answer.strip(),
+            reasoning_content=response.reasoning_content,
+            suggested_questions=parsed.suggested_questions,
+        )
     except Exception as e:
         if should_record:
             record_ai_call(
@@ -643,6 +754,36 @@ def stream_answer_question(
     ai_call_callback: Callable[[AICallRecord], None] | None = None,
     source_context: dict[str, object] | None = None,
 ) -> Iterator[str]:
+    for event in stream_answer_question_events(
+        question=question,
+        summary=summary,
+        transcript=transcript,
+        video_title=video_title,
+        history=history,
+        provider=provider,
+        model=model,
+        task_id=task_id,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        source_context=source_context,
+    ):
+        if event.kind == "answer_delta":
+            yield event.text
+
+
+def stream_answer_question_events(
+    question: str,
+    summary: str,
+    transcript: str,
+    video_title: str = "",
+    history: list[dict] | None = None,
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    task_id: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    source_context: dict[str, object] | None = None,
+) -> Iterator[AIResponseStreamEvent]:
     llm = provider or default_llm_provider(model)
     messages, input_chars = build_qa_messages(
         question=question,
@@ -654,6 +795,7 @@ def stream_answer_question(
     )
     started_at = time.perf_counter()
     chunks: list[str] = []
+    reasoning_chunks: list[str] = []
     stream_usage: LLMUsage | None = None
 
     def remember_usage(usage: LLMUsage) -> None:
@@ -661,26 +803,47 @@ def stream_answer_question(
         stream_usage = usage
 
     try:
-        for chunk in llm.chat_stream(messages, temperature=0.2, on_usage=remember_usage):
-            chunks.append(chunk)
-            yield chunk
+        parser = SuggestionTrailerParser()
+        visible_chars = 0
+        for chunk in _stream_provider_events(llm, messages, temperature=0.2):
+            if chunk.usage:
+                remember_usage(chunk.usage)
+            if chunk.reasoning_content:
+                reasoning_chunks.append(chunk.reasoning_content)
+                yield AIResponseStreamEvent(kind="reasoning_delta", text=chunk.reasoning_content)
+            if chunk.content:
+                chunks.append(chunk.content)
+                visible = parser.feed(chunk.content)
+                if visible:
+                    visible_chars += len(visible)
+                    yield AIResponseStreamEvent(kind="answer_delta", text=visible)
+        envelope = parser.finish()
+        if len(envelope.answer) > visible_chars:
+            yield AIResponseStreamEvent(kind="answer_delta", text=envelope.answer[visible_chars:])
+        envelope = type(envelope)(
+            answer=envelope.answer,
+            reasoning_content="".join(reasoning_chunks),
+            suggested_questions=envelope.suggested_questions,
+        )
         provider_response = LLMResponse(
             content="",
             provider=llm.name,
             model=llm.model,
             usage=stream_usage,
+            reasoning_content=envelope.reasoning_content,
         ) if stream_usage else None
         record = record_ai_call(
             call_type="qa",
             provider_response=provider_response,
             input_chars=input_chars,
-            output_chars=len("".join(chunks)),
+            output_chars=len("".join(chunks)) + len(envelope.reasoning_content),
             elapsed_seconds=time.perf_counter() - started_at,
             task_id=task_id,
             content_item_id=content_item_id,
         )
         if record and ai_call_callback:
             ai_call_callback(record)
+        yield AIResponseStreamEvent(kind="done", envelope=envelope)
     except Exception as e:
         record_ai_call(
             call_type="qa",
@@ -729,6 +892,7 @@ def build_qa_messages(
 """
     messages = [
         LLMMessage(role="system", content=system_prompt),
+        LLMMessage(role="system", content=FOLLOWUP_RESPONSE_CONTRACT),
     ]
     if context_material:
         messages.append(LLMMessage(role="system", content=active_source_context_system_prompt()))

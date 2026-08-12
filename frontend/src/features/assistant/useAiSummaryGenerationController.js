@@ -39,6 +39,9 @@ export function useAiSummaryGenerationController({
     session.asking = true
     session.generatingSummary = true
     session.generatingSummaryText = ''
+    session.generatingSummaryReasoning = ''
+    session.generatingSummaryReasoningExpanded = false
+    session.suggestedQuestions = []
     session.lastSaved = false
     syncQaSessionIfActive(item.id, session)
 
@@ -78,6 +81,9 @@ export function useAiSummaryGenerationController({
     const pendingItem = {
       question: displayQuestion,
       answer: '',
+      reasoning: '',
+      reasoningExpanded: false,
+      suggestedQuestions: [],
       saved: false,
       pending: true,
       error: false,
@@ -127,8 +133,21 @@ export function useAiSummaryGenerationController({
             status: 'running',
           })
         },
+        onFirstReasoning: () => {
+          session.generatingSummaryReasoningExpanded = true
+          syncQaSessionIfActive(item.id, session)
+        },
+        onReasoning: (reasoning) => {
+          session.generatingSummaryReasoning = reasoning
+          syncQaSessionIfActive(item.id, session)
+        },
+        onSuggestions: (questions) => {
+          session.suggestedQuestions = questions
+          syncQaSessionIfActive(item.id, session)
+        },
         onCommit: (summary) => {
           session.generatingSummaryText = summary
+          if (session.generatingSummaryReasoning) session.generatingSummaryReasoningExpanded = false
           syncQaSessionIfActive(item.id, session)
         },
       })
@@ -146,6 +165,9 @@ export function useAiSummaryGenerationController({
       pendingItem.error = true
       pendingItem.answer = pendingItem.answer || '生成 AI 摘要失败'
       session.generatingSummaryText = ''
+      session.generatingSummaryReasoning = ''
+      session.generatingSummaryReasoningExpanded = false
+      session.suggestedQuestions = []
       refreshQaSessionHistory(item.id, session)
       const failureMessage = error?.message || '生成 AI 摘要失败'
       const latestTaskLog = [...getLogs()].reverse().find((entry) => entry.task_id === logTaskId)
@@ -163,6 +185,7 @@ export function useAiSummaryGenerationController({
       cancel(waitingForModelTimer)
       session.asking = false
       session.generatingSummary = false
+      session.generatingSummaryText = ''
       syncQaSessionIfActive(item.id, session)
     }
   }

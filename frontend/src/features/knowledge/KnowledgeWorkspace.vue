@@ -24,6 +24,13 @@
           </article>
 
           <article class="knowledge-message knowledge-message-answer" :class="{ 'knowledge-message-new': item.pending && index === history.length - 1 }">
+            <AiReasoningPanel
+              :reasoning="item.reasoning"
+              :expanded="item.reasoningExpanded"
+              :pending-answer="item.pending && !item.answer"
+              :render-markdown="renderMarkdown"
+              @update:expanded="item.reasoningExpanded = $event"
+            />
             <div
               v-if="item.answer"
               class="knowledge-answer report-markdown vk-prose"
@@ -32,7 +39,7 @@
               @click="handleAnswerFootnoteClick($event, item)"
             />
             <AiSkeletonStream
-              v-else-if="item.pending"
+              v-else-if="item.pending && !item.reasoning"
               class="knowledge-answer knowledge-answer-skeleton"
               aria-label="AI 正在生成回答"
             />
@@ -51,6 +58,11 @@
       <Transition name="knowledge-notice">
         <p v-if="notice" class="knowledge-notice" :class="notice.kind" role="status">{{ notice.text }}</p>
       </Transition>
+      <AssistantFollowUpSuggestions
+        :questions="suggestedQuestions"
+        :disabled="asking"
+        @select="askSuggestion"
+      />
 
       <form class="knowledge-composer" @submit.prevent="ask">
         <div class="knowledge-scope" aria-label="检索范围">
@@ -102,6 +114,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowUp } from '../../components/macosSymbolComponents.js'
 import AiSkeletonStream from '../../components/AiSkeletonStream.vue'
+import AiReasoningPanel from '../assistant/AiReasoningPanel.vue'
+import AssistantFollowUpSuggestions from '../assistant/AssistantFollowUpSuggestions.vue'
 import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
 const newChatIcon = 'ellipsis.bubble'
 const exportIcon = 'arrow.down.document'
@@ -121,6 +135,7 @@ const question = ref('')
 const history = ref([])
 const activeConversationId = ref('')
 const asking = ref(false)
+const suggestedQuestions = ref([])
 const ANSWER_MODEL_STORAGE_KEY = 'knowledgehub:knowledge-answer-model:v1'
 const answerModelOptions = [
   { value: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
@@ -137,6 +152,8 @@ const sendLaunchActive = ref(false)
 const CONVERSATION_BOTTOM_THRESHOLD = 56
 let conversationScrollFrame = null
 let sendLaunchTimer = null
+let streamRequestId = 0
+let activeStreamController = null
 const hasExportableConversation = computed(() => history.value.some((item) => item?.question || item?.answer))
 const {
   clearFootnoteReturn,
@@ -181,18 +198,32 @@ async function openConversation(conversationId) {
 function messagesToHistory(messages) {
   const exchanges = []
   for (const message of messages) {
-    if (message.role === 'user') exchanges.push({ question: message.content, answer: '', citations: [], error: '', pending: false })
-    else if (exchanges.length) Object.assign(exchanges.at(-1), { answer: message.content, citations: message.citations || [], error: message.error || '', pending: false })
+    if (message.role === 'user') exchanges.push({ question: message.content, answer: '', reasoning: '', reasoningExpanded: false, suggestedQuestions: [], citations: [], error: '', pending: false })
+    else if (exchanges.length) Object.assign(exchanges.at(-1), {
+      answer: message.content,
+      reasoning: message.reasoning_content || '',
+      reasoningExpanded: false,
+      suggestedQuestions: Array.isArray(message.suggested_questions) ? message.suggested_questions.slice(0, 3) : [],
+      citations: message.citations || [],
+      error: message.error || '',
+      pending: false,
+    })
   }
+  suggestedQuestions.value = exchanges.at(-1)?.suggestedQuestions || []
   return exchanges
 }
 
 async function ask() {
   if (asking.value || !question.value.trim() || !selectedSources.value.length) return
-  const item = { question: question.value.trim(), answer: '', citations: [], error: '', pending: true }
+  const item = { question: question.value.trim(), answer: '', reasoning: '', reasoningExpanded: false, suggestedQuestions: [], citations: [], error: '', pending: true }
+  suggestedQuestions.value = []
   history.value.push(item)
   question.value = ''
   asking.value = true
+  const requestId = ++streamRequestId
+  activeStreamController?.abort()
+  const streamController = new AbortController()
+  activeStreamController = streamController
   resumeConversationAutoFollow()
   try {
     const response = await fetch(localApiRequestUrl(`${API}/knowledge/v2/query/stream`), {
@@ -205,29 +236,55 @@ async function ask() {
         excluded_document_ids: selectedSources.value[0]?.excluded_document_ids || null,
         conversation_id: activeConversationId.value || null,
         answer_model: answerModel.value,
-      })
+      }),
+      signal: streamController.signal,
     })
     if (!response.ok) {
       const data = await response.json().catch(() => ({}))
       throw Error(data.detail || '提问失败')
     }
-    await readKnowledgeStream(response, item)
+    await readKnowledgeStream(response, item, requestId)
   } catch (error) {
-    item.error = error.message || '提问失败'
+    if (requestId === streamRequestId && error?.name !== 'AbortError') item.error = error.message || '提问失败'
   } finally {
-    item.pending = false
-    asking.value = false
-    history.value = [...history.value]
-    emit('conversation-saved')
+    if (requestId === streamRequestId) {
+      item.pending = false
+      asking.value = false
+      history.value = [...history.value]
+      emit('conversation-saved')
+    }
+    if (activeStreamController === streamController) activeStreamController = null
   }
 }
 
-async function readKnowledgeStream(response, item) {
+async function readKnowledgeStream(response, item, requestId) {
   const reader = response.body?.getReader()
   if (!reader) throw Error('浏览器不支持流式响应')
   const decoder = new TextDecoder()
   let buffer = ''
   let doneData = null
+  let reasoningBuffer = ''
+  let reasoningFrame = null
+  const assertCurrentStream = () => {
+    if (requestId === streamRequestId) return
+    const error = Error('知识集已切换，已忽略旧回答')
+    error.name = 'AbortError'
+    throw error
+  }
+  const commitReasoning = () => {
+    reasoningFrame = null
+    if (!reasoningBuffer) return
+    item.reasoning += reasoningBuffer
+    reasoningBuffer = ''
+    history.value = [...history.value]
+  }
+  const resetReasoning = () => {
+    reasoningBuffer = ''
+    if (reasoningFrame !== null) cancelAnimationFrame(reasoningFrame)
+    reasoningFrame = null
+    item.reasoning = ''
+    item.reasoningExpanded = false
+  }
   const streamRenderer = createQaStreamRenderer({
     getRenderedLength: () => item.answer.length,
     onCommit: (text) => {
@@ -238,18 +295,31 @@ async function readKnowledgeStream(response, item) {
   try {
     while (true) {
       const { value, done } = await reader.read()
+      assertCurrentStream()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       const blocks = buffer.split('\n\n')
       buffer = blocks.pop() || ''
-      for (const block of blocks) doneData = handleKnowledgeStreamBlock(block, item, streamRenderer, doneData)
+      for (const block of blocks) doneData = handleKnowledgeStreamBlock(block, item, streamRenderer, doneData, (text) => {
+        reasoningBuffer += text
+        if (!item.reasoning) commitReasoning()
+        else if (reasoningFrame === null) reasoningFrame = requestAnimationFrame(commitReasoning)
+      }, resetReasoning)
     }
+    assertCurrentStream()
     buffer += decoder.decode()
-    if (buffer.trim()) doneData = handleKnowledgeStreamBlock(buffer, item, streamRenderer, doneData)
+    if (buffer.trim()) doneData = handleKnowledgeStreamBlock(buffer, item, streamRenderer, doneData, (text) => { reasoningBuffer += text }, resetReasoning)
     await streamRenderer.drain()
+    assertCurrentStream()
+    if (reasoningFrame !== null) cancelAnimationFrame(reasoningFrame)
+    commitReasoning()
     if (!doneData) throw Error('AI 流式响应提前结束，请重试')
+    assertCurrentStream()
     item.answer = String(doneData.answer || item.answer)
     item.citations = Array.isArray(doneData.citations) ? doneData.citations : []
+    item.reasoning = String(doneData.reasoning_content || item.reasoning)
+    item.suggestedQuestions = Array.isArray(doneData.suggested_questions) ? doneData.suggested_questions.slice(0, 3) : []
+    suggestedQuestions.value = item.suggestedQuestions
     if (doneData.conversation_id) {
       activeConversationId.value = String(doneData.conversation_id)
       emit('conversation-activated', activeConversationId.value)
@@ -257,23 +327,34 @@ async function readKnowledgeStream(response, item) {
     setConversationUsage(doneData.usage)
   } catch (error) {
     streamRenderer.flush()
+    if (reasoningFrame !== null) cancelAnimationFrame(reasoningFrame)
+    await reader.cancel().catch(() => {})
     throw error
   }
 }
 
-function handleKnowledgeStreamBlock(block, item, streamRenderer, doneData) {
+function handleKnowledgeStreamBlock(block, item, streamRenderer, doneData, queueReasoning = () => {}, resetReasoning = () => {}) {
   const lines = block.split('\n')
   const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim() || 'message'
   const dataLine = lines.find((line) => line.startsWith('data:'))
   if (!dataLine) return doneData
   const data = JSON.parse(dataLine.slice(5).trim())
   if (event === 'delta') {
+    if (item.reasoning) item.reasoningExpanded = false
     streamRenderer.enqueue(data.text || '')
+    return doneData
+  }
+  if (event === 'reasoning_delta') {
+    if (!item.reasoning && data.text) item.reasoningExpanded = true
+    queueReasoning(data.text || '')
     return doneData
   }
   if (event === 'replace') {
     streamRenderer.flush()
     item.answer = String(data.text || '')
+    resetReasoning()
+    item.suggestedQuestions = []
+    suggestedQuestions.value = []
     history.value = [...history.value]
     return doneData
   }
@@ -285,12 +366,22 @@ function handleKnowledgeStreamBlock(block, item, streamRenderer, doneData) {
 function startNewChat() {
   if (asking.value) return
   history.value = []
+  streamRequestId += 1
+  activeStreamController?.abort()
+  activeStreamController = null
+  suggestedQuestions.value = []
   activeConversationId.value = ''
   emit('conversation-activated', '')
   setConversationUsage()
   clearFootnoteReturn()
   conversationAutoFollow.value = true
   nextTick(() => questionInput.value?.focus())
+}
+
+function askSuggestion(value) {
+  if (asking.value) return
+  question.value = String(value || '')
+  ask()
 }
 
 function readKnowledgeAnswerModel() {
@@ -373,8 +464,13 @@ function setConversationUsage(value) {
 }
 
 function setKnowledgeScope(scope) {
+  streamRequestId += 1
+  activeStreamController?.abort()
+  activeStreamController = null
+  asking.value = false
   selectedSources.value = scope ? [{ ...scope }] : []
   if (history.value.length) startNewChat()
+  else suggestedQuestions.value = []
 }
 
 function selectionLabel(scope) {
@@ -446,6 +542,9 @@ watch(answerModel, (model) => {
 })
 
 onBeforeUnmount(() => {
+  streamRequestId += 1
+  activeStreamController?.abort()
+  activeStreamController = null
   if (conversationScrollFrame !== null) cancelAnimationFrame(conversationScrollFrame)
   if (sendLaunchTimer !== null) clearTimeout(sendLaunchTimer)
 })

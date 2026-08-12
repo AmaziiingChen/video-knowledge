@@ -1,14 +1,17 @@
-from datetime import datetime, timedelta
 import sqlite3
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-
 from config import settings
+from fastapi.testclient import TestClient
 from main import app
+from services.ai_response_envelope import AIResponseEnvelope
 from services.content_source_text import ContentSourceText
 from services.database import connect, initialize_database
-from services.knowledge_library import append_qa_to_source_document, materialize_source_document
+from services.knowledge_library import (
+    append_qa_to_source_document,
+    materialize_source_document,
+)
 from services.markdown_sync import save_markdown_draft_and_sync
 from services.repository import ContentRepository, new_id
 
@@ -152,7 +155,7 @@ def test_markdown_projection_recovers_after_the_database_acknowledgement_fails()
     with (
         patch.object(settings, "deepseek_api_key", "test-key"),
         patch("routers.qa.load_content_source_text", return_value=source),
-        patch("routers.qa.answer_question", return_value="这是回答。"),
+        patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="这是回答。")),
         patch("routers.qa._mark_content_qa_exchange_written", side_effect=sqlite3.OperationalError("temporary lock")),
     ):
         response = client.post(

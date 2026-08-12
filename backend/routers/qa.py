@@ -1,36 +1,45 @@
-from datetime import datetime
-from dataclasses import dataclass
 import json
 import sqlite3
+from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from starlette.responses import StreamingResponse
-
-from services.llm_settings import text_model_configured
+from services.ai_response_envelope import (
+    suggested_questions_from_json,
+    suggested_questions_json,
+)
 from services.cache import cache_dir_for_url, read_cached_transcript_segments
 from services.content_source_text import load_content_source_text
 from services.database import connect, initialize_database, utc_now_iso
 from services.forum_capture_repository import ForumCaptureRepository
-from services.markdown_sync import get_markdown_state, replace_content_summary_and_sync, sync_draft_from_obsidian
-from services.repository import ContentRepository, new_id
-from services.source_context_store import load_source_context
 from services.knowledge_library import (
-    archive_qa_conversation_in_source_document,
     append_qa_to_source_document,
+    archive_qa_conversation_in_source_document,
     markdown_document_path,
     qa_history_from_markdown,
     replace_qa_answer_in_source_document,
 )
+from services.llm_settings import text_model_configured
+from services.markdown_sync import (
+    get_markdown_state,
+    replace_content_summary_and_sync,
+    sync_draft_from_obsidian,
+)
+from services.repository import ContentRepository, new_id
+from services.source_context_store import load_source_context
 from services.summarizer import (
-    answer_question,
+    answer_question_envelope,
     append_qa_to_markdown,
     resolve_obsidian_note_path,
-    stream_regenerated_content_summary,
-    stream_answer_question,
+    stream_answer_question_events,
+    stream_regenerated_content_summary_events,
 )
-from services.video_timestamps import normalize_video_summary_timestamps, timestamped_video_transcript
-
+from services.video_timestamps import (
+    normalize_video_summary_timestamps,
+    timestamped_video_transcript,
+)
+from starlette.responses import StreamingResponse
 
 router = APIRouter()
 
@@ -67,6 +76,8 @@ class QAResponse(BaseModel):
     obsidian_error: str | None = None
     error: str | None = None
     assistant_message_id: str | None = None
+    reasoning_content: str = ""
+    suggested_questions: list[str] = Field(default_factory=list)
 
 
 class SavedQAHistoryItem(BaseModel):
@@ -74,6 +85,8 @@ class SavedQAHistoryItem(BaseModel):
     question: str
     answer: str
     created_at: str
+    reasoning_content: str = ""
+    suggested_questions: list[str] = Field(default_factory=list)
 
 
 class QAHistoryResponse(BaseModel):
@@ -95,6 +108,8 @@ class SavedContentQAExchange:
     question: str
     answer: str
     created_at: str
+    reasoning_content: str = ""
+    suggested_questions: tuple[str, ...] = ()
 
 
 def _resolve_qa_source(req: QARequest) -> tuple[str, str, str]:
@@ -177,6 +192,8 @@ def _save_content_qa_exchange(
     content_item_id: str | None,
     question: str,
     answer: str,
+    reasoning_content: str = "",
+    suggested_questions: list[str] | None = None,
 ) -> SavedContentQAExchange | None:
     """Persist a completed manual answer before projecting it into Markdown."""
     if not content_item_id:
@@ -223,12 +240,14 @@ def _save_content_qa_exchange(
             assistant_message_id = new_id()
             connection.executemany(
                 """
-                INSERT INTO qa_messages (id, thread_id, role, content, write_to_obsidian, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO qa_messages (
+                    id, thread_id, role, content, write_to_obsidian, created_at,
+                    reasoning_content, suggested_questions_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
-                    (user_message_id, thread_id, "user", question, 0, now),
-                    (assistant_message_id, thread_id, "assistant", answer, 0, now),
+                    (user_message_id, thread_id, "user", question, 0, now, "", "[]"),
+                    (assistant_message_id, thread_id, "assistant", answer, 0, now, reasoning_content, suggested_questions_json(suggested_questions)),
                 ],
             )
             connection.commit()
@@ -241,6 +260,8 @@ def _save_content_qa_exchange(
         question=question,
         answer=answer,
         created_at=now,
+        reasoning_content=reasoning_content,
+        suggested_questions=tuple(suggested_questions or ()),
     )
 
 
@@ -292,7 +313,12 @@ def _latest_content_qa_exchange(
     )
 
 
-def _replace_latest_content_qa_answer(target: SavedContentQAExchange, answer: str) -> SavedContentQAExchange | None:
+def _replace_latest_content_qa_answer(
+    target: SavedContentQAExchange,
+    answer: str,
+    reasoning_content: str = "",
+    suggested_questions: list[str] | None = None,
+) -> SavedContentQAExchange | None:
     """Atomically replace the prevalidated tail answer and mark its Markdown projection dirty."""
     try:
         now = utc_now_iso()
@@ -301,14 +327,14 @@ def _replace_latest_content_qa_answer(target: SavedContentQAExchange, answer: st
             updated = connection.execute(
                 """
                 UPDATE qa_messages
-                SET content = ?, write_to_obsidian = 0
+                SET content = ?, reasoning_content = ?, suggested_questions_json = ?, write_to_obsidian = 0
                 WHERE id = ? AND role = 'assistant'
                   AND NOT EXISTS (
                     SELECT 1 FROM qa_messages AS later
                     WHERE later.thread_id = qa_messages.thread_id AND later.rowid > qa_messages.rowid
                   )
                 """,
-                (answer, target.assistant_message_id),
+                (answer, reasoning_content, suggested_questions_json(suggested_questions), target.assistant_message_id),
             ).rowcount
             if not updated:
                 connection.rollback()
@@ -330,6 +356,8 @@ def _replace_latest_content_qa_answer(target: SavedContentQAExchange, answer: st
         question=target.question,
         answer=answer,
         created_at=target.created_at,
+        reasoning_content=reasoning_content,
+        suggested_questions=tuple(suggested_questions or ()),
     )
 
 
@@ -522,7 +550,7 @@ def _content_qa_history(content_item_id: str, limit: int, before: str | None = N
             boundary_rowid = boundary["rowid"]
         rows = connection.execute(
             """
-            SELECT id, role, content, created_at, rowid
+            SELECT id, role, content, created_at, reasoning_content, suggested_questions_json, rowid
             FROM qa_messages
             WHERE thread_id = ? AND (? IS NULL OR rowid < ?)
             ORDER BY created_at DESC, rowid DESC
@@ -544,6 +572,8 @@ def _content_qa_history(content_item_id: str, limit: int, before: str | None = N
                     question=question["content"],
                     answer=message["content"],
                     created_at=message["created_at"],
+                    reasoning_content=str(message["reasoning_content"] or ""),
+                    suggested_questions=suggested_questions_from_json(message["suggested_questions_json"]),
                 )
             )
             question = None
@@ -640,7 +670,7 @@ def ask_video_note(req: QARequest):
                 obsidian_error = str(exc)
 
     try:
-        answer = answer_question(
+        envelope = answer_question_envelope(
             question=question,
             summary=summary,
             transcript=transcript,
@@ -649,7 +679,7 @@ def ask_video_note(req: QARequest):
             model=req.ai_model,
             source_context=source_context,
         )
-        answer = normalize_video_summary_timestamps(answer, timestamp_seconds)
+        answer = normalize_video_summary_timestamps(envelope.answer, timestamp_seconds)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -660,6 +690,8 @@ def ask_video_note(req: QARequest):
         req.content_item_id,
         _display_question(req, question),
         answer,
+        envelope.reasoning_content,
+        envelope.suggested_questions,
     )
     if req.content_item_id:
         if saved_exchange is None:
@@ -695,6 +727,9 @@ def ask_video_note(req: QARequest):
         saved_to_content=bool(saved_exchange),
         synced_markdown_draft=synced_markdown_draft,
         obsidian_error=obsidian_error,
+        assistant_message_id=saved_exchange.assistant_message_id if saved_exchange else None,
+        reasoning_content=envelope.reasoning_content,
+        suggested_questions=envelope.suggested_questions,
     )
 
 
@@ -735,6 +770,7 @@ async def ask_video_note_stream(req: QARequest):
     def event_stream():
         chunks: list[str] = []
         ai_call_records = []
+        final_envelope = None
         try:
             if req.regenerate_summary:
                 yield _sse("log", {
@@ -744,7 +780,7 @@ async def ask_video_note_stream(req: QARequest):
                     "progress": 20,
                     "status": "running",
                 })
-                stream = stream_regenerated_content_summary(
+                stream = stream_regenerated_content_summary_events(
                     transcript=transcript,
                     video_title=video_title,
                     content_kind=regeneration_kind or "article",
@@ -756,7 +792,7 @@ async def ask_video_note_stream(req: QARequest):
                 )
                 usage_call_type = "article_regeneration"
             else:
-                stream = stream_answer_question(
+                stream = stream_answer_question_events(
                     question=question,
                     summary=summary,
                     transcript=transcript,
@@ -769,9 +805,17 @@ async def ask_video_note_stream(req: QARequest):
                 )
                 usage_call_type = "qa"
 
-            for chunk in stream:
-                chunks.append(chunk)
-                yield _sse("delta", {"text": chunk})
+            for event in stream:
+                if event.kind == "reasoning_delta":
+                    yield _sse("reasoning_delta", {"text": event.text})
+                elif event.kind == "answer_delta":
+                    chunks.append(event.text)
+                    yield _sse("delta", {"text": event.text})
+                elif event.kind == "done":
+                    final_envelope = event.envelope
+
+            if final_envelope is None:
+                raise RuntimeError("文本模型流未返回完成事件")
 
             if ai_call_records:
                 for record in ai_call_records:
@@ -809,7 +853,7 @@ async def ask_video_note_stream(req: QARequest):
                         },
                     )
 
-            answer = "".join(chunks)
+            answer = final_envelope.answer
             if timestamp_seconds:
                 answer = normalize_video_summary_timestamps(answer, timestamp_seconds)
             if req.regenerate_summary:
@@ -848,6 +892,9 @@ async def ask_video_note_stream(req: QARequest):
                         "synced_markdown_draft": True,
                         "obsidian_error": None,
                         "markdown_state": sync_state.__dict__,
+                        "answer": answer,
+                        "reasoning_content": final_envelope.reasoning_content,
+                        "suggested_questions": final_envelope.suggested_questions,
                     },
                 )
                 return
@@ -858,12 +905,19 @@ async def ask_video_note_stream(req: QARequest):
             obsidian_error = initial_obsidian_error
             final_path = target_path
             saved_exchange = (
-                _replace_latest_content_qa_answer(regeneration_target, answer)
+                _replace_latest_content_qa_answer(
+                    regeneration_target,
+                    answer,
+                    final_envelope.reasoning_content,
+                    final_envelope.suggested_questions,
+                )
                 if regeneration_target is not None
                 else _save_content_qa_exchange(
                     req.content_item_id,
                     _display_question(req, question),
                     answer,
+                    final_envelope.reasoning_content,
+                    final_envelope.suggested_questions,
                 )
             )
             if regeneration_target is not None and saved_exchange is None:
@@ -900,6 +954,8 @@ async def ask_video_note_stream(req: QARequest):
                     "obsidian_error": obsidian_error,
                     "answer": answer,
                     "assistant_message_id": saved_exchange.assistant_message_id if saved_exchange else None,
+                    "reasoning_content": final_envelope.reasoning_content,
+                    "suggested_questions": final_envelope.suggested_questions,
                 },
             )
         except Exception as exc:

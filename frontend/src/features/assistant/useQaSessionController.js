@@ -25,6 +25,9 @@ export function useQaSessionController({
   const askingQuestion = ref(false)
   const generatingAiSummary = ref(false)
   const generatingSummaryText = ref('')
+  const generatingSummaryReasoning = ref('')
+  const generatingSummaryReasoningExpanded = ref(false)
+  const suggestedQuestions = ref([])
   const startingNewChat = ref(false)
   const lastQaSaved = ref(false)
 
@@ -50,6 +53,9 @@ export function useQaSessionController({
     askingQuestion.value = session.asking
     generatingAiSummary.value = session.generatingSummary
     generatingSummaryText.value = session.generatingSummaryText
+    generatingSummaryReasoning.value = session.generatingSummaryReasoning
+    generatingSummaryReasoningExpanded.value = session.generatingSummaryReasoningExpanded
+    suggestedQuestions.value = session.suggestedQuestions
     lastQaSaved.value = session.lastSaved
     qaHistoryLoading.value = session.historyLoading
     qaHistoryLoadingMore.value = session.historyLoadingMore
@@ -71,6 +77,9 @@ export function useQaSessionController({
     askingQuestion.value = false
     generatingAiSummary.value = false
     generatingSummaryText.value = ''
+    generatingSummaryReasoning.value = ''
+    generatingSummaryReasoningExpanded.value = false
+    suggestedQuestions.value = []
     lastQaSaved.value = false
     qaHistoryLoading.value = false
     qaHistoryLoadingMore.value = false
@@ -165,6 +174,7 @@ export function useQaSessionController({
         session.history = session.history.length === initialHistoryLength
           ? savedItems
           : [...savedItems, ...session.history]
+        session.suggestedQuestions = session.history.at(-1)?.suggestedQuestions || []
         session.historyLoaded = true
         session.historyHasMore = Boolean(response.data?.has_more)
         session.historyNextBefore = String(response.data?.next_before || '')
@@ -247,6 +257,9 @@ export function useQaSessionController({
     askingQuestion,
     generatingAiSummary,
     generatingSummaryText,
+    generatingSummaryReasoning,
+    generatingSummaryReasoningExpanded,
+    suggestedQuestions,
     startingNewChat,
     lastQaSaved,
     ensureQaSession,

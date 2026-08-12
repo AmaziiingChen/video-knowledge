@@ -95,3 +95,46 @@ test('does not replace a newly selected document markdown after an older QA stre
 
   assert.deepEqual(markdownStates, [])
 })
+
+test('keeps reasoning separate, collapses on answer, and accepts authoritative suggestions', async () => {
+  const pendingItem = { answer: '', reasoning: '', reasoningExpanded: false, pending: true }
+  const session = { lastSaved: false, suggestedQuestions: [] }
+  const controller = createQaResponseStreamController({
+    appendContentAiCall: () => {},
+    getSelectedContentItem: () => ({ id: 'content-1' }),
+    applyMarkdownState: () => {},
+    refreshQaSessionHistory: () => {},
+    refreshFallbackHistory: () => {},
+    setLastQaSaved: () => {},
+    createStreamRenderer: immediateRenderer,
+  })
+
+  await controller.readQaStream(streamResponse([
+    'event: reasoning_delta\ndata: {"text":"先核对"}\n\n',
+    'event: delta\ndata: {"text":"正文"}\n\n',
+    'event: done\ndata: {"answer":"正文","reasoning_content":"先核对","suggested_questions":["继续问？"]}\n\n',
+  ]), pendingItem, 'content-1', { session })
+
+  assert.equal(pendingItem.answer, '正文')
+  assert.equal(pendingItem.reasoning, '先核对')
+  assert.equal(pendingItem.reasoningExpanded, false)
+  assert.deepEqual(pendingItem.suggestedQuestions, ['继续问？'])
+  assert.deepEqual(session.suggestedQuestions, ['继续问？'])
+})
+
+test('reasoning-only interrupted stream fails without inventing an answer', async () => {
+  const pendingItem = { answer: '', reasoning: '', pending: true }
+  const controller = createQaResponseStreamController({
+    appendContentAiCall: () => {}, getSelectedContentItem: () => null,
+    applyMarkdownState: () => {}, refreshQaSessionHistory: () => {},
+    refreshFallbackHistory: () => {}, setLastQaSaved: () => {},
+    createStreamRenderer: immediateRenderer,
+  })
+  await assert.rejects(
+    controller.readQaStream(streamResponse([
+      'event: reasoning_delta\ndata: {"text":"未完成思考"}',
+    ]), pendingItem, 'content-1'),
+    /提前结束/,
+  )
+  assert.equal(pendingItem.answer, '')
+})

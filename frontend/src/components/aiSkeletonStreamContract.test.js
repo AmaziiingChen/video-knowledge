@@ -22,7 +22,7 @@ test('uses one quiet semantic palette for AI and transcript loading streams', ()
 
 test('reuses the shared stream in knowledge answers without retaining a duplicate shimmer', () => {
   assert.match(knowledge, /import AiSkeletonStream from '\.\.\/\.\.\/components\/AiSkeletonStream\.vue'/)
-  assert.match(knowledge, /<AiSkeletonStream[\s\S]*?v-else-if="item\.pending"[\s\S]*?aria-label="AI 正在生成回答"/)
+  assert.match(knowledge, /<AiSkeletonStream[\s\S]*?v-else-if="item\.pending && !item\.reasoning"[\s\S]*?aria-label="AI 正在生成回答"/)
   assert.doesNotMatch(knowledge, /class="skeleton-line/)
   assert.doesNotMatch(knowledge, /knowledge-skeleton-shimmer/)
 })

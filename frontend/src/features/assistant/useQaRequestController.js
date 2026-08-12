@@ -54,6 +54,7 @@ export function useQaRequestController({
       : draftQuestion
     session.asking = true
     session.lastSaved = false
+    session.suggestedQuestions = []
     syncQaSessionIfActive(contentItemId, session)
     const historySnapshot = qaHistoryForPrompt(session.history)
     const pendingItem = {
@@ -62,6 +63,9 @@ export function useQaRequestController({
       displayQuestion,
       selectedText: selectionContext?.text || '',
       answer: '',
+      reasoning: '',
+      reasoningExpanded: false,
+      suggestedQuestions: [],
       saved: false,
       autoShortcutName: resolvedQuestion.autoShortcutName,
       pending: true,
@@ -170,6 +174,9 @@ export function useQaRequestController({
     if (session.asking || session.generatingSummary || isStartingNewChat() || item.pending) return
 
     const previousAnswer = String(item.answer || '')
+    const previousReasoning = String(item.reasoning || '')
+    const previousSuggestions = Array.isArray(item.suggestedQuestions) ? [...item.suggestedQuestions] : []
+    const previousSessionSuggestions = Array.isArray(session.suggestedQuestions) ? [...session.suggestedQuestions] : []
     const question = String(item.modelQuestion || resolveQaQuestion(item.question).prompt || '').trim()
     if (!question) {
       notify.warning('找不到原始提问，无法重新生成')
@@ -179,6 +186,10 @@ export function useQaRequestController({
     session.asking = true
     session.lastSaved = false
     item.answer = ''
+    item.reasoning = ''
+    item.reasoningExpanded = false
+    item.suggestedQuestions = []
+    session.suggestedQuestions = []
     item.pending = true
     item.error = false
     refreshQaSessionHistory(contentItemId, session)
@@ -210,6 +221,9 @@ export function useQaRequestController({
       notify.success(item.obsidianError ? '回答已重新生成，但 Markdown 更新失败' : '回答已重新生成')
     } catch (error) {
       item.answer = previousAnswer
+      item.reasoning = previousReasoning
+      item.suggestedQuestions = previousSuggestions
+      session.suggestedQuestions = previousSessionSuggestions
       item.pending = false
       item.error = false
       refreshQaSessionHistory(contentItemId, session)

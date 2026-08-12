@@ -136,7 +136,13 @@ def v2_query(req: V2QueryRequest):
             task_id=str(exchange['id']),
             model=req.answer_model,
         )
-        completed = finish_exchange(str(exchange['id']), answer=answer.answer, citations=answer.citations)
+        completed = finish_exchange(
+            str(exchange['id']),
+            answer=answer.answer,
+            citations=answer.citations,
+            reasoning_content=answer.reasoning_content,
+            suggested_questions=answer.suggested_questions,
+        )
         return {
             'conversation_id': exchange['id'],
             'answer': answer.answer,
@@ -144,6 +150,8 @@ def v2_query(req: V2QueryRequest):
             'insufficient_evidence': answer.insufficient_evidence,
             'search_query': search_query,
             'usage': completed.get('usage', {}),
+            'reasoning_content': answer.reasoning_content,
+            'suggested_questions': answer.suggested_questions or [],
         }
     except ValueError as exc:
         finish_exchange(str(exchange['id']), answer='', citations=[], error=str(exc))
@@ -209,11 +217,19 @@ def v2_query_stream(req: V2QueryRequest):
             ):
                 if event == 'delta':
                     yield _sse('delta', {'text': payload})
+                elif event == 'reasoning_delta':
+                    yield _sse('reasoning_delta', {'text': payload})
                 elif event == 'replace':
                     yield _sse('replace', {'text': payload})
                 elif event == 'done':
                     answer = payload
-                    completed = finish_exchange(str(exchange['id']), answer=answer.answer, citations=answer.citations)
+                    completed = finish_exchange(
+                        str(exchange['id']),
+                        answer=answer.answer,
+                        citations=answer.citations,
+                        reasoning_content=answer.reasoning_content,
+                        suggested_questions=answer.suggested_questions,
+                    )
                     yield _sse('done', {
                         'conversation_id': exchange['id'],
                         'answer': answer.answer,
@@ -221,6 +237,8 @@ def v2_query_stream(req: V2QueryRequest):
                         'insufficient_evidence': answer.insufficient_evidence,
                         'search_query': search_query,
                         'usage': completed.get('usage', {}),
+                        'reasoning_content': answer.reasoning_content,
+                        'suggested_questions': answer.suggested_questions or [],
                     })
         except Exception as exc:
             finish_exchange(str(exchange['id']), answer='', citations=[], error=str(exc))

@@ -7,14 +7,24 @@ smaller child chunks used for retrieval.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Iterable, Iterator
 
 from config import settings
 
 from services.ai_call_logger import record_ai_call
+from services.ai_response_envelope import KNOWLEDGE_FOLLOWUP_RESPONSE_CONTRACT
 from services.database import connect, utc_now_iso
+from services.knowledge_answer_envelope import GroundedAnswer, parse_grounded_answer
+from services.knowledge_answer_evidence import (
+    ANSWER_CONTEXT_CHAR_BUDGET,  # noqa: F401 - compatibility re-export
+    ANSWER_EVIDENCE_MAX_CANDIDATES,  # noqa: F401 - compatibility re-export
+    answer_evidence_payload as _answer_evidence_payload,
+    citation_excerpt as _citation_excerpt,  # noqa: F401 - compatibility re-export
+    evidence_payload as _evidence_payload,  # noqa: F401 - compatibility re-export
+    validated_evidence_quotes as _validated_evidence_quotes,  # noqa: F401 - compatibility re-export
+)
 from services.knowledge_chunking import (
     CHILD_MAX_TOKENS,  # noqa: F401 - compatibility re-export
     CHILD_TARGET_TOKENS,  # noqa: F401 - compatibility re-export
@@ -31,12 +41,22 @@ from services.knowledge_conversation_context import (
     CONVERSATION_CONTEXT_QUESTION_MAX_CHARS,  # noqa: F401 - compatibility re-export
     conversation_context_messages as _conversation_context_messages,
 )
+from services.knowledge_embedding_runtime import (
+    EMBEDDING_REQUEST_TIMEOUT_SECONDS,  # noqa: F401 - compatibility re-export
+    embed as _embed,
+    embedding_text as _embedding_text,
+    save_embedding_batch as _save_embedding_batch,
+)
+from services.knowledge_index_storage import (
+    CHUNKER_VERSION,
+    insert_chunk as _insert_chunk,
+    searchable as _searchable,
+    source_hash as _source_hash,
+)
+from services.knowledge_query_rewrite import parse_json_object as _parse_answer_json  # noqa: F401 - compatibility re-export
+from services.knowledge_query_rewrite import rewrite_knowledge_query
 from services.knowledge_response_transport import (
     collect_model_response as _answer_model_response,
-)
-from services.knowledge_query_rewrite import (
-    parse_json_object as _parse_answer_json,
-    rewrite_knowledge_query,
 )
 from services.knowledge_retrieval_store import (
     fts_ranks as _fts_ranks,
@@ -53,32 +73,12 @@ from services.knowledge_source_catalog import (
     validate_source_document_ids,  # noqa: F401 - compatibility re-export
 )
 from services.knowledge_source_loader import source_documents
-from services.knowledge_index_storage import (
-    CHUNKER_VERSION,
-    insert_chunk as _insert_chunk,
-    searchable as _searchable,
-    source_hash as _source_hash,
-)
-from services.knowledge_embedding_runtime import (
-    EMBEDDING_REQUEST_TIMEOUT_SECONDS,  # noqa: F401 - compatibility re-export
-    embed as _embed,
-    embedding_text as _embedding_text,
-    save_embedding_batch as _save_embedding_batch,
+from services.knowledge_streaming_json import (
+    IncrementalAnswerJson as _IncrementalAnswerJson,
 )
 from services.knowledge_vector_index import (
     dense_ranks as _dense_ranks,
     invalidate_vector_cache,
-)
-from services.knowledge_answer_evidence import (
-    ANSWER_CONTEXT_CHAR_BUDGET,  # noqa: F401 - compatibility re-export
-    ANSWER_EVIDENCE_MAX_CANDIDATES,  # noqa: F401 - compatibility re-export
-    answer_evidence_payload as _answer_evidence_payload,
-    citation_excerpt as _citation_excerpt,  # noqa: F401 - compatibility re-export
-    evidence_payload as _evidence_payload,  # noqa: F401 - compatibility re-export
-    validated_evidence_quotes as _validated_evidence_quotes,
-)
-from services.knowledge_streaming_json import (
-    IncrementalAnswerJson as _IncrementalAnswerJson,
 )
 from services.llm_provider import (
     LLMMessage,
@@ -130,13 +130,6 @@ class EmbeddingProgress:
     estimated_input_tokens: int
     budgeted_input_tokens: int
     deferred_chunk_count: int
-
-
-@dataclass(frozen=True)
-class GroundedAnswer:
-    answer: str
-    citations: list[dict[str, object]]
-    insufficient_evidence: bool
 
 
 def _knowledge_llm_provider(model: str):
@@ -338,6 +331,7 @@ def answer_from_evidence(
             answer="在当前选择的知识集中，没有找到足以回答这个问题的材料。",
             citations=[],
             insufficient_evidence=True,
+            suggested_questions=[],
         )
     if not text_model_configured(model):
         raise ValueError("请先在设置中配置所选文本模型的 API Key")
@@ -346,7 +340,6 @@ def answer_from_evidence(
         question=question,
         evidence_limit=evidence_limit,
     )
-    permitted_ids = {str(item["evidence_id"]) for item in evidence}
     system = managed_prompt_text("knowledge_answer", DEFAULT_KNOWLEDGE_ANSWER_PROMPT)
     user = (
             f"问题：{str(question).strip()}\n\n"
@@ -360,6 +353,7 @@ def answer_from_evidence(
     )
     messages = [
         LLMMessage(role="system", content=system),
+        LLMMessage(role="system", content=KNOWLEDGE_FOLLOWUP_RESPONSE_CONTRACT),
         LLMMessage(role="system", content=CONVERSATION_CONTEXT_GUARDRAIL),
         *_conversation_context_messages(conversation_context),
         LLMMessage(role="user", content=user),
@@ -389,27 +383,7 @@ def answer_from_evidence(
                 task_id=task_id,
             )
             try:
-                parsed = _parse_answer_json(response.content)
-                answer = str(parsed.get("answer") or "").strip()
-                evidence_ids = parsed.get("evidence_ids")
-                evidence_quotes = parsed.get("evidence_quotes")
-                # A model may correctly identify a missing subtopic but mark
-                # the entire answer insufficient while also returning valid
-                # evidence IDs. This field is reserved for a full abstention;
-                # any cited answer is therefore a partial, usable answer.
-                insufficient = bool(parsed.get("insufficient_evidence")) and not bool(evidence_ids)
-                if not isinstance(evidence_ids, list) or any(not isinstance(value, str) or value not in permitted_ids for value in evidence_ids):
-                    raise ValueError("模型返回了范围外或格式错误的证据引用")
-                if not answer:
-                    raise ValueError("模型没有返回答案")
-                if not insufficient and not evidence_ids:
-                    raise ValueError("模型回答缺少证据引用")
-                quotes_by_id = _validated_evidence_quotes(
-                    evidence_quotes,
-                    evidence_ids=evidence_ids,
-                    evidence=evidence,
-                    insufficient=insufficient,
-                )
+                grounded_answer = parse_grounded_answer(response, evidence)
                 break
             except ValueError:
                 if attempt:
@@ -433,12 +407,7 @@ def answer_from_evidence(
             error=str(exc),
         )
         raise RuntimeError(f"文本模型 API 调用失败: {exc}") from exc
-    selected = [
-        {**item, "excerpt": quotes_by_id[str(item["evidence_id"])]}
-        for item in evidence
-        if item["evidence_id"] in evidence_ids
-    ]
-    return GroundedAnswer(answer=answer, citations=selected, insufficient_evidence=insufficient)
+    return grounded_answer
 
 
 def stream_answer_from_evidence(
@@ -461,14 +430,15 @@ def stream_answer_from_evidence(
             answer="在当前选择的知识集中，没有找到足以回答这个问题的材料。",
             citations=[],
             insufficient_evidence=True,
+            suggested_questions=[],
         )
         return
     if not text_model_configured(model):
         raise ValueError("请先在设置中配置所选文本模型的 API Key")
     evidence = _answer_evidence_payload(results, question=question, evidence_limit=evidence_limit)
-    permitted_ids = {str(item["evidence_id"]) for item in evidence}
     messages = [
         LLMMessage(role="system", content=managed_prompt_text("knowledge_answer", DEFAULT_KNOWLEDGE_ANSWER_PROMPT)),
+        LLMMessage(role="system", content=KNOWLEDGE_FOLLOWUP_RESPONSE_CONTRACT),
         LLMMessage(role="system", content=CONVERSATION_CONTEXT_GUARDRAIL),
         *_conversation_context_messages(conversation_context),
         LLMMessage(
@@ -505,6 +475,7 @@ def stream_answer_from_evidence(
                             yield "delta", visible
                     if event.reasoning_content:
                         reasoning_parts.append(event.reasoning_content)
+                        yield "reasoning_delta", event.reasoning_content
                     if event.usage:
                         usage = event.usage
                     if event.finish_reason:
@@ -545,29 +516,7 @@ def stream_answer_from_evidence(
             task_id=task_id,
         )
         try:
-            parsed = _parse_answer_json(response.content)
-            answer = str(parsed.get("answer") or "").strip()
-            evidence_ids = parsed.get("evidence_ids")
-            evidence_quotes = parsed.get("evidence_quotes")
-            insufficient = bool(parsed.get("insufficient_evidence")) and not bool(evidence_ids)
-            if not isinstance(evidence_ids, list) or any(not isinstance(value, str) or value not in permitted_ids for value in evidence_ids):
-                raise ValueError("模型返回了范围外或格式错误的证据引用")
-            if not answer:
-                raise ValueError("模型没有返回答案")
-            if not insufficient and not evidence_ids:
-                raise ValueError("模型回答缺少证据引用")
-            quotes_by_id = _validated_evidence_quotes(
-                evidence_quotes,
-                evidence_ids=evidence_ids,
-                evidence=evidence,
-                insufficient=insufficient,
-            )
-            selected = [
-                {**item, "excerpt": quotes_by_id[str(item["evidence_id"])]}
-                for item in evidence
-                if item["evidence_id"] in evidence_ids
-            ]
-            yield "done", GroundedAnswer(answer=answer, citations=selected, insufficient_evidence=insufficient)
+            yield "done", parse_grounded_answer(response, evidence)
             return
         except ValueError:
             if attempt:

@@ -16,7 +16,7 @@ from types import ModuleType
 from services.database_migrations import segment_01, segment_02, segment_03, segment_04
 
 
-SCHEMA_VERSION = 92
+SCHEMA_VERSION = 93
 Migration = Callable[[sqlite3.Connection], None]
 _MIGRATION_NAME = re.compile(r"^_migration_(\d{3})_")
 _SEGMENTS = (segment_01, segment_02, segment_03, segment_04)
