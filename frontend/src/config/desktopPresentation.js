@@ -9,6 +9,8 @@ export const DESKTOP_ASR_POLICY = Object.freeze({
   asr_fallback_enabled: false,
 })
 
+export const DEFAULT_APPEARANCE_THEME = 'notion'
+
 export const appearanceThemes = [
   { value: 'paper', label: '清纸', description: '橄榄与暖白，适合日常收集', accent: '#6F8D3E', background: '#FDF6E3', foreground: '#2F2A1F' },
   { value: 'pure', label: '素白', description: '近白与石墨，最大限度减少视觉噪声', accent: '#66756B', background: '#FAFAF9', foreground: '#252825' },
@@ -32,5 +34,5 @@ export function normalizeAppearanceTheme(theme) {
   const legacyThemes = { everforest: 'paper', one: 'codex' }
   return appearanceThemes.some((item) => item.value === theme)
     ? theme
-    : legacyThemes[theme] || 'paper'
+    : legacyThemes[theme] || DEFAULT_APPEARANCE_THEME
 }

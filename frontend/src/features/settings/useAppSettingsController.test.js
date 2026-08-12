@@ -32,6 +32,28 @@ function installDocument() {
   return themeColor
 }
 
+test('uses 简记 for a fresh profile without persisting an implicit preference', () => {
+  const priorStorage = globalThis.localStorage
+  const priorDocument = globalThis.document
+  const storage = createStorage()
+  globalThis.localStorage = storage
+  const themeColor = installDocument()
+
+  try {
+    const controller = useAppSettingsController()
+    const restored = controller.restoreSettings()
+
+    assert.deepEqual(restored, { hasLocalAiSettings: false })
+    assert.equal(controller.selectedTheme.value, 'notion')
+    assert.equal(globalThis.document.documentElement.dataset.theme, 'notion')
+    assert.equal(themeColor.content, '#FFFFFF')
+    assert.equal(storage.getItem(APPEARANCE_SETTINGS_KEY), null)
+  } finally {
+    globalThis.localStorage = priorStorage
+    globalThis.document = priorDocument
+  }
+})
+
 test('restores legacy settings in the original order while keeping ASR fixed to desktop policy', async () => {
   const priorStorage = globalThis.localStorage
   const priorDocument = globalThis.document

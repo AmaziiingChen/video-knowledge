@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue'
 
 import {
   appearanceThemes,
+  DEFAULT_APPEARANCE_THEME,
   DESKTOP_ASR_POLICY,
   normalizeAppearanceTheme,
 } from '../../config/desktopPresentation.js'
@@ -28,7 +29,7 @@ export function useAppSettingsController() {
   const selectedAiModel = ref('deepseek-v4-flash:enabled')
   const assistantAiModel = ref(selectedAiModel.value)
   const autoQaShortcutRecognition = ref(true)
-  const selectedTheme = ref('paper')
+  const selectedTheme = ref(DEFAULT_APPEARANCE_THEME)
   const themeOptions = appearanceThemes
   const selectedThemeOption = computed(() => {
     return themeOptions.find((item) => item.value === selectedTheme.value) || themeOptions[0]
