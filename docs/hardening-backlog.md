@@ -34,12 +34,17 @@ lines.
   final asset refinement; the fresh candidate DMG still needs physical
   validation under the RC verification gate below.
 - [x] Restore the native macOS icon language inside the renderer without
-  republishing the historical Apple CoreSVG exports. Standard workbench,
-  toolbar, assistant and campus-source icons are generated from the installed
-  SF Symbols catalog through AppKit before macOS development and production
-  builds; the separately reviewed OpenClaw brand mark remains an explicit
-  integration asset. A source contract prevents direct Tabler or Element Plus
-  icon imports from returning to product components.
+  republishing the historical Apple CoreSVG exports. Activity-bar, workspace,
+  settings, toolbar, assistant, file/media and campus-source identities are
+  generated from the installed SF Symbols catalog through AppKit; the reviewed
+  OpenClaw brand mark remains an explicit integration asset. File-tree
+  disclosure and selection affordances retain their established Element Plus
+  components; close buttons retain the default Tabler `IconX`. A source
+  contract prevents both narrow exceptions from spreading.
+  The AppKit renderer pins SF Symbols to the regular weight, and the mask layer
+  preserves full opacity so small toolbar glyphs do not appear artificially thin.
+  Web-source identities keep distinct source glyphs and theme-aware colour
+  backgrounds instead of being flattened into monochrome toolbar controls.
 - [x] Add a deterministic packaged-app core smoke using an isolated temporary
   user-data directory. It must start the unsigned `.app`, prove the renderer and
   bundled backend are ready, import and reopen a local fixture, restart once,

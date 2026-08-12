@@ -150,6 +150,7 @@ macOS 也可直接双击：
 
 - `Video Knowledge.command`：启动前后端并打开浏览器。
 - `Video Knowledge Desktop.command`：以当前源码启动 Electron 桌面外壳；后端修改在下次启动时直接生效。正式发布包再执行对应的 `desktop:package:*` 命令。
+- `KnowledgeHub Desktop Preview.command`：先重建前端，再以临时 Electron 配置和仓库 `data/` 启动真实桌面端，用于在打包前检查图标与界面；它不会读取已安装版的 Application Support 数据，若 8000 端口被占用会停止并给出提示。
 - `Stop Video Knowledge.command`：停止由启动器管理的服务。
 
 日志位于 `data/logs/backend.log` 与 `data/logs/frontend.log`；停止服务可运行：

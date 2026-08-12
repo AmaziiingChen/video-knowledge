@@ -339,7 +339,7 @@
 
 <script setup>
 import { computed, nextTick, ref } from 'vue'
-import { ArrowRight, Delete, Plus } from '../components/macosSymbolComponents.js'
+import { ArrowRight, Delete, Plus } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import SidebarTreeRow from './SidebarTreeRow.vue'
 import { promptTaskGroups, promptTemplateDisplayName } from '../config/promptInterface'

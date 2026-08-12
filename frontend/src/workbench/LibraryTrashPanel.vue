@@ -25,7 +25,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { ArrowRight } from '../components/macosSymbolComponents.js'
+import { ArrowRight } from '@element-plus/icons-vue'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 import { requestDestructiveConfirmation } from '../composables/useDestructiveConfirm'
 import { libraryContentIcon } from '../utils/contentIcons'

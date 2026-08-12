@@ -99,8 +99,6 @@
 .campus-manager-table-head > span { min-width: 0; transition: opacity var(--vk-motion-fast) var(--vk-ease-out), transform var(--vk-motion-fast) var(--vk-ease-out), visibility var(--vk-motion-fast) var(--vk-ease-out); }
 
 .campus-manager-source-cell { gap: 9px; }
-.campus-manager-source-mark { display: block; width: 28px; height: 28px; flex: 0 0 28px; color: var(--vk-accent-strong); }
-.campus-manager-source-mark.is-procurement { opacity: 1; }
 .campus-manager-source-copy,
 .campus-manager-activity-cell { display: grid; align-content: center; gap: 3px; min-width: 0; }
 .campus-manager-activity-cell { justify-items: center; text-align: center; }

@@ -11,12 +11,12 @@
       >
         <el-tooltip content="新建文件夹" placement="bottom">
           <button class="sidebar-icon-button" type="button" aria-label="新建文件夹" @click="startNewFolder(null)">
-            <SvgMaskIcon :src="folderAddIcon" :size="24" />
+            <SvgMaskIcon :src="folderAddIcon" :size="18" />
           </button>
         </el-tooltip>
         <el-tooltip content="导入本地资料" placement="bottom">
           <button class="sidebar-icon-button" type="button" aria-label="导入本地资料" @click="chooseMarkdownFile">
-            <SvgMaskIcon :src="markdownImportIcon" :size="24" />
+            <SvgMaskIcon :src="markdownImportIcon" :size="18" />
           </button>
         </el-tooltip>
       </div>

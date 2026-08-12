@@ -10,6 +10,7 @@
 <script setup>
 import { computed } from 'vue'
 import iconManifest from './macosSymbolManifest.json'
+import { resolveMacosSymbolAssetUrl } from './macosSymbolAssets.js'
 
 const props = defineProps({
   src: {
@@ -23,17 +24,12 @@ const props = defineProps({
 })
 
 const fallbackName = 'text.document'
-const baseUrl = import.meta.env.BASE_URL || './'
 const resolvedName = computed(() => iconManifest[props.src] ? props.src : fallbackName)
 const iconAsset = computed(() => iconManifest[resolvedName.value])
-const iconUrl = computed(() => {
-  const directory = iconAsset.value.kind === 'brand'
-    ? 'brand-icons'
-    : 'generated/sf-symbols'
-  return `${baseUrl}${directory}/${iconAsset.value.asset}`
-})
+const iconUrl = computed(() => resolveMacosSymbolAssetUrl(iconAsset.value))
 const iconStyle = computed(() => ({
   '--icon-size': `${props.size}px`,
+  '--icon-render-size': iconAsset.value.kind === 'brand' ? 'contain' : '128%',
   '--icon-source': `url("${iconUrl.value}")`
 }))
 </script>
@@ -45,9 +41,9 @@ const iconStyle = computed(() => ({
   display: block;
   flex: 0 0 auto;
   background-color: currentColor;
-  -webkit-mask: var(--icon-source) center / contain no-repeat;
-  mask: var(--icon-source) center / contain no-repeat;
-  opacity: 0.78;
+  -webkit-mask: var(--icon-source) center / var(--icon-render-size) no-repeat;
+  mask: var(--icon-source) center / var(--icon-render-size) no-repeat;
+  opacity: 1;
   transition:
     opacity 0.16s ease,
     transform 0.12s ease;

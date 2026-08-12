@@ -86,6 +86,5 @@
   "tray.badge.fill": { "asset": "tray.badge.fill.png", "candidates": ["tray.badge.fill", "tray.fill"] },
   "waveform": { "asset": "waveform.png", "candidates": ["waveform"] },
   "wechat": { "asset": "wechat.png", "candidates": ["message.fill", "bubble.left.fill"] },
-  "x.circle": { "asset": "x.circle.png", "candidates": ["xmark.circle"] },
-  "xmark": { "asset": "xmark.png", "candidates": ["xmark"] }
+  "x.circle": { "asset": "x.circle.png", "candidates": ["xmark.circle"] }
 }

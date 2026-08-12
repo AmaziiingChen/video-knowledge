@@ -5,9 +5,9 @@ import test from 'node:test'
 const source = await readFile(new URL('./LibrarySidebar.vue', import.meta.url), 'utf8')
 const linkDockSource = await readFile(new URL('./SidebarLinkDock.vue', import.meta.url), 'utf8')
 
-test('centres and enlarges file-tree toolbar actions without a top divider', () => {
-  assert.match(source, /<SvgMaskIcon :src="folderAddIcon" :size="24"\s*\/>/)
-  assert.match(source, /<SvgMaskIcon :src="markdownImportIcon" :size="24"\s*\/>/)
+test('centres file-tree toolbar actions at the same glyph size as the activity bar', () => {
+  assert.match(source, /<SvgMaskIcon :src="folderAddIcon" :size="18"\s*\/>/)
+  assert.match(source, /<SvgMaskIcon :src="markdownImportIcon" :size="18"\s*\/>/)
   assert.match(
     source,
     /\.sidebar-file-toolbar\s*\{[\s\S]*?justify-content:\s*center;[\s\S]*?min-height:\s*36px;[\s\S]*?padding-block:\s*0;[\s\S]*?border-top:\s*0;/,

@@ -23,6 +23,10 @@ when deciding which local checks a change requires.
    the reviewed SF Symbols into an ignored generated-assets directory; install
    the Xcode Command Line Tools before running those commands. Non-macOS builds
    skip this step because the supported desktop release target is macOS.
+   File, media, source and functional identities all use the reviewed SF Symbol
+   mapping. The file-tree disclosure and selection controls intentionally retain
+   their established Element Plus components, and close buttons retain the
+   default Tabler `IconX`; do not broaden either exception.
    Run `ruff check --select E9,F63,F7,F82 backend tests scripts` and the affected
    backend tests for Python changes. Run
    `python scripts/check_architecture_budget.py` for structural changes. Its

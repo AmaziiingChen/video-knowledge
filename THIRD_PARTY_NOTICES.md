@@ -9,6 +9,8 @@ repository root. Dependencies keep their own licenses and notices.
   system through AppKit. No Apple CoreSVG or SF Symbols SVG export is tracked
   or redistributed in this source tree; use of the rendered symbols remains
   subject to Apple's SF Symbols terms and platform restrictions.
+- Close buttons use the default `IconX` from `@tabler/icons-vue`, distributed
+  under Tabler's MIT License.
 - `frontend/public/brand-icons/openclaw.svg` identifies the optional OpenClaw
   integration. OpenClaw is distributed under the MIT License; its name and
   visual identity remain the property of its respective owner.
