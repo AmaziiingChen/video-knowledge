@@ -233,7 +233,7 @@ def test_client_never_reflects_browser_exception_details(tmp_path, monkeypatch):
     (tmp_path / "xiaohongshu_cookie.txt").write_text("session=private-cookie", encoding="utf-8")
 
     def fail_probe(_cookie):
-        raise collector.XiaohongshuBrowserError("xsec_token=secret /Users/private")
+        raise collector.XiaohongshuBrowserError("xsec_token=secret local-runtime-path")
 
     monkeypatch.setattr(collector, "probe_xiaohongshu_session", fail_probe)
     status = xiaohongshu_client.xiaohongshu_cookie_status(probe=True)

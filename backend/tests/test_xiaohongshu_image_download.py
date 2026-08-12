@@ -67,7 +67,7 @@ def test_xhs_image_capture_never_persists_remote_exception_details(tmp_path, mon
     monkeypatch.setattr(
         xiaohongshu_ingest,
         "_download_image",
-        lambda _url: (_ for _ in ()).throw(RuntimeError("xsec_token=secret /Users/private")),
+        lambda _url: (_ for _ in ()).throw(RuntimeError("xsec_token=secret local-runtime-path")),
     )
     entry = xiaohongshu_ingest._capture_image(
         "https://images.example/image.jpg?token=secret",
