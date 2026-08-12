@@ -11,6 +11,7 @@ function createEmptyTaskResult() {
     summary: null,
     reasoning_content: '',
     reasoning_truncated: false,
+    suggested_questions: [],
     display_title: null,
     source_title: null,
     obsidian_path: null,
@@ -84,6 +85,9 @@ export function useActiveTaskStateController({
     result.summary = data.summary
     result.reasoning_content = data.reasoning_content || ''
     result.reasoning_truncated = Boolean(data.reasoning_truncated)
+    result.suggested_questions = Array.isArray(data.suggested_questions)
+      ? data.suggested_questions.slice(0, 3)
+      : []
     result.display_title = data.display_title || null
     result.source_title = data.source_title || null
     result.obsidian_path = data.obsidian_path

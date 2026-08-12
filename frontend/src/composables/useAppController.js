@@ -168,8 +168,7 @@ export function useAppController() {
     isQaSessionActive,
     activateQaSession,
     detachQaSession,
-    syncQaSessionIfActive,
-    refreshQaSessionHistory,
+    syncQaSessionIfActive, refreshQaSessionHistory, projectPipelineSuggestedQuestions,
     clearQaSession,
     resetActiveQaSession: resetQaState,
     insertQaShortcut,
@@ -740,10 +739,7 @@ export function useAppController() {
     originalMediaUrlForTab,
     transcriptForTab,
     articlePreviewForTab,
-    activeWorkspaceTab,
-    activeWorkspaceContent,
-    activeWorkspaceResult,
-    activeWorkspaceTranscript,
+    activeWorkspaceTab, activeWorkspaceContent, activeWorkspaceResult, activeWorkspaceTranscript,
   } = useWorkspaceTabProjectionController({
     workspaceTabs,
     activeWorkspaceTabId,
@@ -926,13 +922,13 @@ export function useAppController() {
   watch(
     () => [
       activeWorkspaceContent.value?.id || '',
-      batchTasks.value.map((task) => `${task.task_id}:${task.content_item_id || ''}:${task.status || ''}`).join('|'),
+      batchTasks.value.map((task) => `${task.task_id}:${task.content_item_id || ''}:${task.status || ''}:${task.suggested_questions?.join('\n') || ''}`).join('|'),
     ],
-    () => syncTaskEventStream({
-      activeContentItemId: activeWorkspaceContent.value?.id,
-      batchTasks: batchTasks.value,
-    }),
-    { flush: 'post' }
+    () => {
+      syncTaskEventStream({ activeContentItemId: activeWorkspaceContent.value?.id, batchTasks: batchTasks.value })
+      projectPipelineSuggestedQuestions(activeWorkspaceContent.value?.id, activeWorkspaceResult.value)
+    },
+    { immediate: true, flush: 'post' }
   )
   startSettingsPersistence()
   onMounted(async () => {
