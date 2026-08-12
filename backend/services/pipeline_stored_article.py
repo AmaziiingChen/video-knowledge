@@ -9,7 +9,11 @@ from typing import Any
 
 from services.content_source_text import ContentSourceText, load_content_source_text
 from services.database import connect
-from services.pipeline_contracts import PipelineCancelled, PipelineResponse, TextSourceInfo
+from services.pipeline_contracts import (
+    PipelineCancelled,
+    PipelineResponse,
+    TextSourceInfo,
+)
 from services.pipeline_progress_rules import elapsed
 from services.pipeline_run_reporter import PipelineRunReporter
 from services.repository import ContentItemRecord, ContentRepository
@@ -96,6 +100,7 @@ def run_prepared_stored_article(
             source_context=source_context,
             on_delta=reporter.publish_summary_delta,
             on_reasoning_delta=reporter.publish_reasoning_delta,
+            on_suggested_questions=reporter.publish_suggested_questions,
             cancel_check=cancel_check,
         )
     except PipelineCancelled:

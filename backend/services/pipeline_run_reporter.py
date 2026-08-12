@@ -9,9 +9,9 @@ from datetime import datetime
 from services.ai_call_logger import AICallRecord
 from services.download_contracts import DownloadProgress
 from services.pipeline_contracts import (
+    MAX_REASONING_CONTENT_CHARS,
     AICallInfo,
     DownloadTransferInfo,
-    MAX_REASONING_CONTENT_CHARS,
     PipelineLog,
     PipelineResponse,
 )
@@ -162,3 +162,6 @@ class PipelineRunReporter:
             return
         self.last_reasoning_publish_at = now
         self.publish()
+
+    def publish_suggested_questions(self, questions: list[str]) -> None:
+        self.response.suggested_questions = list(questions[:3])

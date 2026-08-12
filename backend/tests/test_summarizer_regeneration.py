@@ -1,4 +1,4 @@
-from services.llm_provider import LLMStreamChunk
+from services.llm_provider import LLMResponse, LLMStreamChunk
 from services.pipeline_contracts import MAX_REASONING_CONTENT_CHARS
 from services.summarizer import _build_regeneration_messages, summarize_stream
 
@@ -62,11 +62,21 @@ class _ReasoningStreamingProvider:
         yield LLMStreamChunk(content="生成标题\n")
         yield LLMStreamChunk(content="可见摘要")
 
+    def chat(self, messages, **kwargs):
+        assert "字幕" not in "\n".join(message.content for message in messages)
+        assert kwargs == {"temperature": 0.1, "max_tokens": 400}
+        return LLMResponse(
+            content='{"questions":["接下来可以了解什么？"]}',
+            provider=self.name,
+            model=self.model,
+        )
+
 
 def test_automatic_summary_keeps_bounded_reasoning_out_of_visible_body(monkeypatch):
     monkeypatch.setattr("services.summarizer.record_ai_call", lambda **_kwargs: None)
     reasoning_updates = []
     summary_updates = []
+    suggestions = []
 
     title, summary = summarize_stream(
         "字幕",
@@ -74,6 +84,7 @@ def test_automatic_summary_keeps_bounded_reasoning_out_of_visible_body(monkeypat
         provider=_ReasoningStreamingProvider(),
         on_delta=lambda next_title, next_summary: summary_updates.append((next_title, next_summary)),
         on_reasoning_delta=lambda reasoning, truncated: reasoning_updates.append((reasoning, truncated)),
+        on_suggested_questions=suggestions.extend,
     )
 
     assert title == "生成标题"
@@ -81,6 +92,7 @@ def test_automatic_summary_keeps_bounded_reasoning_out_of_visible_body(monkeypat
     assert reasoning_updates[-1] == ("先核对材料边界", False)
     assert "先核对" not in summary
     assert summary_updates[-1] == ("生成标题", "可见摘要")
+    assert suggestions == ["接下来可以了解什么？"]
 
 
 class _OversizedReasoningProvider:

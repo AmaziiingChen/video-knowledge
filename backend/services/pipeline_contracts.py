@@ -6,7 +6,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 MAX_REASONING_CONTENT_CHARS = 32_768
 
 
@@ -99,6 +98,7 @@ class PipelineResponse(BaseModel):
     summary: str | None = None
     reasoning_content: str = Field(default="", max_length=MAX_REASONING_CONTENT_CHARS)
     reasoning_truncated: bool = False
+    suggested_questions: list[str] = Field(default_factory=list, max_length=3)
     obsidian_path: str | None = None
     markdown_draft_path: str | None = None
     whisper_model: str | None = None

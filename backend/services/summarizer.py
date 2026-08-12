@@ -1,6 +1,6 @@
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from config import settings
@@ -11,6 +11,7 @@ from services.ai_response_envelope import (
     AIResponseEnvelope,
     AIResponseStreamEvent,
     SuggestionTrailerParser,
+    parse_suggested_questions_response,
 )
 from services.database import connect, initialize_database
 from services.llm_provider import (
@@ -21,8 +22,8 @@ from services.llm_provider import (
     LLMUsage,
     default_llm_provider,
 )
-from services.prompt_file_store import sync_prompt_files
 from services.pipeline_contracts import MAX_REASONING_CONTENT_CHARS, PipelineCancelled
+from services.prompt_file_store import sync_prompt_files
 from services.prompt_templates import (
     DEFAULT_ARTICLE_MATERIAL_REDUCTION_PROMPT,
     DEFAULT_ARTICLE_SUMMARY_PROMPT,
@@ -48,6 +49,9 @@ MAX_QA_TRANSCRIPT_CHARS = 60000
 MAX_REGENERATION_DIRECT_SOURCE_CHARS = 54_000
 MAX_REGENERATION_CHUNK_SOURCE_CHARS = 36_000
 MAX_REGENERATION_FINAL_MATERIAL_CHARS = 54_000
+MAX_FOLLOWUP_SUBJECT_CHARS = 1_000
+MAX_FOLLOWUP_ANSWER_CHARS = 12_000
+MAX_FOLLOWUP_OUTPUT_TOKENS = 400
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,84 @@ class SummaryStreamEvent:
     summary: str = ""
     reasoning_content: str = ""
     reasoning_truncated: bool = False
+    suggested_questions: list[str] = field(default_factory=list)
+
+
+def _bounded_followup_text(value: str, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    marker = "\n\n[中段省略]\n\n"
+    available = max(0, limit - len(marker))
+    head = (available * 2) // 3
+    tail = available - head
+    return f"{text[:head]}{marker}{text[-tail:] if tail else ''}"
+
+
+def generate_followup_suggestions(
+    *,
+    llm: LLMProvider,
+    subject_label: str,
+    subject: str,
+    answer: str,
+    call_type: str,
+    task_id: str | None,
+    content_item_id: str | None,
+    ai_call_callback: Callable[[AICallRecord], None] | None,
+    should_record: bool = True,
+) -> list[str]:
+    """Generate optional follow-ups without sending source material or history."""
+    messages = [
+        LLMMessage(
+            role="system",
+            content=(
+                "只基于给定主题和最终正文，生成用户接下来最可能追问的中文问题。"
+                "只返回 JSON 对象：{\"questions\":[\"问题一\",\"问题二\",\"问题三\"]}。"
+                "最多三条；没有可靠建议时返回空数组。不得复述正文，不得添加 JSON 之外的字段。"
+            ),
+        ),
+        LLMMessage(
+            role="user",
+            content=(
+                f"{subject_label}：{_bounded_followup_text(subject, MAX_FOLLOWUP_SUBJECT_CHARS)}\n\n"
+                f"最终正文：\n{_bounded_followup_text(answer, MAX_FOLLOWUP_ANSWER_CHARS)}"
+            ),
+        ),
+    ]
+    input_chars = sum(len(message.content) for message in messages)
+    started_at = time.perf_counter()
+    try:
+        response = llm.chat(
+            messages,
+            temperature=0.1,
+            max_tokens=MAX_FOLLOWUP_OUTPUT_TOKENS,
+        )
+        questions = parse_suggested_questions_response(response.content)
+        if should_record:
+            record = record_ai_call(
+                call_type=call_type,
+                provider_response=response,
+                input_chars=input_chars,
+                output_chars=len(response.content) + len(response.reasoning_content or ""),
+                elapsed_seconds=time.perf_counter() - started_at,
+                task_id=task_id,
+                content_item_id=content_item_id,
+            )
+            if record and ai_call_callback:
+                ai_call_callback(record)
+        return questions
+    except Exception as exc:  # noqa: BLE001 - optional suggestions must fail open
+        if should_record:
+            record_ai_call(
+                call_type=call_type,
+                provider_response=None,
+                input_chars=input_chars,
+                elapsed_seconds=time.perf_counter() - started_at,
+                task_id=task_id,
+                content_item_id=content_item_id,
+                error=str(exc),
+            )
+        return []
 
 
 def _stream_provider_events(llm: LLMProvider, messages: list[LLMMessage], *, temperature: float) -> Iterator[LLMStreamChunk]:
@@ -204,6 +286,7 @@ def summarize_stream(
     source_context: dict[str, object] | None = None,
     on_delta: Callable[[str, str], None] | None = None,
     on_reasoning_delta: Callable[[str, bool], None] | None = None,
+    on_suggested_questions: Callable[[list[str]], None] | None = None,
     cancel_check: Callable[[], None] | None = None,
 ) -> tuple[str, str]:
     """Generate a summary while exposing safe, renderable partial text.
@@ -236,6 +319,8 @@ def summarize_stream(
             summary = event.summary
             if event.kind == "summary_delta" and on_delta:
                 on_delta(title, summary)
+            if event.kind == "done" and on_suggested_questions:
+                on_suggested_questions(event.suggested_questions)
     return title, summary
 
 
@@ -355,12 +440,28 @@ def summarize_stream_events(
             )
             if record and ai_call_callback:
                 ai_call_callback(record)
+        if cancel_check:
+            cancel_check()
+        suggested_questions = generate_followup_suggestions(
+            llm=llm,
+            subject_label="摘要主题",
+            subject=video_title or ("当前文章" if normalized_task_type == "article_summary" else "当前视频"),
+            answer=summary,
+            call_type="summary_followup_suggestions",
+            task_id=task_id,
+            content_item_id=content_item_id,
+            ai_call_callback=ai_call_callback,
+            should_record=should_record,
+        )
+        if cancel_check:
+            cancel_check()
         yield SummaryStreamEvent(
             kind="done",
             title=title,
             summary=summary,
             reasoning_content=visible_reasoning,
             reasoning_truncated=reasoning_truncated,
+            suggested_questions=suggested_questions,
         )
     except PipelineCancelled:
         raise
@@ -509,6 +610,22 @@ def stream_regenerated_content_summary_events(
         )
         if record and ai_call_callback:
             ai_call_callback(record)
+        if not envelope.suggested_questions:
+            suggested_questions = generate_followup_suggestions(
+                llm=llm,
+                subject_label="摘要主题",
+                subject=video_title or f"当前{normalized_kind}内容",
+                answer=envelope.answer,
+                call_type="summary_followup_suggestions",
+                task_id=None,
+                content_item_id=content_item_id,
+                ai_call_callback=ai_call_callback,
+            )
+            envelope = type(envelope)(
+                answer=envelope.answer,
+                reasoning_content=envelope.reasoning_content,
+                suggested_questions=suggested_questions,
+            )
         yield AIResponseStreamEvent(kind="done", envelope=envelope)
     except Exception as exc:
         error_message = str(exc)
@@ -807,10 +924,21 @@ def answer_question_envelope(
         parser = SuggestionTrailerParser()
         parser.feed(response.content)
         parsed = parser.finish()
+        suggested_questions = parsed.suggested_questions or generate_followup_suggestions(
+            llm=llm,
+            subject_label="当前用户问题",
+            subject=question,
+            answer=parsed.answer,
+            call_type="qa_followup_suggestions",
+            task_id=task_id,
+            content_item_id=content_item_id,
+            ai_call_callback=ai_call_callback,
+            should_record=should_record,
+        )
         return AIResponseEnvelope(
             answer=parsed.answer.strip(),
             reasoning_content=response.reasoning_content,
-            suggested_questions=parsed.suggested_questions,
+            suggested_questions=suggested_questions,
         )
     except Exception as e:
         if should_record:
@@ -928,6 +1056,22 @@ def stream_answer_question_events(
         )
         if record and ai_call_callback:
             ai_call_callback(record)
+        if not envelope.suggested_questions:
+            suggested_questions = generate_followup_suggestions(
+                llm=llm,
+                subject_label="当前用户问题",
+                subject=question,
+                answer=envelope.answer,
+                call_type="qa_followup_suggestions",
+                task_id=task_id,
+                content_item_id=content_item_id,
+                ai_call_callback=ai_call_callback,
+            )
+            envelope = type(envelope)(
+                answer=envelope.answer,
+                reasoning_content=envelope.reasoning_content,
+                suggested_questions=suggested_questions,
+            )
         yield AIResponseStreamEvent(kind="done", envelope=envelope)
     except Exception as e:
         record_ai_call(
