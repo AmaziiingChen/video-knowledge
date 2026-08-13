@@ -40,6 +40,9 @@ test('settings omit retired cache, conversation-mirror, and Telegram controls', 
   assert.doesNotMatch(source, /Telegram|telegramBotToken|telegramAllowedUserIds|telegramReplyEnabled/)
   assert.match(source, /自动写入 Markdown/)
   assert.match(source, /微信链接自动处理/)
+  assert.match(source, /修复 MCP/)
+  assert.match(source, /repair-openclaw-mcp/)
+  assert.match(appSource, /repairOpenClawMcp/)
 })
 
 test('Telegram controls are absent from the desktop UI', () => {

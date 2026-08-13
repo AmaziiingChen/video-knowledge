@@ -3,6 +3,7 @@ const { spawn } = require('child_process')
 const { randomUUID } = require('crypto')
 const fs = require('fs')
 const http = require('http')
+const nodeNet = require('net')
 const path = require('path')
 const { pathToFileURL } = require('url')
 const { createCampusWebVpnController } = require('./campus-webvpn.cjs')
@@ -10,7 +11,13 @@ const { createPlatformAuthController } = require('./platform-auth.cjs')
 const { directChildEnvironment } = require('./network-env.cjs')
 const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
-const { backendSpawnOptions, terminateBackendProcess } = require('./backend-process.cjs')
+const {
+  backendSpawnOptions,
+  clearBackendLease,
+  terminateBackendProcess,
+  terminateLeasedBackend,
+  writeBackendLease,
+} = require('./backend-process.cjs')
 const { shouldInjectBackendToken, withBackendToken } = require('./backend-request-auth.cjs')
 const { applyUserDataDirectoryOverride } = require('./user-data-dir.cjs')
 const {
@@ -306,13 +313,18 @@ ipcMain.handle('knowledgehub:campus-download-attachment', trustedIpcHandler(asyn
 ipcMain.handle('knowledgehub:platform-auth-connect', trustedIpcHandler(async (platform) => platformAuth.connect(platform, mainWindow)))
 ipcMain.handle('knowledgehub:platform-auth-disconnect', trustedIpcHandler(async (platform) => platformAuth.disconnect(platform)))
 
-function waitForHealth(url, timeoutMs = 45000) {
+function waitForHealth(url, timeoutMs = 45000, earlyFailure = () => '') {
   const started = Date.now()
   return new Promise((resolve, reject) => {
     const tick = () => {
       inspectBackendHealth(url).then((health) => {
         if (health.ready) {
           resolve()
+          return
+        }
+        const failure = earlyFailure()
+        if (failure) {
+          reject(new Error(failure))
           return
         }
         if (Date.now() - started > timeoutMs) {
@@ -324,6 +336,18 @@ function waitForHealth(url, timeoutMs = 45000) {
     }
     tick()
   })
+}
+
+function isExpectedBackendProcess(pid) {
+  try {
+    const command = require('child_process').execFileSync(
+      'ps', ['-p', String(pid), '-o', 'command='],
+      { encoding: 'utf8', timeout: 1000 },
+    )
+    return /knowledgehub-backend|uvicorn\s+main:app/.test(command)
+  } catch {
+    return false
+  }
 }
 
 function inspectBackendHealth(url) {
@@ -358,6 +382,30 @@ function inspectBackendHealth(url) {
     })
     request.on('error', () => resolve({ reachable: false, ready: false }))
   })
+}
+
+function isPortOccupied(port = 8000) {
+  return new Promise((resolve) => {
+    const socket = nodeNet.connect({ host: '127.0.0.1', port })
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once('error', () => resolve(false))
+    socket.setTimeout(300, () => {
+      socket.destroy()
+      resolve(true)
+    })
+  })
+}
+
+async function waitForPortRelease(port = 8000, timeoutMs = 4000) {
+  const started = Date.now()
+  while (await isPortOccupied(port)) {
+    if (Date.now() - started >= timeoutMs) return false
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  return true
 }
 
 function pickPython() {
@@ -442,13 +490,16 @@ function startMcpBridgeSession(runDir) {
 }
 
 async function ensureBackend() {
+  const runtime = backendRuntime()
   const existingHealth = await inspectBackendHealth(HEALTH_URL)
   if (existingHealth.ready) return
   if (existingHealth.reachable) {
     throw new Error('本机端口 8000 已被另一个后端或其他服务占用，请先关闭该进程后重试')
   }
-
-  const runtime = backendRuntime()
+  const terminatedLease = terminateLeasedBackend(runtime.runDir, { isExpectedBackendProcess })
+  if (terminatedLease && !(await waitForPortRelease())) {
+    throw new Error('上一轮 KnowledgeHub 后端未能停止，请完全退出旧版 KnowledgeHub 后重试')
+  }
   fs.mkdirSync(runtime.logDir, { recursive: true })
   const bridgeSession = startMcpBridgeSession(runtime.runDir)
   const backendLog = path.join(runtime.logDir, 'desktop-backend.log')
@@ -488,17 +539,26 @@ async function ensureBackend() {
     fs.closeSync(log)
     log = null
 
-    backendProcess.on('exit', () => {
-      backendProcess = null
+    const spawnedBackend = backendProcess
+    let backendExit = null
+    writeBackendLease(runtime.runDir, spawnedBackend)
+    spawnedBackend.on('exit', (code, signal) => {
+      backendExit = { code, signal }
+      clearBackendLease(runtime.runDir, spawnedBackend.pid)
+      if (backendProcess === spawnedBackend) backendProcess = null
       stopMcpBridgeSession({ ignoreErrors: true })
     })
 
-    await waitForHealth(HEALTH_URL)
+    await waitForHealth(HEALTH_URL, 45000, () => {
+      if (!backendExit) return ''
+      return '本机后端启动后立即退出；端口 8000 可能仍被旧版进程占用，请完全退出旧版 KnowledgeHub 后重试'
+    })
   } catch (error) {
     if (log !== null) fs.closeSync(log)
     const failedBackend = backendProcess
     backendProcess = null
     terminateBackendProcess(failedBackend)
+    clearBackendLease(runtime.runDir, failedBackend?.pid)
     stopMcpBridgeSession({ ignoreErrors: true })
     throw error
   }
@@ -693,6 +753,7 @@ app.on('before-quit', () => {
   isQuitting = true
   stopMcpBridgeSession({ ignoreErrors: true })
   terminateBackendProcess(backendProcess)
+  clearBackendLease(backendRuntime().runDir, backendProcess?.pid)
 })
 
 app.on('window-all-closed', () => {

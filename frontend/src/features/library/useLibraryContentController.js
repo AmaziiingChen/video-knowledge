@@ -138,10 +138,26 @@ export function useLibraryContentController({
       total: allContentItems.value.length,
     })
     try {
-      // Startup is intentionally bounded to the folder tree. Restored tabs
-      // resolve only their selected item; historical rows load per folder.
       await loadLibraryFolders({ throwOnError: startup })
       if (loadVersion !== contentPageLoadVersion) return
+      // Keep one bounded recent window in memory.  The tree stays lazy for
+      // historical rows, while unread state can immediately reflect new RSS
+      // and source-sync items before their folder is manually expanded.
+      const response = await request.get(`${apiBase}/content/page`, {
+        params: { limit: 200 },
+        timeout: 15000,
+      })
+      if (loadVersion !== contentPageLoadVersion) return
+      const page = response.data || {}
+      const recentItems = Array.isArray(page.items) ? page.items : []
+      allContentItems.value = mergeContentItems(allContentItems.value, recentItems)
+      reconcileContentViewState(allContentItems.value, { initialWindowComplete: true })
+      applyContentFilter()
+      Object.assign(contentPageLoadStatus, {
+        state: Boolean(page.has_more) ? 'partial' : 'ready',
+        loaded: allContentItems.value.length,
+        total: Number.isFinite(Number(page.total)) ? Number(page.total) : allContentItems.value.length,
+      })
       startupRetryCount = 0
       if (startup) startupPhase.value = 'workspace'
       void syncActiveWorkspaceTabSelection()

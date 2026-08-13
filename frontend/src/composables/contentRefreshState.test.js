@@ -37,6 +37,11 @@ test('refreshes content once when a task reaches a terminal state', () => {
   )
 })
 
+test('refreshes after a source sync finishes even without one content item id', () => {
+  const task = { task_type: 'source_sync', status: 'succeeded' }
+  assert.equal(shouldRefreshContentForTask(task, 'running|', true, terminalStatuses), true)
+})
+
 test('hydrates a task only when a readable or playable milestone changes', () => {
   const queued = { status: 'queued', content_item_id: 'content-a', step: 'parse' }
   assert.equal(shouldHydrateProgressiveTask(queued, undefined), true)

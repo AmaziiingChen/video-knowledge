@@ -1,8 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-
-from services.openclaw_gateway import OpenClawGatewayError, get_openclaw_status, start_openclaw_gateway
-from services.openclaw_usage import get_openclaw_usage
 from services.openclaw_conversations import (
     bind_task,
     claim_terminal_notification,
@@ -12,7 +9,13 @@ from services.openclaw_conversations import (
     record_conversation_turn,
     update_conversation_settings,
 )
-
+from services.openclaw_gateway import (
+    OpenClawGatewayError,
+    get_openclaw_status,
+    repair_openclaw_mcp,
+    start_openclaw_gateway,
+)
+from services.openclaw_usage import get_openclaw_usage
 
 router = APIRouter()
 
@@ -52,6 +55,14 @@ async def get_gateway_status(refresh: bool = Query(default=False)):
 async def start_gateway():
     try:
         return start_openclaw_gateway()
+    except OpenClawGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/openclaw-gateway/repair-mcp")
+async def repair_gateway_mcp():
+    try:
+        return repair_openclaw_mcp()
     except OpenClawGatewayError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

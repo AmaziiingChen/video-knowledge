@@ -20,7 +20,7 @@ class ClipboardWatcherRequest(BaseModel):
     asr_fallback_enabled: bool | None = None
     ai_model: str | None = None
     use_cache: bool = True
-    poll_interval: float = Field(default=2.5, ge=1.0, le=10.0)
+    poll_interval: float = Field(default=0.75, ge=0.5, le=10.0)
     capture_mode: str = Field(default="task", pattern="^(inbox|task)$")
 
 
@@ -45,7 +45,7 @@ class ClipboardWatcherResponse(BaseModel):
     asr_fallback_enabled: bool | None = None
     ai_model: str | None = None
     use_cache: bool = True
-    poll_interval: float = 2.5
+    poll_interval: float = 0.75
     capture_mode: str = "task"
     last_error: str | None = None
     last_checked_at: str | None = None

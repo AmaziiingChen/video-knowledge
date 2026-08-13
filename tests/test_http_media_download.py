@@ -97,3 +97,27 @@ def test_browser_context_transfer_keeps_media_in_bounded_range_requests(tmp_path
     assert result.success
     assert context.ranges == ["bytes=0-2", "bytes=3-5"]
     assert (tmp_path / "video.part").read_bytes() == b"abcdef"
+
+
+def test_browser_context_transfer_uses_a_short_cancellable_request_timeout(tmp_path: Path):
+    class BrowserResponse:
+        status = 200
+        status_text = "OK"
+        headers = {"content-length": "1"}
+
+        def body(self):
+            return b"x"
+
+    class BrowserRequestContext:
+        def __init__(self):
+            self.timeout = None
+
+        def get(self, _url, *, timeout, **_kwargs):
+            self.timeout = timeout
+            return BrowserResponse()
+
+    context = BrowserRequestContext()
+    result = download_browser_context_media(context, "https://cdn.example/video.mp4", tmp_path / "video.part")
+
+    assert result.success
+    assert context.timeout == 15_000

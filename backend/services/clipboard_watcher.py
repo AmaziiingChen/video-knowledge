@@ -12,14 +12,21 @@ from services.inbox import capture_link_to_inbox
 from services.manual_collection_settings import manual_collection_settings
 from services.pipeline_runner import PipelineRequest
 from services.task_manager import TaskRecord, task_manager
-from services.url_parser import XIAOHONGSHU_PATTERN, XIAOHONGSHU_SHORT_PATTERN
+from services.url_parser import (
+    BILIBILI_PATTERN,
+    BILIBILI_SHORT_PATTERN,
+    DOUYIN_PATTERN,
+    WECHAT_PATTERN,
+    XIAOHONGSHU_PATTERN,
+    XIAOHONGSHU_SHORT_PATTERN,
+)
 
 
 VIDEO_LINK_PATTERNS = [
-    re.compile(r"https?://v\.douyin\.com/[A-Za-z0-9_/-]+"),
-    re.compile(r"https?://(?:www\.)?bilibili\.com/video/[A-Za-z0-9]+"),
-    re.compile(r"https?://b23\.tv/[A-Za-z0-9]+"),
-    re.compile(r"https?://mp\.weixin\.qq\.com/[^\s]+"),
+    DOUYIN_PATTERN,
+    BILIBILI_PATTERN,
+    BILIBILI_SHORT_PATTERN,
+    WECHAT_PATTERN,
     # Reuse the ingest parser's canonical patterns so clipboard listening does
     # not silently lag behind supported Xiaohongshu share-link domains.
     XIAOHONGSHU_PATTERN,
@@ -105,7 +112,7 @@ class ClipboardWatcher:
         self._whisper_model: str | None = None
         self._use_cache = True
         self._ai_model: str | None = None
-        self._poll_interval = 2.5
+        self._poll_interval = 0.75
         self._capture_mode = "task"
         self._asr_options: dict = {}
 
@@ -121,7 +128,7 @@ class ClipboardWatcher:
         asr_fallback_enabled: bool | None = None,
         ai_model: str | None = None,
         use_cache: bool = True,
-        poll_interval: float = 2.5,
+        poll_interval: float = 0.75,
         capture_mode: str = "task",
         skip_current_clipboard: bool = False,
     ) -> dict:
@@ -138,7 +145,9 @@ class ClipboardWatcher:
             }
             self._use_cache = use_cache
             self._ai_model = ai_model
-            self._poll_interval = max(1.0, min(float(poll_interval), 10.0))
+            # Clipboard changes are tiny local reads.  A sub-second poll keeps
+            # a copied share link responsive while still avoiding a busy loop.
+            self._poll_interval = max(0.5, min(float(poll_interval), 10.0))
             self._capture_mode = capture_mode if capture_mode in {"inbox", "task"} else "task"
             self._last_error = None
             if self._thread and self._thread.is_alive():

@@ -320,6 +320,13 @@
                 <el-button size="small" :loading="openclawScanning" @click="emit('start-openclaw')">
                   {{ openclawRunning ? '诊断' : '启动' }}
                 </el-button>
+                <el-button
+                  v-if="openclawMcpRepairAvailable"
+                  size="small"
+                  :loading="openclawScanning"
+                  :disabled="openclawScanning"
+                  @click="emit('repair-openclaw-mcp')"
+                >修复 MCP</el-button>
               </div>
               <div class="settings-openclaw-path" aria-label="微信链接自动处理连接状态">
                 <span v-for="item in openclawConnectionItems" :key="item.key" class="settings-openclaw-path-item">
@@ -562,6 +569,7 @@ const {
   openclawScanning,
   openclawStatusText,
   openclawConnectionItems,
+  openclawMcpRepairAvailable,
   openclawStatusTone,
   wechatAccounts,
   wechatSubscriptions,
@@ -622,6 +630,7 @@ const {
   openclawScanning: Boolean,
   openclawStatusText: { type: String, default: '' },
   openclawConnectionItems: { type: Array, default: () => [] },
+  openclawMcpRepairAvailable: Boolean,
   openclawStatusTone: { type: String, default: 'is-warning' },
   wechatAccounts: { type: Array, default: () => [] },
   wechatSubscriptions: { type: Array, default: () => [] },
@@ -706,6 +715,7 @@ const emit = defineEmits([
   'choose-folder-import',
   'toggle-folder-import',
   'start-openclaw',
+  'repair-openclaw-mcp',
   'load-wechat',
   'start-wechat-qr',
   'reauthorize-account',

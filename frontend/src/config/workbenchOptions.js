@@ -98,7 +98,6 @@ export const promptTaskOptions = [
 
 export const ribbonItems = [
   { view: 'library', label: '资源管理器', icon: 'folder' },
-  { view: 'knowledge', label: '知识问答', icon: 'knowledge' },
   { view: 'prompts', label: '提示词', icon: 'prompt' },
   { view: 'wechat', label: '公众号管理', icon: 'wechat' },
   { view: 'campus', label: '网页管理', icon: 'campus' },

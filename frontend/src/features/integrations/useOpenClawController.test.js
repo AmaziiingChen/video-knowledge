@@ -51,3 +51,37 @@ test('initial and forced status reads keep the existing API contract', async () 
   assert.equal(controller.openclawRunning.value, false)
   assert.equal(controller.openclawStatusText.value, 'Gateway 未响应')
 })
+
+test('repairs only the KnowledgeHub MCP entry through the local API and refreshes its status', async () => {
+  const notifications = []
+  const calls = []
+  const controller = useOpenClawController({
+    apiBase: 'http://api.test',
+    notify: {
+      success: (message) => notifications.push(['success', message]),
+      error: (message) => notifications.push(['error', message]),
+      warning() {},
+    },
+    request: {
+      get: async () => ({ data: {} }),
+      post: async (...args) => {
+        calls.push(args)
+        return {
+          data: {
+            state: 'running',
+            detail: 'Gateway 与本地 RPC 已连接',
+            installed: true,
+            gateway_running: true,
+            mcp: { configured: true, detail: 'KnowledgeHub MCP 已就绪' },
+          }
+        }
+      },
+    },
+  })
+
+  await controller.repairOpenClawMcp()
+
+  assert.deepEqual(calls, [['http://api.test/openclaw-gateway/repair-mcp', {}, { timeout: 45000 }]])
+  assert.equal(controller.openclawMcpRepairAvailable.value, false)
+  assert.deepEqual(notifications, [['success', 'KnowledgeHub MCP 已修复并完成自检']])
+})

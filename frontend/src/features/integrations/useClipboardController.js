@@ -43,7 +43,7 @@ export function useClipboardController({
         ...asrRequestOptions(),
         ...aiRequestOptions(),
         use_cache: useCache.value,
-        poll_interval: 2.5,
+        poll_interval: 0.75,
         capture_mode: 'task'
       }, { timeout: 10000 })
       const freshIds = applyClipboardStatus(response.data)

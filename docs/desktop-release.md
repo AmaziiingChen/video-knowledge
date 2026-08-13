@@ -23,8 +23,9 @@ Release 页面自行下载并安装。关闭应用时无法接收系统级推送
 语音模型不随安装包分发。用户在“设置 → 本机处理”中按需下载所选模型；模型保存在用户本机数据目录，不进入应用包或 GitHub Release。
 
 安装包内的同一后端可执行文件也提供 `--mcp-stdio` 入口，不复制第二套
-Python/模型运行时。KnowledgeHub 不会自动改写 OpenClaw 配置；本机 bridge
-命令、短期 capability 文件路径和撤销语义见
+Python/模型运行时。KnowledgeHub 不会在启动时自动改写 OpenClaw 配置；用户可在
+“设置 → 微信链接自动处理”明确点击“修复 MCP”，由 OpenClaw CLI 仅更新
+`knowledgehub` 这一项并立即自检。本机 bridge 命令、短期 capability 文件路径和撤销语义见
 [OpenClaw 接入说明](openclaw-ingest.md#local-mcp-bridge-configuration)。
 
 ## 无 Developer ID 签名的 macOS 分发
