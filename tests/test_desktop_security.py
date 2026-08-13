@@ -61,7 +61,7 @@ def test_health_identifies_the_exact_desktop_backend_instance(monkeypatch):
     assert response.json() == {
         "status": "ok",
         "service": "knowledgehub-backend",
-        "version": "0.1.0",
+        "version": "0.1.1",
         "instance_token": "desktop-launch-token",
     }
 

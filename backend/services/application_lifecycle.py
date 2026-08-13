@@ -45,6 +45,10 @@ from services.wechat_subscription import (
 
 
 async def start_application() -> None:
+    # Resolve the durable telemetry preference before the first event. A fresh
+    # installation starts enabled; an explicit local opt-out remains disabled
+    # across restarts and manual application updates.
+    telemetry_service.bootstrap()
     telemetry_service.record("app_started")
     ensure_library_layout()
     try:

@@ -1,0 +1,8 @@
+{
+  "name": "knowledgehub-release-manifest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

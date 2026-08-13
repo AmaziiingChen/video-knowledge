@@ -87,17 +87,32 @@
         </section>
 
         <section v-show="settingsSection === 'privacy'" class="settings-page settings-form-page" aria-label="隐私与诊断">
-          <div class="settings-group">
+          <div class="settings-group" :aria-busy="telemetryStatusLoading || telemetrySaving">
             <div class="settings-row">
               <div class="settings-row-copy">
-                <h3>发送匿名使用数据</h3>
-                <p>仅在你允许后记录 17 个固定检查点的结果，并低频发送到 Cloudflare。不会包含文章、视频、OCR 文本、搜索词、路径、链接、账号或密钥；匿名数据最多保留 3 个月。事件范围变更时会再次告知。</p>
+                <h3>发送去标识使用诊断</h3>
+                <p>新安装默认开启，低频发送 17 个固定检查点到 Cloudflare。不会包含文章、视频、OCR 文本、搜索词、路径、链接、账号、密钥或错误原文；数据最多保留 3 个月。事件范围或用途变更时会再次告知。</p>
               </div>
               <div class="settings-row-control settings-switch-control">
-                <el-switch v-model="telemetryEnabled" :loading="telemetrySaving" aria-label="发送匿名使用数据" @change="saveTelemetry" />
+                <el-switch
+                  v-model="telemetryEnabled"
+                  :loading="telemetryStatusLoading || telemetrySaving"
+                  :disabled="!telemetryStatusLoaded || telemetryStatusLoading || telemetrySaving"
+                  aria-label="发送去标识使用诊断"
+                  aria-describedby="telemetry-status-note"
+                  @change="saveTelemetry"
+                />
               </div>
             </div>
-            <p class="settings-group-note">本机待发送：{{ telemetryPendingEvents }} 条。关闭后会删除本机待发送事件；已发送的匿名数据将在保留期结束后删除。</p>
+            <p id="telemetry-status-note" class="settings-group-note" role="status" aria-live="polite">
+              <template v-if="telemetryStatusLoading">正在读取当前诊断状态…</template>
+              <template v-else-if="telemetryStatusError">
+                {{ telemetryStatusError }}
+                <el-button link size="small" @click="loadTelemetryStatus">重试</el-button>
+              </template>
+              <template v-else-if="telemetryStatusLoaded">本机待发送：{{ telemetryPendingEvents }} 条。关闭会删除本机队列和随机安装标识，只保留“不发送”的本机偏好；已发送数据将在保留期结束后删除。</template>
+              <template v-else>尚未读取当前诊断状态。</template>
+            </p>
           </div>
         </section>
 
@@ -496,6 +511,7 @@ import { ElMessage } from 'element-plus'
 import { IconX } from './macosSymbolComponents.js'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
 import TextModelProviderSettings from '../features/settings/TextModelProviderSettings.vue'
+import { useTelemetrySettingsController } from '../features/telemetry/useTelemetrySettingsController.js'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import { API_BASE as API } from '../utils/localApiAuth.js'
 import SvgMaskIcon from './SvgMaskIcon.vue'
@@ -782,14 +798,17 @@ function ensureTextModelPricing() {
 watch([selectedTextModelName, deepseekPricing], ensureTextModelPricing, { immediate: true })
 const FAVORITE_API = `${API}/favorite-sources`
 const XIAOHONGSHU_COOKIE_API = `${API}/xiaohongshu-cookie`
-const TELEMETRY_API = `${API}/telemetry`
 const EMBEDDING_SECRET_REVEAL_API = `${API}/llm-settings/campus-embedding/reveal`
 const PADDLE_OCR_SECRET_REVEAL_API = `${API}/paddle-ocr-settings/reveal`
 const VISUAL_MODEL_SECRET_REVEAL_API = `${API}/wechat-publishing/cover-settings/reveal`
-const telemetryEnabled = ref(false)
-const telemetryPendingEvents = ref(0)
-const telemetrySaving = ref(false)
-const telemetryNoticeVersion = ref('')
+const {
+  telemetryEnabled, telemetryPendingEvents, telemetrySaving,
+  telemetryStatusLoading, telemetryStatusLoaded, telemetryStatusError,
+  loadTelemetryStatus, saveTelemetry,
+} = useTelemetrySettingsController({
+  notifySuccess: (message) => ElMessage.success(message),
+  notifyError: (message) => ElMessage.error(message),
+})
 const favoriteSources = ref([])
 const favoriteSourcesLoading = ref(false)
 const favoriteBusyId = ref('')
@@ -1131,35 +1150,6 @@ async function updateXiaohongshuFavorite(changes) {
   }
 }
 
-async function loadTelemetryStatus() {
-  try {
-    const response = await axios.get(TELEMETRY_API, { timeout: 5000 })
-    telemetryEnabled.value = Boolean(response.data?.enabled)
-    telemetryPendingEvents.value = Number(response.data?.pending_events || 0)
-    telemetryNoticeVersion.value = String(response.data?.privacy_notice_version || '')
-  } catch {
-    // The settings dialog remains usable if an older backend lacks telemetry.
-  }
-}
-
-async function saveTelemetry(enabled) {
-  telemetrySaving.value = true
-  try {
-    const response = await axios.put(TELEMETRY_API, {
-      enabled: Boolean(enabled),
-      privacy_notice_version: Boolean(enabled) ? telemetryNoticeVersion.value : '',
-    }, { timeout: 5000 })
-    telemetryEnabled.value = Boolean(response.data?.enabled)
-    telemetryPendingEvents.value = Number(response.data?.pending_events || 0)
-    ElMessage.success(telemetryEnabled.value ? '已开启匿名使用数据' : '已关闭并清除本机遥测数据')
-  } catch {
-    telemetryEnabled.value = !Boolean(enabled)
-    ElMessage.error('遥测设置保存失败')
-  } finally {
-    telemetrySaving.value = false
-  }
-}
-
 async function enableDouyinFavorites() {
   const current = douyinFavoriteSource.value
   if (current) return syncFavorite(current)
@@ -1288,7 +1278,7 @@ async function deleteFavorite(source) {
 watch(modelValue, (opened) => {
   if (opened) {
     loadXiaohongshuCookieStatus()
-    loadTelemetryStatus()
+    void loadTelemetryStatus()
   }
 })
 

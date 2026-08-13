@@ -1,5 +1,9 @@
 const SCHEMA_VERSION = 1
-const PRIVACY_NOTICE_VERSION = '2026-08-telemetry-v2'
+const CURRENT_PRIVACY_NOTICE_VERSION = '2026-08-telemetry-v3'
+const ACCEPTED_PRIVACY_NOTICE_VERSIONS = new Set([
+  '2026-08-telemetry-v2',
+  CURRENT_PRIVACY_NOTICE_VERSION,
+])
 const MAX_EVENTS_PER_REQUEST = 100
 const MAX_BODY_BYTES = 256 * 1024
 const MAX_EVENT_AGE_MS = 16 * 24 * 60 * 60 * 1000
@@ -68,9 +72,9 @@ function parsedOccurredAt(value, nowMs) {
   return timestamp
 }
 
-function validEvent(event, nowMs) {
+function validEvent(event, nowMs, noticeVersion) {
   if (!hasExactKeys(event, EVENT_FIELDS_REQUIRED)) return false
-  if (event.schema_version !== SCHEMA_VERSION || event.privacy_notice_version !== PRIVACY_NOTICE_VERSION) return false
+  if (event.schema_version !== SCHEMA_VERSION || event.privacy_notice_version !== noticeVersion) return false
   if (!validUuid(event.event_id) || !Object.hasOwn(EVENT_FIELDS, event.event_name)) return false
   if (parsedOccurredAt(event.occurred_at, nowMs) === null) return false
   if (typeof event.app_version !== 'string' || !/^[0-9A-Za-z._-]{1,40}$/.test(event.app_version)) return false
@@ -132,9 +136,12 @@ async function importHmacKey(secret) {
   return crypto.subtle.importKey('raw', bytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
 }
 
-async function hmacIndex(key, purpose, month, installationId) {
-  const message = new TextEncoder().encode(`${purpose}:${month}:${installationId}`)
-  const signature = await crypto.subtle.sign('HMAC', key, message)
+async function hmacIndex(key, purpose, noticeVersion, month, installationId) {
+  const message = noticeVersion === '2026-08-telemetry-v2'
+    ? `${purpose}:${month}:${installationId}`
+    : `${purpose}:${noticeVersion}:${month}:${installationId}`
+  const encoded = new TextEncoder().encode(message)
+  const signature = await crypto.subtle.sign('HMAC', key, encoded)
   return [...new Uint8Array(signature)].slice(0, 12).map((value) => value.toString(16).padStart(2, '0')).join('')
 }
 
@@ -188,12 +195,12 @@ export async function handleTelemetryRequest(request, env) {
   if (
     !hasExactKeys(payload, BATCH_FIELDS)
     || payload.schema_version !== SCHEMA_VERSION
-    || payload.privacy_notice_version !== PRIVACY_NOTICE_VERSION
+    || !ACCEPTED_PRIVACY_NOTICE_VERSIONS.has(payload.privacy_notice_version)
     || !validUuid(payload.installation_id)
     || !Array.isArray(payload.events)
     || !payload.events.length
     || payload.events.length > MAX_EVENTS_PER_REQUEST
-    || !payload.events.every((event) => validEvent(event, nowMs))
+    || !payload.events.every((event) => validEvent(event, nowMs, payload.privacy_notice_version))
   ) return json(400, { error: 'invalid_payload' })
 
   let hmacKey
@@ -207,7 +214,13 @@ export async function handleTelemetryRequest(request, env) {
   const currentMonth = eventMonth(nowMs)
   let rateKey
   try {
-    rateKey = await hmacIndex(hmacKey, 'rate', currentMonth, payload.installation_id)
+    rateKey = await hmacIndex(
+      hmacKey,
+      'rate',
+      payload.privacy_notice_version,
+      currentMonth,
+      payload.installation_id,
+    )
   } catch {
     return json(503, { error: 'collector_unavailable' })
   }
@@ -221,7 +234,13 @@ export async function handleTelemetryRequest(request, env) {
       const timestampMs = parsedOccurredAt(event.occurred_at, nowMs)
       const month = eventMonth(timestampMs)
       if (!indexes.has(month)) {
-        const digest = await hmacIndex(hmacKey, 'analytics', month, payload.installation_id)
+        const digest = await hmacIndex(
+          hmacKey,
+          'analytics',
+          payload.privacy_notice_version,
+          month,
+          payload.installation_id,
+        )
         indexes.set(month, `${month}:${digest}`)
       }
       env.TELEMETRY.writeDataPoint(analyticsPoint(event, indexes.get(month), timestampMs))

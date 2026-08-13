@@ -4,17 +4,18 @@ import { handleTelemetryRequest } from './collector.js'
 
 const INSTALLATION_ID = '2ab1d7b9-5481-4f47-8ba5-94767a8b1be9'
 const EVENT_ID = '66195774-659b-4c7e-9bd5-bebf8021e6f5'
-const NOTICE_VERSION = '2026-08-telemetry-v2'
+const NOTICE_VERSION = '2026-08-telemetry-v3'
+const LEGACY_NOTICE_VERSION = '2026-08-telemetry-v2'
 const MAX_BODY_BYTES = 256 * 1024
 
-function payloadFor(eventName = 'workspace_opened', properties = { view: 'library' }) {
+function payloadFor(eventName = 'workspace_opened', properties = { view: 'library' }, noticeVersion = NOTICE_VERSION) {
   return {
     schema_version: 1,
-    privacy_notice_version: NOTICE_VERSION,
+    privacy_notice_version: noticeVersion,
     installation_id: INSTALLATION_ID,
     events: [{
       schema_version: 1,
-      privacy_notice_version: NOTICE_VERSION,
+      privacy_notice_version: noticeVersion,
       event_id: EVENT_ID,
       event_name: eventName,
       occurred_at: new Date().toISOString(),
@@ -79,6 +80,43 @@ test('accepts the exact versioned schema and writes queryable Analytics Engine s
   assert.deepEqual(harness.globalKeys, ['v1-events'])
   assert.equal(harness.installationKeys.length, 1)
   assert.equal(harness.installationKeys[0].includes(INSTALLATION_ID), false)
+})
+
+test('preserves the v2 HMAC vectors while isolating v3 rate and Analytics indexes', async () => {
+  const fixedNow = '2026-08-13T09:20:00.000Z'
+  const originalNow = Date.now
+  const fixedPayloadFor = (noticeVersion = NOTICE_VERSION) => {
+    const value = payloadFor('workspace_opened', { view: 'library' }, noticeVersion)
+    value.events[0].occurred_at = fixedNow
+    return value
+  }
+  Date.now = () => Date.parse(fixedNow)
+
+  try {
+    const currentHarness = environment()
+    const legacyHarness = environment()
+    const currentResponse = await handleTelemetryRequest(request(fixedPayloadFor()), currentHarness.env)
+    const legacyResponse = await handleTelemetryRequest(
+      request(fixedPayloadFor(LEGACY_NOTICE_VERSION)),
+      legacyHarness.env,
+    )
+
+    assert.equal(currentResponse.status, 202)
+    assert.equal(legacyResponse.status, 202)
+    assert.equal(legacyHarness.writes[0].blobs[3], LEGACY_NOTICE_VERSION)
+    assert.deepEqual(legacyHarness.installationKeys, ['b9c45172049af82de487a015'])
+    assert.equal(legacyHarness.writes[0].indexes[0], '2026-08:1ae9faf2442e1e3dea61a640')
+    assert.deepEqual(currentHarness.installationKeys, ['d1c14312051d643ba64cb3ef'])
+    assert.equal(currentHarness.writes[0].indexes[0], '2026-08:f904771f941bcac7b0da9ca0')
+
+    const mismatched = fixedPayloadFor()
+    mismatched.events[0].privacy_notice_version = LEGACY_NOTICE_VERSION
+    const rejectedHarness = environment()
+    assert.equal((await handleTelemetryRequest(request(mismatched), rejectedHarness.env)).status, 400)
+    assert.deepEqual(rejectedHarness.writes, [])
+  } finally {
+    Date.now = originalNow
+  }
 })
 
 test('accepts every catalog event only with its exact enum properties', async () => {

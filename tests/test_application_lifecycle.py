@@ -29,6 +29,7 @@ def _patch_lifecycle_dependencies(monkeypatch):
     ):
         monkeypatch.setattr(application_lifecycle, name, Mock())
     monkeypatch.setattr(application_lifecycle, "connect", lambda: nullcontext(Mock()))
+    monkeypatch.setattr(application_lifecycle.telemetry_service, "bootstrap", Mock())
     monkeypatch.setattr(application_lifecycle.telemetry_service, "record", Mock())
     monkeypatch.setattr(application_lifecycle.telemetry_service, "flush", Mock())
     monkeypatch.setattr(application_lifecycle, "telemetry_uploader", Mock())
@@ -73,6 +74,18 @@ def test_application_lifecycle_resumes_pending_article_preparation_once(monkeypa
     application_lifecycle.start_article_source_preparation.assert_called_once_with()
     application_lifecycle.enqueue_pending_article_preparation.assert_called_once_with()
     application_lifecycle.telemetry_uploader.start.assert_called_once_with()
+
+
+def test_application_lifecycle_bootstraps_telemetry_before_the_first_event_and_database(monkeypatch):
+    _patch_lifecycle_dependencies(monkeypatch)
+    order = []
+    application_lifecycle.telemetry_service.bootstrap.side_effect = lambda: order.append("telemetry_bootstrap")
+    application_lifecycle.telemetry_service.record.side_effect = lambda *_args: order.append("app_started")
+    application_lifecycle.initialize_database.side_effect = lambda: order.append("database")
+
+    asyncio.run(application_lifecycle.start_application())
+
+    assert order[:3] == ["telemetry_bootstrap", "app_started", "database"]
 
 
 def test_application_lifecycle_stops_article_preparation_after_producers(monkeypatch):

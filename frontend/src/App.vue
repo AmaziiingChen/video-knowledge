@@ -22,8 +22,8 @@
     <TelemetryConsentNotice
       v-if="telemetryNoticeVisible"
       :saving="telemetryConsentSaving"
-      @allow="enableTelemetryFromNotice"
-      @dismiss="dismissTelemetryNotice"
+      @acknowledge="acknowledgeTelemetryNotice"
+      @disable="disableTelemetryFromNotice"
       @open-privacy="openPrivacySettings"
     />
 
@@ -834,6 +834,8 @@ import PanelToggleIcon from './components/PanelToggleIcon.vue'
 import StatusBreadcrumb from './components/StatusBreadcrumb.vue'
 import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
 import TelemetryConsentNotice from './components/TelemetryConsentNotice.vue'
+import { createTelemetryNoticeController } from './features/telemetry/telemetryNoticeController.js'
+import { assertTelemetryEnabledState } from './features/telemetry/telemetryNoticeState.js'
 import appIconUrl from '../build/icon.svg?url'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
@@ -1897,51 +1899,62 @@ function rememberTelemetryNotice(version) {
   }
 }
 
-function hasSeenTelemetryNotice(version) {
+function seenTelemetryNoticeVersion() {
   try {
-    return localStorage.getItem(TELEMETRY_NOTICE_STORAGE_KEY) === version
+    return localStorage.getItem(TELEMETRY_NOTICE_STORAGE_KEY) || ''
   } catch {
-    return false
+    return ''
   }
 }
 
-async function loadTelemetryNotice() {
-  try {
-    const response = await axios.get(`${API}/telemetry`, { timeout: 5000 })
-    const status = response.data || {}
-    const version = String(status.privacy_notice_version || '')
+async function requestTelemetryDisabled() {
+  const response = await axios.put(
+    `${API}/telemetry`,
+    { enabled: false, privacy_notice_version: '' },
+    { timeout: 5000 },
+  )
+  return assertTelemetryEnabledState(response.data || {}, false)
+}
+
+const telemetryNoticeController = createTelemetryNoticeController({
+  fetchStatus: async () => {
+    const response = await axios.get(`${API}/telemetry`, { timeout: 3000 })
+    return response.data || {}
+  },
+  disableTelemetry: requestTelemetryDisabled,
+  readSeenVersion: seenTelemetryNoticeVersion,
+  rememberVersion: rememberTelemetryNotice,
+  updateNotice: ({ version, visible }) => {
     telemetryNoticeVersion.value = version
-    telemetryNoticeVisible.value = Boolean(version && status.requires_consent && !hasSeenTelemetryNotice(version))
-  } catch {
-    // A release paired with an older backend remains fully usable and simply
-    // does not display a notice it cannot honour.
-  }
-}
+    telemetryNoticeVisible.value = visible
+  },
+})
 
-async function enableTelemetryFromNotice() {
-  const version = telemetryNoticeVersion.value
-  if (!version) return
-  telemetryConsentSaving.value = true
-  try {
-    await axios.put(`${API}/telemetry`, { enabled: true, privacy_notice_version: version }, { timeout: 5000 })
-    rememberTelemetryNotice(version)
-    telemetryNoticeVisible.value = false
-    ElMessage.success('已开启匿名诊断数据')
-  } catch {
-    ElMessage.error('无法保存匿名诊断数据设置')
-  } finally {
-    telemetryConsentSaving.value = false
-  }
-}
-
-function dismissTelemetryNotice() {
+function acknowledgeTelemetryNotice() {
+  telemetryNoticeController.stop()
   const version = telemetryNoticeVersion.value
   if (version) rememberTelemetryNotice(version)
   telemetryNoticeVisible.value = false
 }
 
+async function disableTelemetryFromNotice() {
+  const version = telemetryNoticeVersion.value
+  telemetryConsentSaving.value = true
+  try {
+    await requestTelemetryDisabled()
+    telemetryNoticeController.stop()
+    if (version) rememberTelemetryNotice(version)
+    telemetryNoticeVisible.value = false
+    ElMessage.success('已关闭诊断并清除本机待发送数据')
+  } catch {
+    ElMessage.error('无法关闭使用诊断，请在设置中重试')
+  } finally {
+    telemetryConsentSaving.value = false
+  }
+}
+
 function openPrivacySettings() {
-  dismissTelemetryNotice()
+  acknowledgeTelemetryNotice()
   void openSettings('privacy')
 }
 
@@ -2657,10 +2670,11 @@ watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
 })
 
 onMounted(() => {
-  void loadTelemetryNotice()
+  void telemetryNoticeController.start()
 })
 
 onBeforeUnmount(() => {
+  telemetryNoticeController.stop()
   disposeWechatReportGenerationController()
   disposeWechatAccountController()
   disposeWechatCoverController()

@@ -36,7 +36,7 @@ async def application_lifespan(_app: FastAPI):
         await stop_application()
 
 
-app = FastAPI(title="KnowledgeHub Pipeline", version="0.1.0", lifespan=application_lifespan)
+app = FastAPI(title="KnowledgeHub Pipeline", version="0.1.1", lifespan=application_lifespan)
 
 
 @app.exception_handler(TaskPersistenceError)

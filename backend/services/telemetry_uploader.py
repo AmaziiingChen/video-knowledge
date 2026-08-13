@@ -65,11 +65,12 @@ def upload_once(*, collector_url: object | None = None, client: httpx.Client | N
     if not url:
         return "disabled"
     try:
-        payload = telemetry.upload_batch(limit=100)
+        snapshot = telemetry.upload_batch_snapshot(limit=100)
     except (OSError, sqlite3.Error):
         return "failed"
-    if not payload:
+    if not snapshot:
         return "empty"
+    generation, payload = snapshot
     events = payload["events"]
     if not isinstance(events, list):
         return "failed"
@@ -83,13 +84,19 @@ def upload_once(*, collector_url: object | None = None, client: httpx.Client | N
     )
     owns_client = client is None
     try:
-        response = active_client.post(url, json=payload, headers={"content-type": "application/json"})
-        response.raise_for_status()
-        result = response.json()
-        if response.status_code != 202 or not isinstance(result, dict) or int(result.get("accepted") or -1) != len(event_ids):
-            return "failed"
-        telemetry.acknowledge_uploaded_events(event_ids)
-        return "succeeded"
+        # The independent send gate lets records continue while guaranteeing
+        # that an explicit opt-out either wins before POST or waits for the
+        # already-started request before reporting that telemetry is disabled.
+        with telemetry.upload_send_permission(generation) as allowed:
+            if not allowed:
+                return "empty"
+            response = active_client.post(url, json=payload, headers={"content-type": "application/json"})
+            response.raise_for_status()
+            result = response.json()
+            if response.status_code != 202 or not isinstance(result, dict) or int(result.get("accepted") or -1) != len(event_ids):
+                return "failed"
+            telemetry.acknowledge_uploaded_events(event_ids)
+            return "succeeded"
     except (httpx.HTTPError, OSError, sqlite3.Error, TypeError, ValueError):
         return "failed"
     finally:

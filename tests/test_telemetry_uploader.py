@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
+from threading import Event, Thread
 from unittest.mock import Mock
 
 import httpx
@@ -10,6 +12,25 @@ ALLOWED_HOSTS = frozenset({"telemetry.example.test"})
 COLLECTOR_URL = "https://telemetry.example.test/v1/events"
 OFFICIAL_HOST = "knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev"
 OFFICIAL_URL = f"https://{OFFICIAL_HOST}/v1/events"
+
+
+@contextmanager
+def _send_allowed(_generation: int):
+    yield True
+
+
+def _reset_service_runtime(service) -> None:
+    with service._lock:
+        if service._flush_timer is not None:
+            service._flush_timer.cancel()
+        service._flush_timer = None
+        service._flush_timer_path = None
+        service._pending_events.clear()
+        service._pending_events_path = None
+        service._enabled_cache = None
+        service._enabled_cache_path = None
+        service._preference_cache = None
+        service._upload_generation = 0
 
 
 class _Response:
@@ -78,7 +99,8 @@ def test_upload_success_acknowledges_only_the_sent_event_ids(monkeypatch):
     }
     acknowledged: list[list[str]] = []
     monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
-    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_batch", lambda limit: batch)
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_batch_snapshot", lambda limit: (7, batch))
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_send_permission", _send_allowed)
     monkeypatch.setattr(
         telemetry_uploader.telemetry,
         "acknowledge_uploaded_events",
@@ -95,9 +117,10 @@ def test_upload_failure_keeps_the_local_queue(monkeypatch):
     monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
     monkeypatch.setattr(
         telemetry_uploader.telemetry,
-        "upload_batch",
-        lambda limit: {"events": [{"event_id": "keep-me"}]},
+        "upload_batch_snapshot",
+        lambda limit: (7, {"events": [{"event_id": "keep-me"}]}),
     )
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_send_permission", _send_allowed)
     acknowledge = Mock()
     monkeypatch.setattr(telemetry_uploader.telemetry, "acknowledge_uploaded_events", acknowledge)
 
@@ -115,7 +138,7 @@ def test_local_queue_failure_enters_retry_without_creating_a_request(monkeypatch
     monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
     monkeypatch.setattr(
         telemetry_uploader.telemetry,
-        "upload_batch",
+        "upload_batch_snapshot",
         Mock(side_effect=sqlite3.OperationalError("database is locked")),
     )
 
@@ -126,11 +149,94 @@ def test_local_queue_failure_enters_retry_without_creating_a_request(monkeypatch
 def test_empty_or_disabled_upload_never_creates_a_request(monkeypatch):
     client = _Client(_Response(payload={"accepted": 0}))
     monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
-    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_batch", lambda limit: None)
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_batch_snapshot", lambda limit: None)
 
     assert telemetry_uploader.upload_once(collector_url="", client=client) == "disabled"
     assert telemetry_uploader.upload_once(collector_url=COLLECTOR_URL, client=client) == "empty"
     assert client.calls == []
+
+
+def test_explicit_opt_out_keeps_the_real_uploader_inert_across_restart(tmp_path, monkeypatch):
+    service = telemetry_uploader.telemetry
+    monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
+    monkeypatch.setattr(service.settings, "data_dir", tmp_path)
+    _reset_service_runtime(service)
+    assert service.status()["enabled"] is True
+    service.set_enabled(False)
+    with service._lock:
+        service._enabled_cache = None
+        service._enabled_cache_path = None
+        service._preference_cache = None
+
+    client = _Client(_Response(payload={"accepted": 1}))
+    assert telemetry_uploader.upload_once(collector_url=COLLECTOR_URL, client=client) == "empty"
+    assert client.calls == []
+
+
+def test_opt_out_after_batch_snapshot_prevents_the_network_request(tmp_path, monkeypatch):
+    service = telemetry_uploader.telemetry
+    monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
+    monkeypatch.setattr(service.settings, "data_dir", tmp_path)
+    _reset_service_runtime(service)
+    assert service.status()["enabled"] is True
+    assert service.record("app_started") is True
+    service.flush()
+    original_snapshot = service.upload_batch_snapshot
+
+    def snapshot_then_disable(limit: int):
+        snapshot = original_snapshot(limit)
+        service.set_enabled(False)
+        return snapshot
+
+    monkeypatch.setattr(service, "upload_batch_snapshot", snapshot_then_disable)
+    client = _Client(_Response(payload={"accepted": 1}))
+
+    assert telemetry_uploader.upload_once(collector_url=COLLECTOR_URL, client=client) == "empty"
+    assert client.calls == []
+    assert (tmp_path / "telemetry-preference").exists()
+    assert not (tmp_path / "telemetry.sqlite").exists()
+
+
+def test_opt_out_waits_for_an_already_started_request_before_returning(tmp_path, monkeypatch):
+    service = telemetry_uploader.telemetry
+    monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
+    monkeypatch.setattr(service.settings, "data_dir", tmp_path)
+    _reset_service_runtime(service)
+    assert service.status()["enabled"] is True
+    assert service.record("app_started") is True
+    service.flush()
+    post_started = Event()
+    release_post = Event()
+    disable_finished = Event()
+    upload_results: list[str] = []
+
+    class BlockingClient(_Client):
+        def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]) -> _Response:
+            post_started.set()
+            assert release_post.wait(2)
+            return super().post(url, json=json, headers=headers)
+
+    client = BlockingClient(_Response(payload={"accepted": 1}))
+    upload_thread = Thread(
+        target=lambda: upload_results.append(
+            telemetry_uploader.upload_once(collector_url=COLLECTOR_URL, client=client)
+        )
+    )
+    upload_thread.start()
+    assert post_started.wait(2)
+
+    disable_thread = Thread(target=lambda: (service.set_enabled(False), disable_finished.set()))
+    disable_thread.start()
+    assert disable_finished.wait(0.05) is False
+    release_post.set()
+    upload_thread.join(2)
+    disable_thread.join(2)
+
+    assert upload_results == ["succeeded"]
+    assert disable_finished.is_set()
+    assert len(client.calls) == 1
+    assert (tmp_path / "telemetry-preference").exists()
+    assert not (tmp_path / "telemetry.sqlite").exists()
 
 
 def test_environment_url_cannot_enable_an_unreviewed_destination(monkeypatch):
@@ -153,7 +259,8 @@ def test_default_client_disables_proxies_and_redirects(monkeypatch):
     client = _Client(_Response(payload={"accepted": 1}))
     client_options: list[dict[str, object]] = []
     monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
-    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_batch", lambda limit: batch)
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_batch_snapshot", lambda limit: (7, batch))
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_send_permission", _send_allowed)
     monkeypatch.setattr(telemetry_uploader.telemetry, "acknowledge_uploaded_events", lambda event_ids: 1)
     monkeypatch.setattr(
         telemetry_uploader.httpx,

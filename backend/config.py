@@ -168,14 +168,18 @@ class Settings(BaseSettings):
     # The WeChat mini-program visual collector is not ready for public
     # distribution. Builds must explicitly enable it.
     miniprogram_forum_capture_enabled: bool = False
-    # Manual updates only: clients read a strict public manifest and open its
-    # download page in the browser. Empty values disable update checks.
-    app_version: str = "0.1.0"
-    release_manifest_url: str = ""
-    download_page_url: str = ""
+    # Manual updates only: clients read the fixed public manifest and open its
+    # official GitHub Release page in the browser. The app never downloads or
+    # installs an update in the background.
+    app_version: str = "0.1.1"
+    release_manifest_url: str = (
+        "https://knowledgehub-release-manifest.knowledgehub4chen.workers.dev/v1/manifest.json"
+    )
+    download_page_url: str = "https://github.com/AmaziiingChen/video-knowledge/releases"
     # The public collector is compiled as an exact-host allowlist in
-    # telemetry_uploader. The background loop may exist before consent, but it
-    # cannot build a batch or create a network request until consent is active.
+    # telemetry_uploader. New installations use the fixed default-on catalog;
+    # an explicit local opt-out leaves the loop inert without changing product
+    # behavior or allowing an alternate destination.
     telemetry_collector_url: str = (
         "https://knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev/v1/events"
     )

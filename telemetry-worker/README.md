@@ -1,18 +1,23 @@
 # KnowledgeHub telemetry collector
 
-This Cloudflare Worker is the **opt-in** KnowledgeHub beta diagnostics
+This Cloudflare Worker is the KnowledgeHub beta diagnostics
 collector. Its free public endpoint is:
 
 `https://knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev/v1/events`
 
-The desktop client is offline by default. It contacts this endpoint only after
-the user accepts privacy notice `2026-08-telemetry-v2`.
+New desktop installations enable the fixed diagnostic catalog by default and
+display a non-modal notice under `2026-08-telemetry-v3`; users can disable it
+at any time. During the transition the Worker accepts exact, internally
+consistent v2 and v3 envelopes so an older pre-release client does not enter a
+permanent retry loop.
 
-Deployment status: manually deployed on 2026-08-13 to the endpoint above. The
-deployed version has the Analytics Engine, two rate-limit and HMAC secret
-bindings; preview URLs and persistent Worker logs are disabled. Remote smoke
-tests confirmed 404/400/413/202 boundaries and read back the accepted test point
-from `knowledgehub_telemetry`.
+Deployment status: version 4 of this dual v2/v3 transition collector was
+manually deployed on 2026-08-13 with 100% traffic. Remote configuration readback
+confirmed the existing HMAC secret, Analytics Engine binding and both rate-limit
+namespaces were preserved; preview URLs and persistent invocation logs remain
+disabled. Remote HTTP smoke tests passed for 404, strict-schema 400, oversized
+413, v2 202 and v3 202. A fresh Analytics Engine row readback for both accepted
+synthetic events remains required before releasing the desktop v3 client.
 
 ## Data boundary
 
@@ -22,18 +27,22 @@ extra fields; properties must exactly match fixed enumerations. Requests are
 limited to 256 KiB and 100 events.
 
 Analytics Engine receives 15 fixed string slots, three numeric slots and one
-monthly HMAC index. It does not receive the raw installation UUID, properties
-JSON, content, search terms, URLs, paths, account identifiers, error text,
-credentials or logs. Persistent Worker invocation logs are explicitly disabled
+monthly HMAC sampling index. The Worker uses the raw installation UUID only in
+memory to derive purpose-separated monthly identifiers for installation rate
+limiting and Analytics Engine sampling; v3 also separates them by notice
+version. The raw UUID, properties JSON, content, search terms, URLs, paths,
+account identifiers, error text, credentials and logs are not written to
+Analytics Engine. Persistent Worker invocation logs are explicitly disabled
 because Cloudflare otherwise records request and response metadata. Analytics
 Engine retains points for up to three months.
 
 The endpoint is public and accepts no trustworthy client credential: an
 open-source desktop app cannot safely embed one. Strict validation and two
-HMAC/IP-free Workers Rate Limiting bindings reduce accidental and abusive
-traffic, but Cloudflare rate limits are per PoP and eventually consistent.
-Treat the dataset as fallible beta diagnostics, never as identity, billing,
-security or individual-level evidence.
+IP-free Workers Rate Limiting bindings reduce accidental and abusive traffic:
+one uses a shared route key and one uses the monthly HMAC installation key.
+Cloudflare rate limits are per PoP and eventually consistent. Treat the dataset
+as fallible beta diagnostics, never as identity, billing, security or
+individual-level evidence.
 
 ## Deployment and redeployment
 
@@ -42,12 +51,19 @@ Deployment is manual and must not be added to GitHub Actions.
 1. Run `npm test`.
 2. Validate `wrangler.toml`. It deliberately enables `workers_dev`, disables
    preview URLs and disables persistent observability logs.
-3. Set `INSTALLATION_HMAC_KEY` as a Cloudflare secret with at least 32 random
-   bytes. Never commit, print or package it.
+3. On the first deployment, create `INSTALLATION_HMAC_KEY` as a Cloudflare
+   secret with at least 32 random bytes. Preserve that existing secret during
+   ordinary redeployments: rotating it breaks monthly Analytics index and
+   installation-rate continuity. Rotate only as an explicit security operation
+   that accepts and documents that discontinuity. Never commit, print or
+   package it.
 4. Deploy `src/collector.js` with the `knowledgehub_telemetry` Analytics Engine
    binding and both rate-limit bindings from `wrangler.toml`.
 5. Read the deployed settings back and verify preview URLs and invocation logs
-   remain disabled. Smoke-test valid, invalid-schema and oversized requests.
+   remain disabled. Smoke-test 404, invalid-schema, oversized, valid v2 and
+   valid v3 requests; then read both synthetic points back from Analytics Engine
+   and verify their notice versions and separated indexes before releasing the
+   desktop v3 client.
 
 The public collector URL is safe to keep in reviewed source. The HMAC secret
 and read-only Analytics query token are not. Query access must remain outside

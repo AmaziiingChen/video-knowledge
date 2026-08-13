@@ -1,12 +1,12 @@
 <template>
-  <aside class="telemetry-consent-notice" aria-label="隐私与诊断说明" role="status">
+  <aside class="telemetry-consent-notice" aria-label="隐私与诊断说明" role="status" :aria-busy="saving">
     <div class="telemetry-consent-copy">
-      <strong>帮助改进 KnowledgeHub</strong>
-      <p>如你允许，我们会通过 Cloudflare 发送匿名的启动、功能结果和处理阶段，最多保留 3 个月。不会发送资料内容、搜索词、链接、路径、账号或密钥。</p>
+      <strong>去标识使用诊断已开启</strong>
+      <p>KnowledgeHub 默认低频发送 17 个固定检查点到 Cloudflare，最多保留 3 个月。不会发送资料内容、搜索词、链接、路径、账号、密钥或错误原文，可随时关闭。</p>
     </div>
     <div class="telemetry-consent-actions">
-      <button class="telemetry-consent-allow" type="button" :disabled="saving" @click="$emit('allow')">允许匿名诊断数据</button>
-      <button type="button" :disabled="saving" @click="$emit('dismiss')">暂不发送</button>
+      <button class="telemetry-consent-primary" type="button" :disabled="saving" @click="$emit('acknowledge')">知道了</button>
+      <button type="button" :disabled="saving" @click="$emit('disable')">关闭并清除</button>
       <button type="button" :disabled="saving" @click="$emit('open-privacy')">查看说明</button>
     </div>
   </aside>
@@ -17,7 +17,7 @@ defineProps({
   saving: { type: Boolean, default: false },
 })
 
-defineEmits(['allow', 'dismiss', 'open-privacy'])
+defineEmits(['acknowledge', 'disable', 'open-privacy'])
 </script>
 
 <style scoped>
@@ -68,9 +68,9 @@ defineEmits(['allow', 'dismiss', 'open-privacy'])
 .telemetry-consent-actions button:focus-visible { box-shadow: inset 0 0 0 1px var(--vk-accent-strong); }
 .telemetry-consent-actions button:disabled { cursor: default; opacity: 0.48; }
 
-.telemetry-consent-actions .telemetry-consent-allow { background: var(--vk-action-bg); color: var(--vk-action-fg); }
-.telemetry-consent-actions .telemetry-consent-allow:hover,
-.telemetry-consent-actions .telemetry-consent-allow:focus-visible { background: var(--vk-action-bg); color: var(--vk-action-fg); }
+.telemetry-consent-actions .telemetry-consent-primary { background: var(--vk-action-bg); color: var(--vk-action-fg); }
+.telemetry-consent-actions .telemetry-consent-primary:hover,
+.telemetry-consent-actions .telemetry-consent-primary:focus-visible { background: var(--vk-action-bg); color: var(--vk-action-fg); }
 
 @media (max-width: 820px) {
   .telemetry-consent-notice { align-items: flex-start; flex-direction: column; }

@@ -543,7 +543,7 @@ data-integrity, ownership-conflict or test-isolation blocker.
   orchestration. Further report normalization or writing splits are deferred
   unless stabilization evidence proves that they block correctness, testing or
   release work.
-- [x] Close the consented telemetry upload boundary before enabling a network
+- [x] Close the fixed-schema telemetry upload boundary before enabling a network
   destination. The desktop uploader batches only the fixed local schema, accepts
   only an exact HTTPS host compiled into the same reviewed release, disables
   redirects and environment proxies, retains events after failures, deletes only
@@ -554,15 +554,26 @@ data-integrity, ownership-conflict or test-isolation blocker.
   for this boundary.
 - [x] Deploy and verify a beta Cloudflare collector on the free exact
   `knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev` hostname.
-  Notice v2 names Cloudflare and the three-month Analytics Engine retention;
-  the desktop remains opt-in. Preview URLs and persistent invocation logs are
-  disabled, the Worker accepts only the 17-event exact fixed schema with a 256 KiB body
-  ceiling, and two HMAC/IP-free Workers Rate Limiting bindings reduce public
-  endpoint abuse. The public URL is allowed in the package; HMAC and Analytics
-  query secrets remain out of the repository and DMG. Remote smoke verification
-  on 2026-08-13 confirmed route rejection, strict-schema rejection, the 256 KiB
-  boundary, a successful test write and Analytics Engine readback with only the
-  monthly HMAC index.
+  The initial opt-in v2 deployment names Cloudflare and the three-month
+  Analytics Engine retention. Preview URLs and persistent invocation logs are
+  disabled, the Worker accepts only the 17-event exact fixed schema with a
+  256 KiB body ceiling, and two IP-free Workers Rate Limiting bindings reduce
+  public endpoint abuse. The public URL is allowed in the package; HMAC and
+  Analytics query secrets remain out of the repository and DMG. Remote smoke
+  verification on 2026-08-13 confirmed route rejection, strict-schema
+  rejection, the 256 KiB boundary, a successful v2 test write and Analytics
+  Engine readback with only the monthly HMAC sampling index.
+- [x] Redeploy the dual v2/v3 transition collector while preserving the existing
+  HMAC secret, Analytics Engine binding and both rate-limit namespaces. Remote
+  configuration readback confirmed 100% version-4 traffic, disabled preview
+  URLs and no persistent invocation logs; 404, strict-schema 400, oversized
+  413, v2 202 and v3 202 responses passed on 2026-08-13.
+- [ ] Before releasing the default-on desktop v3 client, read both accepted
+  synthetic points back from Analytics Engine and confirm notice-version and
+  HMAC-index separation without storing the raw installation UUID. The current
+  authenticated API connector returned HTTP 200 for the SQL query but did not
+  expose the non-standard successful response body, so this evidence is not yet
+  claimed as complete.
 - [ ] Add transactional `event_id` idempotency only if duplicate-resistant raw
   event counts become necessary. The beta Analytics Engine path is explicitly
   at-least-once, so queries must deduplicate by `event_id` and account for

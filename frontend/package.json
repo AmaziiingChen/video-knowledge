@@ -3,7 +3,7 @@
   "description": "A local-first knowledge workspace for macOS.",
   "author": "AmaziiingChen",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
