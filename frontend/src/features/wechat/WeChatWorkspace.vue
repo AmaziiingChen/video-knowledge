@@ -10,10 +10,10 @@
           <header class="wechat-sheet-head">
             <div>
               <h3>授权账号</h3>
-              <p>登录态只保存在本机 Keychain，不写入内容库或处理日志。</p>
+              <p>{{ authorizationAvailable ? '登录态只保存在本机 Keychain，不写入内容库或处理日志。' : '受上游接口限制，新增授权与订阅暂不可用；已有公众号合集、分组和 RSS 保持可读。' }}</p>
             </div>
             <div class="wechat-connect-actions">
-              <el-button class="wechat-connect-button" size="small" :loading="qrStarting" @click="emit('start-qr')">
+              <el-button class="wechat-connect-button" size="small" :loading="qrStarting" :disabled="!authorizationAvailable" :title="authorizationUnavailableMessage" @click="emit('start-qr')">
                 扫码连接
               </el-button>
             </div>
@@ -44,15 +44,15 @@
                 </span>
               </button>
               <div class="wechat-account-actions">
-                <button v-if="account.status === 'requires_reauth'" class="wechat-account-action" type="button" @click="emit('reauthorize-account', account.id)">重新授权</button>
-                <button v-if="Number(account.subscription_count || 0) && selectedAccountId && selectedAccountId !== account.id" class="wechat-account-action" type="button" @click="requestSubscriptionTransfer(account)">迁移订阅</button>
+                <button v-if="account.status === 'requires_reauth'" class="wechat-account-action" type="button" :disabled="!authorizationAvailable" :title="authorizationUnavailableMessage" @click="emit('reauthorize-account', account.id)">重新授权</button>
+                <button v-if="Number(account.subscription_count || 0) && selectedAccountId && selectedAccountId !== account.id" class="wechat-account-action" type="button" :disabled="!authorizationAvailable" :title="authorizationUnavailableMessage" @click="requestSubscriptionTransfer(account)">迁移订阅</button>
                 <button class="wechat-remove-button" type="button" aria-label="移除授权账号" @click="requestAccountRemoval(account)">移除</button>
               </div>
             </article>
           </div>
           <div v-else class="wechat-empty-account">
             <span>还没有可用账号</span>
-            <small>先扫码连接，再开始订阅公众号。</small>
+            <small>{{ authorizationAvailable ? '先扫码连接，再开始订阅公众号。' : '新增授权目前不可用；已有资料和公众号合集不会受影响。' }}</small>
           </div>
 
           <details class="wechat-manual-disclosure">
@@ -66,6 +66,7 @@
                   autocomplete="off"
                   aria-label="账号显示名称"
                   placeholder="例如：运营号…"
+                  :disabled="!authorizationAvailable"
                   @update:model-value="emit('update:accountDisplayName', $event)"
                 />
               </label>
@@ -78,6 +79,7 @@
                   spellcheck="false"
                   aria-label="微信公众平台 token"
                   placeholder="粘贴 token…"
+                  :disabled="!authorizationAvailable"
                   @update:model-value="emit('update:manualToken', $event)"
                 />
               </label>
@@ -92,10 +94,11 @@
                   aria-label="微信公众平台 Cookie"
                   :rows="3"
                   placeholder="粘贴完整 Cookie…"
+                  :disabled="!authorizationAvailable"
                   @update:model-value="emit('update:manualCookie', $event)"
                 />
               </label>
-              <el-button class="wechat-manual-submit" size="small" :loading="manualConnecting" @click="emit('connect-manual')">
+              <el-button class="wechat-manual-submit" size="small" :loading="manualConnecting" :disabled="!authorizationAvailable" :title="authorizationUnavailableMessage" @click="emit('connect-manual')">
                 连接账号
               </el-button>
             </div>
@@ -387,6 +390,7 @@ import { requestDestructiveConfirmation } from '../../composables/useDestructive
 const props = defineProps({
   mode: { type: String, default: 'full' },
   embedded: { type: Boolean, default: false },
+  authorizationAvailable: { type: Boolean, default: true },
   loading: { type: Boolean, default: false },
   accounts: { type: Array, default: () => [] },
   subscriptions: { type: Array, default: () => [] },
@@ -420,6 +424,7 @@ const props = defineProps({
 })
 
 const selectedAccount = computed(() => props.accounts.find((account) => String(account.id) === String(props.selectedAccountId)) || null)
+const authorizationUnavailableMessage = '微信公众平台新增授权与订阅暂不可用，已有公众号合集仍可使用。'
 const selectedAccountRateLimited = computed(() => accountRateLimited(selectedAccount.value))
 const filterDraft = reactive({ name: '', subscription_id: '', selectors: '', text_patterns: '' })
 const groupDraft = ref('')

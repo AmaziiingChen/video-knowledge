@@ -80,6 +80,12 @@ def test_build_backend_uses_project_cache_and_excludes_optional_model_stacks(tmp
     assert command[command.index("--distpath") + 1] == str(output)
     assert command[command.index("--paths") + 1] == str(backend)
     assert command[command.index("--hidden-import") + 1] == "mcp_server"
+    hidden_imports = [command[index + 1] for index, value in enumerate(command) if value == "--hidden-import"]
+    assert hidden_imports == ["mcp_server", "mlx.core", "mlx.nn", "mlx_whisper"]
+    collected_binaries = [command[index + 1] for index, value in enumerate(command) if value == "--collect-binaries"]
+    collected_data = [command[index + 1] for index, value in enumerate(command) if value == "--collect-data"]
+    assert collected_binaries == ["mlx"]
+    assert collected_data == ["mlx", "mlx_whisper"]
     assert command[command.index("--add-data") + 1] == f"{native}{os.pathsep}native"
     assert command[command.index("--add-binary") + 1] == f"{helper}{os.pathsep}native_tools"
     excluded = [command[index + 1] for index, value in enumerate(command) if value == "--exclude-module"]

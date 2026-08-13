@@ -87,32 +87,13 @@
         </section>
 
         <section v-show="settingsSection === 'privacy'" class="settings-page settings-form-page" aria-label="隐私与诊断">
-          <div class="settings-group" :aria-busy="telemetryStatusLoading || telemetrySaving">
+          <div class="settings-group">
             <div class="settings-row">
               <div class="settings-row-copy">
-                <h3>发送去标识使用诊断</h3>
-                <p>新安装默认开启，低频发送 17 个固定检查点到 Cloudflare。不会包含文章、视频、OCR 文本、搜索词、路径、链接、账号、密钥或错误原文；数据最多保留 3 个月。事件范围或用途变更时会再次告知。</p>
-              </div>
-              <div class="settings-row-control settings-switch-control">
-                <el-switch
-                  v-model="telemetryEnabled"
-                  :loading="telemetryStatusLoading || telemetrySaving"
-                  :disabled="!telemetryStatusLoaded || telemetryStatusLoading || telemetrySaving"
-                  aria-label="发送去标识使用诊断"
-                  aria-describedby="telemetry-status-note"
-                  @change="saveTelemetry"
-                />
+                <h3>去标识使用诊断</h3>
+                <p>为改进软件体验，应用会低频收集 17 个固定的功能结果与处理阶段数据，并发送至 Cloudflare。不会包含文章、视频、OCR 文本、搜索词、路径、链接、账号、密钥或错误原文；数据最多保留 3 个月。事件范围或用途变更时会再次告知。</p>
               </div>
             </div>
-            <p id="telemetry-status-note" class="settings-group-note" role="status" aria-live="polite">
-              <template v-if="telemetryStatusLoading">正在读取当前诊断状态…</template>
-              <template v-else-if="telemetryStatusError">
-                {{ telemetryStatusError }}
-                <el-button link size="small" @click="loadTelemetryStatus">重试</el-button>
-              </template>
-              <template v-else-if="telemetryStatusLoaded">本机待发送：{{ telemetryPendingEvents }} 条。关闭会删除本机队列和随机安装标识，只保留“不发送”的本机偏好；已发送数据将在保留期结束后删除。</template>
-              <template v-else>尚未读取当前诊断状态。</template>
-            </p>
           </div>
         </section>
 
@@ -394,6 +375,7 @@
             :last-sync-summary="wechatLastSyncSummary"
             :publishing-settings="wechatPublishingSettings"
             :saving-publishing-settings="savingWechatPublishingSettings"
+            :authorization-available="false"
             @start-qr="emit('start-wechat-qr')"
             @reauthorize-account="emit('reauthorize-account', $event)"
             @connect-manual="emit('connect-wechat-manually')"
@@ -491,7 +473,7 @@
                 <span>登录窗口与主应用隔离；凭据仅保存在本机且不会展示。当前仅支持主动导入单篇图文，收藏、创作者同步与评论采集暂未开放。</span>
                 <div class="settings-platform-credential-buttons">
                   <el-button size="small" type="primary" round :loading="xiaohongshuAuthConnecting" :disabled="!platformAuthAvailable || !xiaohongshuSessionProbeAvailable" @click="connectXiaohongshuAuth">登录并连接</el-button>
-                  <el-button size="small" plain round :loading="xiaohongshuCookieState === 'loading'" :disabled="!xiaohongshuSessionProbeAvailable" @click="loadXiaohongshuCookieStatus(true)">检查可用性</el-button>
+                  <el-button size="small" plain round :loading="xiaohongshuCookieStatusLoading" :disabled="!xiaohongshuSessionProbeAvailable || xiaohongshuCookieStatusLoading" @click="loadXiaohongshuCookieStatus(true)">检查可用性</el-button>
                   <el-button v-if="xiaohongshuCookieConfigured && platformAuthAvailable" size="small" text class="settings-disconnect-button" :disabled="xiaohongshuAuthConnecting" @click="disconnectXiaohongshuAuth">断开</el-button>
                 </div>
               </div>
@@ -511,7 +493,6 @@ import { ElMessage } from 'element-plus'
 import { IconX } from './macosSymbolComponents.js'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
 import TextModelProviderSettings from '../features/settings/TextModelProviderSettings.vue'
-import { useTelemetrySettingsController } from '../features/telemetry/useTelemetrySettingsController.js'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import { API_BASE as API } from '../utils/localApiAuth.js'
 import SvgMaskIcon from './SvgMaskIcon.vue'
@@ -801,14 +782,6 @@ const XIAOHONGSHU_COOKIE_API = `${API}/xiaohongshu-cookie`
 const EMBEDDING_SECRET_REVEAL_API = `${API}/llm-settings/campus-embedding/reveal`
 const PADDLE_OCR_SECRET_REVEAL_API = `${API}/paddle-ocr-settings/reveal`
 const VISUAL_MODEL_SECRET_REVEAL_API = `${API}/wechat-publishing/cover-settings/reveal`
-const {
-  telemetryEnabled, telemetryPendingEvents, telemetrySaving,
-  telemetryStatusLoading, telemetryStatusLoaded, telemetryStatusError,
-  loadTelemetryStatus, saveTelemetry,
-} = useTelemetrySettingsController({
-  notifySuccess: (message) => ElMessage.success(message),
-  notifyError: (message) => ElMessage.error(message),
-})
 const favoriteSources = ref([])
 const favoriteSourcesLoading = ref(false)
 const favoriteBusyId = ref('')
@@ -818,11 +791,12 @@ const bilibiliFavoriteUrl = ref('')
 const bilibiliFavoriteAutoAnalyze = ref(true)
 const xiaohongshuCookieInput = ref('')
 const xiaohongshuCookieConfigured = ref(false)
-const xiaohongshuCookieState = ref('loading')
-const xiaohongshuCookieStatusText = ref('正在读取小红书登录态')
+const xiaohongshuCookieState = ref('unknown')
+const xiaohongshuCookieStatusText = ref('登录状态将在连接后验证')
+const xiaohongshuCookieStatusLoading = ref(false)
 const xiaohongshuCapabilities = ref({})
 const xiaohongshuCredentialStorageAvailable = computed(() => xiaohongshuCapabilities.value.credential_storage?.available !== false)
-const xiaohongshuSessionProbeAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.session_probe?.available))
+const xiaohongshuSessionProbeAvailable = computed(() => xiaohongshuCapabilities.value.session_probe?.available !== false)
 const xiaohongshuNoteCaptureAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.note_capture?.available))
 const xiaohongshuFavoritesAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.favorites_sync?.available))
 const xiaohongshuNoteCaptureReason = computed(() => xiaohongshuCapabilities.value.note_capture?.reason || '小红书单篇图文读取暂不可用；已缓存资料仍可阅读')
@@ -1015,7 +989,7 @@ async function loadFavoriteSources() {
 }
 
 async function loadXiaohongshuCookieStatus(refresh = false) {
-  xiaohongshuCookieState.value = 'loading'
+  xiaohongshuCookieStatusLoading.value = true
   try {
     const response = await axios.get(XIAOHONGSHU_COOKIE_API, { params: refresh ? { refresh: true } : undefined, timeout: refresh ? 35000 : 5000 })
     xiaohongshuCookieConfigured.value = Boolean(response.data?.configured)
@@ -1032,6 +1006,8 @@ async function loadXiaohongshuCookieStatus(refresh = false) {
     xiaohongshuCookieConfigured.value = false
     xiaohongshuCookieState.value = 'unknown'
     xiaohongshuCookieStatusText.value = error.response?.data?.detail || error.message || '小红书登录态状态读取失败'
+  } finally {
+    xiaohongshuCookieStatusLoading.value = false
   }
 }
 
@@ -1277,8 +1253,7 @@ async function deleteFavorite(source) {
 
 watch(modelValue, (opened) => {
   if (opened) {
-    loadXiaohongshuCookieStatus()
-    void loadTelemetryStatus()
+    void loadXiaohongshuCookieStatus()
   }
 })
 
