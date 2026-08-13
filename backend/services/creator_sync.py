@@ -1,17 +1,62 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from threading import Lock
 from typing import Any, Literal
-from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 
 from config import settings
 from services.content_index import ensure_creator_folder
+from services.creator_capture_status import creator_capture_status, record_creator_list_check as _record_creator_list_check
 from services.creator_metadata import save_creator_work_metadata
+from services.creator_sync_models import CreatorPreview, CreatorSyncError, CreatorSyncResult, CreatorVideo
+from services.creator_sync_policy import (
+    creator_error_category as _creator_error_category,
+    creator_retry_minutes as _creator_retry_minutes,
+    effective_processing_mode as _effective_processing_mode,
+    valid_interval as _valid_interval,
+    valid_queue_limit as _valid_queue_limit,
+)
+from services.creator_source_registry import (
+    creator_source_item_ids as _creator_source_item_ids,
+    delete_creator_source,
+    due_creator_source_ids,
+    get_creator_source,
+    list_creator_sync_runs,
+    list_creator_sources,
+    record_sync_error as _record_sync_error,
+    record_sync_success as _record_sync_success,
+    source_identity as _source_identity,
+    source_row as _source_row,
+    update_creator_source,
+)
+from services.creator_source_urls import (
+    PERSONAL_SOURCE_KINDS as _PERSONAL_SOURCE_KINDS,
+    canonical_creator_url as _canonical_creator_url,
+    creator_capture_url as _creator_capture_url,
+    parse_creator_url as _parse_creator_url,
+)
+from services.creator_remote_payloads import (
+    as_int as _as_int,
+    bilibili_video as _bilibili_video,
+    collection_name_from_payload as _collection_name_from_payload,
+    douyin_video as _douyin_video,
+    parse_creator_page as _parse_page,
+)
+from services.creator_browser_capture import (
+    capture_creator_browser_pages,
+    next_bilibili_favorites_page_url as _next_bilibili_favorites_page_url,
+)
+from services.creator_sync_selection import (
+    MAX_CREATOR_CAPTURE_RESPONSE_PAGES,
+    append_new_videos as _append_new_videos,
+    latest_published_at as _latest_published_at,
+    parse_cutoff as _parse_cutoff,
+    preview_within_date_range as _preview_within_date_range,
+    selected_preview_videos as _selected_preview_videos,
+    should_continue_creator_capture as _should_continue_creator_capture,
+    unseen_prefix_before_known_item as _unseen_prefix_before_known_item,
+)
 from services.database import connect, initialize_database, utc_now_iso
-from services.network_policy import direct_browser_launch_options
 from services.pipeline_runner import PipelineRequest
 from services.repository import ContentRepository, new_id
 from services.task_manager import task_manager
@@ -19,83 +64,12 @@ from services.task_manager import task_manager
 
 MAX_CREATOR_SCAN_ITEMS = 500
 PAGE_SIZE = 20
-CREATOR_PAGE_RESPONSE_WAIT_MS = 5_000
-MAX_CREATOR_LOAD_ATTEMPTS = 3
-MAX_CREATOR_CAPTURE_RESPONSE_PAGES = 60
-ALLOWED_SYNC_INTERVAL_MINUTES = {30, 60, 180, 360, 720, 1440}
-CREATOR_PROCESSING_MODES = {"metadata", "transcript", "full"}
 DEFAULT_CREATOR_QUEUE_LIMIT = 1
 # Only the first subscription has a user-visible discovery breadth. Scheduled
 # checks scan back from the newest item until they reach an item already linked
 # to this source; this is deliberately not a user-configurable cap.
 DEFAULT_CREATOR_SYNC_SCAN_ITEMS = 1
-_BILIBILI_SPACE_PATH_RE = re.compile(r"^/(?P<id>\d+)(?:/upload/video)?/?$")
-_BILIBILI_LIST_PATH_RE = re.compile(r"^/(?P<mid>\d+)/lists/(?P<id>\d+)/?$")
-_BILIBILI_CHANNEL_PATH_RE = re.compile(r"^/(?P<mid>\d+)/channel/(?P<kind>seriesdetail|collectiondetail)/?$")
-_BILIBILI_FAVORITES_PATH_RE = re.compile(r"^/(?P<mid>\d+)/favlist/?$")
-_BILIBILI_LIKES_PATH_RE = re.compile(r"^/(?P<mid>\d+)/like/?$")
-_PERSONAL_SOURCE_KINDS = {"favorites", "likes"}
-_DOUYIN_USER_PATH_RE = re.compile(r"^/user/(?P<id>[^/?#]+)/?$")
-_DOUYIN_COLLECTION_PATH_RE = re.compile(r"^/collection/(?P<id>\d+)(?:/(?P<position>\d+))?/?$")
-_XIAOHONGSHU_PROFILE_PATH_RE = re.compile(r"^/user/profile/(?P<id>[^/?#]+)/?$")
-_CREATOR_BROWSER_LOCK = Lock()
 _CREATOR_SYNC_LOCK = Lock()
-_CREATOR_CAPTURE_STATE_LOCK = Lock()
-_CREATOR_CAPTURE_STATE = {
-    "active": False,
-    "provider": "",
-    "stage": "空闲",
-    "waiting_count": 0,
-    "last_list_checks": {"douyin": {}, "bilibili": {}, "xiaohongshu": {}},
-}
-
-
-class CreatorSyncError(ValueError):
-    """An input or upstream-response error safe to show in the UI."""
-
-
-@dataclass(frozen=True)
-class CreatorVideo:
-    provider: str
-    canonical_id: str
-    source_url: str
-    title: str
-    cover_url: str = ""
-    duration_seconds: float | None = None
-    published_at: str | None = None
-    description: str = ""
-    author_name: str = ""
-    tags: tuple[str, ...] = ()
-    stats: dict[str, int] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class CreatorPreview:
-    provider: str
-    source_kind: str
-    source_url: str
-    creator_key: str
-    creator_name: str
-    videos: list[CreatorVideo]
-    creator_avatar_url: str = ""
-    creator_description: str = ""
-    collection_id: str = ""
-    collection_name: str = ""
-
-
-@dataclass(frozen=True)
-class CreatorSyncResult:
-    source_id: str
-    provider: str
-    creator_name: str
-    folder_id: str
-    discovered_count: int
-    created_count: int
-    duplicate_count: int
-    queued_count: int
-    inbox_count: int
-    task_ids: list[str]
-    content_item_ids: list[str]
 
 
 def preview_creator_source(
@@ -109,6 +83,10 @@ def preview_creator_source(
 ) -> CreatorPreview:
     """Read a public creator page through the application's bundled browser."""
     provider, source_kind, creator_key = _parse_creator_url(source_url.strip())
+    if provider == "xiaohongshu":
+        from services.xiaohongshu_capability import require_xiaohongshu_feature
+
+        require_xiaohongshu_feature("creator_sync")
     normalized_url = _canonical_creator_url(provider, source_kind, creator_key)
     capture_url = _creator_capture_url(source_url, provider=provider, source_kind=source_kind, creator_key=creator_key)
     max_items = max(1, min(int(limit), MAX_CREATOR_SCAN_ITEMS))
@@ -473,95 +451,6 @@ def sync_creator_source(
         )
 
 
-def list_creator_sources() -> list[dict[str, Any]]:
-    initialize_database()
-    with connect() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, provider, source_url, source_kind, creator_key, creator_name,
-                   library_folder_id, enabled, auto_process, processing_mode, sync_interval_minutes,
-                   sync_limit, queue_limit, last_sync_at, next_sync_at, last_seen_published_at,
-                   last_error, last_error_category, consecutive_failure_count,
-                   last_discovered_count, last_created_count,
-                   created_at, updated_at
-            FROM creator_sources
-            ORDER BY updated_at DESC
-            """
-        ).fetchall()
-    return [_serialize_source(row) for row in rows]
-
-
-def get_creator_source(source_id: str) -> dict[str, Any]:
-    initialize_database()
-    with connect() as connection:
-        row = connection.execute("SELECT * FROM creator_sources WHERE id=?", (source_id,)).fetchone()
-    if not row:
-        raise LookupError(source_id)
-    return _serialize_source(row)
-
-
-def list_creator_sync_runs(source_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
-    initialize_database()
-    with connect() as connection:
-        rows = connection.execute(
-            """SELECT status, error_category, message, discovered_count, created_count, created_at
-               FROM creator_sync_runs WHERE source_id=? ORDER BY created_at DESC LIMIT ?""",
-            (source_id, max(1, min(int(limit), 30))),
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def update_creator_source(
-    source_id: str,
-    *,
-    enabled: bool | None = None,
-    auto_process: bool | None = None,
-    processing_mode: str | None = None,
-    sync_interval_minutes: int | None = None,
-) -> dict[str, Any]:
-    if all(value is None for value in (enabled, auto_process, processing_mode, sync_interval_minutes)):
-        raise CreatorSyncError("至少提供一个需要更新的订阅设置")
-    if sync_interval_minutes is not None:
-        _valid_interval(sync_interval_minutes)
-    if processing_mode is not None:
-        _valid_processing_mode(processing_mode)
-    initialize_database()
-    with connect() as connection:
-        current = connection.execute("SELECT * FROM creator_sources WHERE id=?", (source_id,)).fetchone()
-        if not current:
-            raise LookupError(source_id)
-        next_enabled = bool(current["enabled"]) if enabled is None else bool(enabled)
-        next_interval = _valid_interval(sync_interval_minutes if sync_interval_minutes is not None else current["sync_interval_minutes"])
-        next_mode = _effective_processing_mode(current, processing_mode, auto_process)
-        next_sync_at = utc_now_iso() if enabled is True else current["next_sync_at"]
-        connection.execute(
-            """UPDATE creator_sources
-               SET enabled=?, auto_process=?, processing_mode=?, sync_interval_minutes=?,
-                   next_sync_at=?, updated_at=? WHERE id=?""",
-            (
-                int(next_enabled),
-                int(next_mode != "metadata"),
-                next_mode,
-                next_interval,
-                next_sync_at,
-                utc_now_iso(),
-                source_id,
-            ),
-        )
-        connection.commit()
-        row = connection.execute("SELECT * FROM creator_sources WHERE id=?", (source_id,)).fetchone()
-    return _serialize_source(row)
-
-
-def delete_creator_source(source_id: str) -> None:
-    initialize_database()
-    with connect() as connection:
-        cursor = connection.execute("DELETE FROM creator_sources WHERE id=?", (source_id,))
-        connection.commit()
-    if not cursor.rowcount:
-        raise LookupError(source_id)
-
-
 def sync_saved_creator_source(
     source_id: str,
     *,
@@ -569,6 +458,10 @@ def sync_saved_creator_source(
     execution_mode: Literal["foreground", "background"] = "foreground",
 ) -> CreatorSyncResult:
     source = get_creator_source(source_id)
+    if source.get("provider") == "xiaohongshu":
+        from services.xiaohongshu_capability import require_xiaohongshu_feature
+
+        require_xiaohongshu_feature("creator_sync")
     if not source["enabled"]:
         raise CreatorSyncError("该创作者订阅已暂停；恢复后再同步")
     known_item_ids = _creator_source_item_ids(source_id)
@@ -598,21 +491,16 @@ def sync_saved_creator_source(
 
 
 def sync_due_creator_sources() -> list[str]:
-    initialize_database()
-    now = utc_now_iso()
-    with connect() as connection:
-        rows = connection.execute(
-            """SELECT id FROM creator_sources
-               WHERE enabled=1 AND (next_sync_at IS NULL OR next_sync_at='' OR next_sync_at<=?)
-               ORDER BY COALESCE(next_sync_at, created_at), created_at""",
-            (now,),
-        ).fetchall()
+    source_ids = due_creator_source_ids(utc_now_iso())
     from services.task_manager import task_manager
+    from services.xiaohongshu_capability import xiaohongshu_capabilities
 
     completed: list[str] = []
-    for row in rows:
-        source_id = str(row["id"])
+    for source_id in source_ids:
         try:
+            source = get_creator_source(source_id)
+            if source.get("provider") == "xiaohongshu" and not xiaohongshu_capabilities()["creator_sync"]["available"]:
+                continue
             task_manager.create_source_sync(
                 {"kind": "creator_saved", "source_id": source_id},
                 source_title="自动检查创作者",
@@ -622,320 +510,6 @@ def sync_due_creator_sources() -> list[str]:
             continue
         completed.append(source_id)
     return completed
-
-
-def creator_capture_status() -> dict[str, Any]:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        status = dict(_CREATOR_CAPTURE_STATE)
-        status["last_list_checks"] = {
-            provider: dict(value) for provider, value in _CREATOR_CAPTURE_STATE["last_list_checks"].items()
-        }
-        return status
-
-
-def _source_row(connection, *, source_id: str | None, source_identity: str):
-    if source_id:
-        return connection.execute("SELECT * FROM creator_sources WHERE id=?", (source_id,)).fetchone()
-    return connection.execute("SELECT * FROM creator_sources WHERE source_identity=?", (source_identity,)).fetchone()
-
-
-def _creator_source_item_ids(source_id: str) -> set[str]:
-    """Return the durable membership anchor for an incremental check."""
-    initialize_database()
-    with connect() as connection:
-        rows = connection.execute(
-            "SELECT remote_item_id FROM creator_source_items WHERE source_id=?",
-            (source_id,),
-        ).fetchall()
-    return {str(row["remote_item_id"]).strip() for row in rows if str(row["remote_item_id"] or "").strip()}
-
-
-def _source_identity(provider: str, source_kind: str, creator_key: str) -> str:
-    return f"{provider}:{source_kind}:{creator_key}"
-
-
-def _canonical_creator_url(provider: str, source_kind: str, creator_key: str) -> str:
-    if provider == "bilibili":
-        if source_kind == "profile":
-            # The space root is a personal overview page.  Bilibili can serve
-            # it without ever requesting the upload list, which leaves the
-            # browser reader with nothing to capture and unnecessarily sends
-            # us to the lower-fidelity WBI fallback.  Open the explicit upload
-            # tab instead; both URLs retain the same stable creator identity.
-            return f"https://space.bilibili.com/{creator_key}/upload/video"
-        mid, source_id = creator_key.split(":", 1)
-        if source_kind in {"series", "collection"}:
-            return f"https://space.bilibili.com/{mid}/lists/{source_id}?type={'series' if source_kind == 'series' else 'season'}"
-        if source_kind in {"channel_series", "channel_collection"}:
-            kind = "seriesdetail" if source_kind == "channel_series" else "collectiondetail"
-            return f"https://space.bilibili.com/{mid}/channel/{kind}?sid={source_id}"
-        if source_kind == "favorites":
-            # Favorites are ordered by the time they were added.  Explicitly
-            # retaining this view makes the personal-favorites sync inspect
-            # the newest entries first instead of inheriting a browser's last
-            # selected sort order.
-            return f"https://space.bilibili.com/{mid}/favlist?fid={source_id}&ftype=create"
-        if source_kind == "likes":
-            return f"https://space.bilibili.com/{mid}/like"
-    if provider == "xiaohongshu" and source_kind == "favorites":
-        return f"https://www.xiaohongshu.com/user/profile/{creator_key}?tab=collect"
-    if source_kind == "favorites":
-        return f"https://www.douyin.com/user/{creator_key}?showSubTab=favorite_folder&showTab=favorite_collection"
-    if source_kind == "likes":
-        return f"https://www.douyin.com/user/{creator_key}?showTab=like"
-    if source_kind == "collection":
-        return f"https://www.douyin.com/collection/{creator_key}"
-    if source_kind == "profile_compilations":
-        return f"https://www.douyin.com/user/{creator_key}?showSubTab=compilation"
-    return f"https://www.douyin.com/user/{creator_key}"
-
-
-def _creator_capture_url(source_url: str, *, provider: str, source_kind: str, creator_key: str) -> str:
-    """Keep a validated Douyin collection entry page for browser collection context.
-
-    Douyin redirects ``/collection/<id>/<position>`` to a video URL after it
-    has established the collection context.  The position is not part of the
-    subscription identity, but stripping it before navigation prevents the
-    browser from issuing the collection request in the first place.
-    """
-    if provider != "douyin" or source_kind != "collection":
-        return _canonical_creator_url(provider, source_kind, creator_key)
-    parsed = urlparse(source_url)
-    match = _DOUYIN_COLLECTION_PATH_RE.fullmatch(parsed.path)
-    if match and match.group("id") == creator_key and match.group("position"):
-        return f"https://www.douyin.com/collection/{creator_key}/{match.group('position')}"
-    return _canonical_creator_url(provider, source_kind, creator_key)
-
-
-def _valid_interval(value: object) -> int:
-    try:
-        interval = int(value)
-    except (TypeError, ValueError) as exc:
-        raise CreatorSyncError("检查频率无效") from exc
-    if interval not in ALLOWED_SYNC_INTERVAL_MINUTES:
-        choices = "、".join(str(item) for item in sorted(ALLOWED_SYNC_INTERVAL_MINUTES))
-        raise CreatorSyncError(f"检查频率必须是 {choices} 分钟之一")
-    return interval
-
-
-def _valid_processing_mode(value: object) -> str:
-    mode = str(value or "").strip().lower()
-    if mode not in CREATOR_PROCESSING_MODES:
-        raise CreatorSyncError("处理方式必须是 metadata、transcript 或 full")
-    return mode
-
-
-def _valid_queue_limit(value: object) -> int:
-    try:
-        limit = int(value)
-    except (TypeError, ValueError) as exc:
-        raise CreatorSyncError("每轮入队上限无效") from exc
-    if not 1 <= limit <= MAX_CREATOR_SCAN_ITEMS:
-        raise CreatorSyncError(f"每轮入队上限必须在 1 到 {MAX_CREATOR_SCAN_ITEMS} 之间")
-    return limit
-
-
-def _effective_processing_mode(source_row, requested_mode: str | None, requested_auto_process: bool | None) -> str:
-    if requested_mode is not None:
-        return _valid_processing_mode(requested_mode)
-    if requested_auto_process is not None:
-        return "full" if requested_auto_process else "metadata"
-    if source_row:
-        stored_mode = source_row["processing_mode"] if "processing_mode" in source_row.keys() else None
-        if stored_mode:
-            return _valid_processing_mode(stored_mode)
-        return "full" if bool(source_row["auto_process"]) else "metadata"
-    return "full"
-
-
-def _selected_preview_videos(videos: list[CreatorVideo], selected_video_ids: list[str] | None) -> list[CreatorVideo]:
-    if selected_video_ids is None:
-        return videos
-    selected = {str(item).strip() for item in selected_video_ids if str(item).strip()}
-    if not selected:
-        raise CreatorSyncError("请至少选择一条预览作品")
-    available = {video.canonical_id for video in videos}
-    unknown = selected - available
-    if unknown:
-        raise CreatorSyncError("所选作品已不在本次预览中，请重新预览后提交")
-    return [video for video in videos if video.canonical_id in selected]
-
-
-def _unseen_prefix_before_known_item(
-    videos: list[CreatorVideo],
-    known_item_ids: set[str],
-) -> list[CreatorVideo]:
-    """Keep only remotely newer entries before this source's saved anchor.
-
-    A creator source is ordered by the provider's own newest-first list
-    order.  Once any previously linked remote id appears, every later row is
-    historical for this subscription and must stay out of a normal check.
-    Failing closed when the anchor is absent is important: accepting a partial
-    response would turn an upstream pagination change into a bulk reimport.
-    """
-    if not videos:
-        return []
-    for index, video in enumerate(videos):
-        if video.canonical_id in known_item_ids:
-            return videos[:index]
-    raise CreatorSyncError("本次检查未找到上次订阅的作品边界，未导入任何内容；请稍后重试")
-
-
-def _serialize_source(row) -> dict[str, Any]:
-    source = dict(row)
-    source["enabled"] = bool(source.get("enabled", True))
-    source["auto_process"] = bool(source.get("auto_process", True))
-    source["processing_mode"] = _valid_processing_mode(source.get("processing_mode") or ("full" if source["auto_process"] else "metadata"))
-    source["sync_interval_minutes"] = _valid_interval(
-        source.get("sync_interval_minutes", settings.creator_default_interval_minutes)
-    )
-    # These fields remain in SQLite solely for migration compatibility. They
-    # are intentionally not exposed or used by the incremental-sync contract.
-    source["consecutive_failure_count"] = max(0, int(source.get("consecutive_failure_count") or 0))
-    source["last_discovered_count"] = max(0, int(source.get("last_discovered_count") or 0))
-    source["last_created_count"] = max(0, int(source.get("last_created_count") or 0))
-    return source
-
-
-def _record_sync_success(
-    source_id: str,
-    *,
-    interval_minutes: int,
-    discovered_count: int,
-    created_count: int,
-    last_seen_published_at: str | None,
-) -> None:
-    now = datetime.now(timezone.utc)
-    next_sync = now + timedelta(minutes=interval_minutes)
-    with connect() as connection:
-        connection.execute(
-            """UPDATE creator_sources
-               SET last_sync_at=?, next_sync_at=?, last_seen_published_at=?, last_error=NULL,
-                   last_error_category=NULL, consecutive_failure_count=0,
-                   last_discovered_count=?, last_created_count=?, updated_at=?
-               WHERE id=?""",
-            (
-                now.isoformat(),
-                next_sync.isoformat(),
-                last_seen_published_at,
-                max(0, int(discovered_count)),
-                max(0, int(created_count)),
-                now.isoformat(),
-                source_id,
-            ),
-        )
-        connection.execute(
-            """INSERT INTO creator_sync_runs
-               (id, source_id, status, message, discovered_count, created_count, created_at)
-               VALUES (?, ?, 'succeeded', '', ?, ?, ?)""",
-            (new_id(), source_id, max(0, int(discovered_count)), max(0, int(created_count)), now.isoformat()),
-        )
-        connection.commit()
-
-
-def _latest_published_at(videos: list[CreatorVideo]) -> str | None:
-    values = [str(video.published_at).strip() for video in videos if video.published_at]
-    return max(values, default=None)
-
-
-def _record_sync_error(source_id: str, message: str) -> None:
-    now = datetime.now(timezone.utc)
-    with connect() as connection:
-        row = connection.execute(
-            "SELECT sync_interval_minutes, consecutive_failure_count FROM creator_sources WHERE id=?", (source_id,)
-        ).fetchone()
-        if not row:
-            return
-        category = _creator_error_category(message)
-        failures = max(0, int(row["consecutive_failure_count"] or 0)) + 1
-        retry_minutes = _creator_retry_minutes(category, failures, _valid_interval(row["sync_interval_minutes"]))
-        connection.execute(
-            """UPDATE creator_sources
-               SET last_error=?, last_error_category=?, consecutive_failure_count=?, next_sync_at=?, updated_at=? WHERE id=?""",
-            (str(message or "同步失败")[:500], category, failures, (now + timedelta(minutes=retry_minutes)).isoformat(), now.isoformat(), source_id),
-        )
-        connection.execute(
-            """INSERT INTO creator_sync_runs (id, source_id, status, error_category, message, created_at)
-               VALUES (?, ?, 'failed', ?, ?, ?)""",
-            (new_id(), source_id, category, str(message or "同步失败")[:500], now.isoformat()),
-        )
-        connection.commit()
-
-
-def _creator_error_category(message: str) -> str:
-    text = str(message or "").lower()
-    # -352 is Bilibili's risk-control response.  The combined browser/WBI
-    # error can also mention the saved login state, but that does not mean the
-    # session is expired.  Treat it as a transient remote failure so the UI
-    # gives an accurate diagnosis and the source retries on the normal path.
-    if any(token in text for token in ("错误码 -352", "error code -352", "风控", "风险校验", "risk control")):
-        return "remote"
-    if any(token in text for token in ("cookie", "登录", "403", "412", "授权")):
-        return "authorization"
-    if any(token in text for token in ("timeout", "超时", "暂时", "网络", "拒绝")):
-        return "remote"
-    if any(token in text for token in ("chromium", "浏览器组件", "内置浏览器")):
-        return "runtime"
-    return "unknown"
-
-
-def _creator_retry_minutes(category: str, failures: int, configured_interval: int) -> int:
-    if category == "authorization":
-        return max(configured_interval, 360)
-    base = 30 if category == "remote" else 60
-    return min(720, max(configured_interval, base * (2 ** min(max(0, failures - 1), 4))))
-
-
-def _parse_creator_url(source_url: str) -> tuple[str, str, str]:
-    parsed = urlparse(source_url)
-    if parsed.scheme != "https":
-        raise CreatorSyncError("链接必须使用 HTTPS")
-    host = (parsed.hostname or "").lower()
-    if host == "space.bilibili.com":
-        if match := _BILIBILI_SPACE_PATH_RE.fullmatch(parsed.path):
-            return "bilibili", "profile", match.group("id")
-        query = parse_qs(parsed.query)
-        if match := _BILIBILI_LIST_PATH_RE.fullmatch(parsed.path):
-            source_kind = "series" if query.get("type", [""])[0] == "series" else "collection"
-            return "bilibili", source_kind, f"{match.group('mid')}:{match.group('id')}"
-        if match := _BILIBILI_CHANNEL_PATH_RE.fullmatch(parsed.path):
-            sid = query.get("sid", [""])[0]
-            if sid.isdigit():
-                source_kind = "channel_series" if match.group("kind") == "seriesdetail" else "channel_collection"
-                return "bilibili", source_kind, f"{match.group('mid')}:{sid}"
-        if match := _BILIBILI_FAVORITES_PATH_RE.fullmatch(parsed.path):
-            fid = query.get("fid", [""])[0]
-            if fid.isdigit():
-                return "bilibili", "favorites", f"{match.group('mid')}:{fid}"
-        if match := _BILIBILI_LIKES_PATH_RE.fullmatch(parsed.path):
-            return "bilibili", "likes", f"{match.group('mid')}:liked"
-    if host in {"douyin.com", "www.douyin.com"}:
-        if match := _DOUYIN_COLLECTION_PATH_RE.fullmatch(parsed.path):
-            return "douyin", "collection", match.group("id")
-        if match := _DOUYIN_USER_PATH_RE.fullmatch(parsed.path):
-            query = parse_qs(parsed.query)
-            active_tab = str(query.get("showTab", [""])[0]).lower()
-            active_sub_tab = str(query.get("showSubTab", [""])[0]).lower()
-            if active_tab in {"like", "liked"}:
-                return "douyin", "likes", match.group("id")
-            if active_tab in {"favorite", "favorite_collection"} or active_sub_tab == "favorite_folder":
-                return "douyin", "favorites", match.group("id")
-            if query.get("showSubTab", [""])[0] == "compilation":
-                return "douyin", "profile_compilations", match.group("id")
-            return "douyin", "profile", match.group("id")
-    if host in {"xiaohongshu.com", "www.xiaohongshu.com"}:
-        if match := _XIAOHONGSHU_PROFILE_PATH_RE.fullmatch(parsed.path):
-            query = parse_qs(parsed.query)
-            active_tab = str(
-                query.get("tab", query.get("showTab", query.get("section", [""])))[0]
-            ).lower()
-            # The web profile currently labels the favorites tab `fav`; older
-            # shared links have used the other spellings below.  They all map
-            # to the same current-account favorites pipeline.
-            if active_tab in {"fav", "collect", "collection", "favorite", "favorites"}:
-                return "xiaohongshu", "favorites", match.group("id")
-            raise CreatorSyncError("小红书目前仅支持“我的收藏”链接；请从个人主页的收藏页复制链接")
-    raise CreatorSyncError("仅支持抖音/B站的主页、合集、收藏夹或喜欢列表，以及小红书“我的收藏”链接")
 
 
 def _preview_douyin_profile_in_browser(
@@ -1284,320 +858,15 @@ def _capture_browser_pages(
     stop_at: datetime | None,
     known_item_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
-    try:
-        from playwright.sync_api import sync_playwright
-        from services.bilibili_auth import bilibili_playwright_cookies
-        from services.downloader import _load_cookies_for_playwright, browser_executable
-    except ImportError as exc:
-        raise CreatorSyncError("内置浏览器组件不可用；请在设置中安装 Chromium 后重试") from exc
-
-    executable = browser_executable()
-    if not executable:
-        raise CreatorSyncError("未找到内置 Chromium；请在设置 > 设备准备中安装后重试")
-    pages: list[dict[str, Any]] = []
-    bilibili_favorites_page_url = ""
-    _wait_for_creator_browser(provider)
-    with _CREATOR_BROWSER_LOCK:
-        _begin_creator_browser_capture(provider)
-        try:
-            with sync_playwright() as playwright:
-                _set_creator_capture_stage("启动内置浏览器")
-                browser = playwright.chromium.launch(
-                    headless=True,
-                    executable_path=executable,
-                    **direct_browser_launch_options("--disable-blink-features=AutomationControlled"),
-                )
-                try:
-                    # Keep the browser's own UA and network fingerprint in
-                    # sync.  The previous fixed Chrome/131 UA diverged from
-                    # the bundled Chromium as it was updated, which makes the
-                    # request look synthetic to Bilibili's risk controls.
-                    context = browser.new_context(
-                        locale="zh-CN",
-                        viewport={"width": 1440, "height": 1000},
-                    )
-                    cookies = _load_cookies_for_playwright() + bilibili_playwright_cookies()
-                    if cookies:
-                        context.add_cookies(cookies)
-                    page = context.new_page()
-                    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
-                    # Douyin and Bilibili both use virtualized grids.  A grid
-                    # can prefetch a page without changing document height, so
-                    # tying collection to one scroll event loses responses.
-                    # Observe every matching API response for this page and
-                    # use scrolling only as a nudge to request the next one.
-                    def capture_response(response) -> None:
-                        nonlocal bilibili_favorites_page_url
-                        url_matches = response_matcher(response.url)
-                        # A provider may rename a list endpoint without
-                        # changing its schema. A caller can opt into a narrow
-                        # payload fallback, limited to fetch/XHR traffic so
-                        # document and asset responses are never inspected.
-                        may_match_payload = bool(
-                            payload_matcher
-                            and response.request.resource_type in {"fetch", "xhr"}
-                        )
-                        if not url_matches and not may_match_payload:
-                            return
-                        try:
-                            payload = response.json()
-                        except Exception:
-                            return
-                        payload_matches = bool(
-                            payload_matcher
-                            and isinstance(payload, dict)
-                            and payload_matcher(payload)
-                        )
-                        if isinstance(payload, dict) and (url_matches or payload_matches):
-                            pages.append(payload)
-                            if provider == "bilibili":
-                                next_url = _next_bilibili_favorites_page_url(response.url)
-                                if next_url:
-                                    bilibili_favorites_page_url = next_url
-
-                    page.on("response", capture_response)
-                    _set_creator_capture_stage("读取创作者页面")
-                    page.goto(source_url, wait_until="domcontentloaded", timeout=30_000)
-                    if not _wait_for_creator_page_count(page, pages, expected_count=1, timeout_ms=30_000):
-                        raise CreatorSyncError("创作者页面没有返回作品列表；请确认链接公开且当前登录态可用")
-
-                    while _should_continue_creator_capture(
-                        pages,
-                        provider=provider,
-                        limit=limit,
-                        watermark=stop_at,
-                        known_item_ids=known_item_ids,
-                    ):
-                        _set_creator_capture_stage("加载更多作品")
-                        captured_count = len(pages)
-                        received_next_page = False
-                        for _ in range(MAX_CREATOR_LOAD_ATTEMPTS):
-                            if bilibili_favorites_page_url:
-                                _request_creator_api_page(page, bilibili_favorites_page_url)
-                            else:
-                                _nudge_creator_page_load(page)
-                            if _wait_for_creator_page_count(
-                                page,
-                                pages,
-                                expected_count=captured_count + 1,
-                                timeout_ms=CREATOR_PAGE_RESPONSE_WAIT_MS,
-                            ):
-                                received_next_page = True
-                                break
-                        if not received_next_page:
-                            break
-                    title = page.title()
-                    context.close()
-                finally:
-                    browser.close()
-        except CreatorSyncError:
-            _record_creator_list_check(provider, state="failed", detail="未取得作品列表")
-            raise
-        except Exception as exc:
-            _record_creator_list_check(provider, state="failed", detail=str(exc))
-            raise CreatorSyncError(f"内置浏览器采集失败：{exc}") from exc
-        finally:
-            _finish_creator_browser_capture()
-    return pages, title
-
-
-def _next_bilibili_favorites_page_url(response_url: str) -> str:
-    """Build the next page URL from Bilibili's browser-originated list call."""
-    parsed = urlparse(response_url)
-    if parsed.path != "/x/v3/fav/resource/list":
-        return ""
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    try:
-        current_page = max(1, int(query.get("pn") or 1))
-    except (TypeError, ValueError):
-        current_page = 1
-    query["pn"] = str(current_page + 1)
-    return parsed._replace(query=urlencode(query)).geturl()
-
-
-def _request_creator_api_page(page, url: str) -> None:
-    """Request a known next page inside the captured browser session."""
-    try:
-        page.evaluate(
-            """(nextUrl) => { void fetch(nextUrl, { credentials: 'include' }); }""",
-            url,
-        )
-    except Exception:
-        # The usual scroll nudge on the following retry is the compatible
-        # fallback when a navigation briefly invalidates the page context.
-        _nudge_creator_page_load(page)
-
-
-def _wait_for_creator_page_count(page, pages: list[dict[str, Any]], *, expected_count: int, timeout_ms: int) -> bool:
-    """Wait for a response event without relying on a scrollable document."""
-    elapsed_ms = 0
-    while elapsed_ms < timeout_ms:
-        if len(pages) >= expected_count:
-            return True
-        page.wait_for_timeout(250)
-        elapsed_ms += 250
-    return len(pages) >= expected_count
-
-
-def _nudge_creator_page_load(page) -> None:
-    """Ask both ordinary and virtualized creator grids to load their next page."""
-    try:
-        page.mouse.wheel(0, 900)
-        page.evaluate(
-            """() => {
-                window.scrollBy(0, Math.max(720, window.innerHeight * 0.9));
-                window.scrollTo(0, document.documentElement.scrollHeight || document.body.scrollHeight);
-                // Douyin keeps the profile grid in an overflow container;
-                // scrolling window alone never reaches its intersection
-                // sentinel.  Class names are hashed, so identify the few
-                // actual vertical scroll containers structurally instead.
-                const containers = [...document.querySelectorAll('*')]
-                    .filter((node) => {
-                        const style = getComputedStyle(node);
-                        return (style.overflowY === 'auto' || style.overflowY === 'scroll')
-                            && node.scrollHeight > node.clientHeight + 24;
-                    })
-                    .sort((left, right) => right.clientHeight - left.clientHeight)
-                    .slice(0, 3);
-                for (const container of containers) {
-                    container.scrollTop = container.scrollHeight;
-                    container.dispatchEvent(new Event('scroll', { bubbles: true }));
-                }
-            }"""
-        )
-    except Exception:
-        # A navigation or a grid re-render can invalidate the frame briefly.
-        # The response wait remains authoritative and a later nudge retries.
-        return
-
-
-def _should_continue_creator_capture(
-    pages: list[dict[str, Any]],
-    *,
-    provider: str,
-    limit: int,
-    watermark: datetime | None,
-    known_item_ids: set[str] | None = None,
-) -> bool:
-    if not pages:
-        return True
-    latest = pages[-1]
-    latest_videos, _creator_name, _cursor, has_more = _parse_page(latest, provider=provider)
-    if known_item_ids and any(video.canonical_id in known_item_ids for video in latest_videos):
-        return False
-    if len(pages) >= MAX_CREATOR_CAPTURE_RESPONSE_PAGES:
-        if known_item_ids:
-            raise CreatorSyncError("本次检查尚未找到上次订阅的作品边界，已停止以避免遗漏；请稍后重试")
-        return False
-    if not has_more:
-        if known_item_ids:
-            raise CreatorSyncError("本次检查未找到上次订阅的作品边界，未导入任何内容；请稍后重试")
-        return False
-    if _page_reaches_watermark(latest, provider=provider, watermark=watermark):
-        return False
-    captured_ids = {
-        video.canonical_id
-        for payload in pages
-        for video in _parse_page(payload, provider=provider)[0]
-    }
-    return len(captured_ids) < limit
-
-
-def _wait_for_creator_browser(provider: str) -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["waiting_count"] += 1
-        if not _CREATOR_CAPTURE_STATE["active"]:
-            _CREATOR_CAPTURE_STATE["provider"] = provider
-            _CREATOR_CAPTURE_STATE["stage"] = "等待内置浏览器"
-
-
-def _begin_creator_browser_capture(provider: str) -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["waiting_count"] = max(0, int(_CREATOR_CAPTURE_STATE["waiting_count"]) - 1)
-        _CREATOR_CAPTURE_STATE["active"] = True
-        _CREATOR_CAPTURE_STATE["provider"] = provider
-        _CREATOR_CAPTURE_STATE["stage"] = "准备采集"
-
-
-def _set_creator_capture_stage(stage: str) -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        if _CREATOR_CAPTURE_STATE["active"]:
-            _CREATOR_CAPTURE_STATE["stage"] = stage
-
-
-def _finish_creator_browser_capture() -> None:
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["active"] = False
-        _CREATOR_CAPTURE_STATE["provider"] = ""
-        _CREATOR_CAPTURE_STATE["stage"] = "等待内置浏览器" if _CREATOR_CAPTURE_STATE["waiting_count"] else "空闲"
-
-
-def _record_creator_list_check(provider: str, *, state: str, detail: str) -> None:
-    if provider not in {"douyin", "bilibili"}:
-        return
-    with _CREATOR_CAPTURE_STATE_LOCK:
-        _CREATOR_CAPTURE_STATE["last_list_checks"][provider] = {
-            "state": state,
-            "detail": str(detail)[:300],
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-
-def _page_reaches_watermark(payload: dict[str, Any], *, provider: str, watermark: datetime | None) -> bool:
-    if not watermark:
-        return False
-    videos, _creator_name, _cursor, _has_more = _parse_page(payload, provider=provider)
-    dated = [_parse_timestamp(video.published_at) for video in videos if video.published_at]
-    return bool(dated) and min(dated) <= watermark
-
-
-def _append_new_videos(
-    destination: list[CreatorVideo],
-    candidates: list[CreatorVideo],
-    *,
-    limit: int,
-    cutoff: datetime | None,
-) -> None:
-    known_ids = {video.canonical_id for video in destination}
-    for video in candidates:
-        if cutoff and video.published_at and _parse_timestamp(video.published_at) < cutoff:
-            continue
-        if video.canonical_id not in known_ids:
-            destination.append(video)
-            known_ids.add(video.canonical_id)
-        if len(destination) >= limit:
-            return
-
-
-def _preview_within_date_range(
-    preview: CreatorPreview,
-    *,
-    after: datetime | None,
-    before: datetime | None,
-) -> CreatorPreview:
-    """Apply the selected date range consistently after provider pagination."""
-    if not after and not before:
-        return preview
-    # Date-only values are inclusive from the UI perspective.
-    inclusive_before = before + timedelta(days=1) if before else None
-    videos = [
-        video for video in preview.videos
-        if video.published_at
-        and (after is None or _parse_timestamp(video.published_at) >= after)
-        and (inclusive_before is None or _parse_timestamp(video.published_at) < inclusive_before)
-    ]
-    return CreatorPreview(
-        provider=preview.provider,
-        source_kind=preview.source_kind,
-        source_url=preview.source_url,
-        creator_key=preview.creator_key,
-        creator_name=preview.creator_name,
-        videos=videos,
-        creator_avatar_url=preview.creator_avatar_url,
-        creator_description=preview.creator_description,
-        collection_id=preview.collection_id,
-        collection_name=preview.collection_name,
+    return capture_creator_browser_pages(
+        source_url=source_url,
+        response_matcher=response_matcher,
+        payload_matcher=payload_matcher,
+        limit=limit,
+        provider=provider,
+        stop_at=stop_at,
+        known_item_ids=known_item_ids,
+        should_continue=_should_continue_creator_capture,
     )
 
 
@@ -1651,196 +920,6 @@ def _link_creator_source_item(connection, source_id: str, content_item_id: str, 
            VALUES (?, ?, ?, ?)""",
         (source_id, content_item_id, remote_item_id, created_at),
     )
-
-
-def _parse_page(payload: dict[str, Any], *, provider: str) -> tuple[list[CreatorVideo], str, int | None, bool]:
-    if provider == "douyin":
-        payload = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-        rows = payload.get("aweme_list") or payload.get("aweme_list_data") or []
-        if not isinstance(rows, list):
-            rows = []
-        videos = [_douyin_video(row) for row in rows if isinstance(row, dict)]
-        videos = [video for video in videos if video is not None]
-        author = payload.get("author") if isinstance(payload.get("author"), dict) else {}
-        creator_name = str(author.get("nickname") or "")
-        if not creator_name and rows and isinstance(rows[0], dict):
-            creator_name = str(((rows[0].get("author") or {}).get("nickname")) or "")
-        next_cursor = _as_int(payload.get("max_cursor") or payload.get("cursor"))
-        return videos, creator_name, next_cursor, bool(payload.get("has_more"))
-
-    root = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    data = root.get("list") if isinstance(root.get("list"), dict) else root
-    rows = data.get("vlist") or data.get("list") or data.get("archives") or data.get("medias") or root.get("archives") or root.get("medias") or []
-    if not isinstance(rows, list):
-        rows = []
-    videos = [_bilibili_video(row) for row in rows if isinstance(row, dict)]
-    videos = [video for video in videos if video is not None]
-    meta = root.get("meta") if isinstance(root.get("meta"), dict) else {}
-    creator_name = str(data.get("owner_name") or data.get("name") or meta.get("owner_name") or meta.get("author") or "")
-    if not creator_name and rows and isinstance(rows[0], dict):
-        creator_name = _bilibili_author_name(rows[0])
-    page_info = data.get("page") if isinstance(data.get("page"), dict) else {}
-    page_number = int(page_info.get("pn") or 1)
-    page_size = int(page_info.get("ps") or len(rows) or PAGE_SIZE)
-    total_items = int(page_info.get("count") or 0)
-    explicit_has_more = data.get("has_more")
-    has_more = bool(explicit_has_more) if isinstance(explicit_has_more, (bool, int)) else bool(rows) and (not total_items or page_number * page_size < total_items)
-    return videos, creator_name, None, has_more
-
-
-def _douyin_video(row: dict[str, Any]) -> CreatorVideo | None:
-    video_id = str(row.get("aweme_id") or row.get("id") or "").strip()
-    if not video_id:
-        return None
-    video = row.get("video") if isinstance(row.get("video"), dict) else {}
-    cover = video.get("cover") if isinstance(video.get("cover"), dict) else {}
-    cover_list = cover.get("url_list") if isinstance(cover.get("url_list"), list) else []
-    published = _timestamp_iso(row.get("create_time"))
-    author = row.get("author") if isinstance(row.get("author"), dict) else {}
-    statistics = row.get("statistics") if isinstance(row.get("statistics"), dict) else {}
-    return CreatorVideo(
-        provider="douyin",
-        canonical_id=video_id,
-        source_url=f"https://www.douyin.com/video/{video_id}",
-        title=str(row.get("desc") or video_id),
-        cover_url=str(cover_list[0]) if cover_list else "",
-        duration_seconds=_as_float(video.get("duration"), scale=1000),
-        published_at=published,
-        description=str(row.get("desc") or ""),
-        author_name=str(author.get("nickname") or ""),
-        tags=tuple(_douyin_tags(row)),
-        stats=_normalized_stats(statistics, {
-            "play": "play_count", "like": "digg_count", "comment": "comment_count",
-            "favorite": "collect_count", "share": "share_count",
-        }),
-    )
-
-
-def _bilibili_video(row: dict[str, Any]) -> CreatorVideo | None:
-    video_id = str(row.get("bvid") or row.get("bv_id") or "").strip()
-    if not video_id:
-        return None
-    cover = row.get("pic") or row.get("cover")
-    if isinstance(cover, str) and cover.startswith("//"):
-        cover = f"https:{cover}"
-    stats_source = dict(row)
-    if isinstance(row.get("stat"), dict):
-        stats_source.update(row["stat"])
-    return CreatorVideo(
-        provider="bilibili",
-        canonical_id=video_id,
-        source_url=f"https://www.bilibili.com/video/{video_id}",
-        title=str(row.get("title") or video_id),
-        cover_url=str(cover or ""),
-        duration_seconds=_duration_from_bilibili(row),
-        published_at=_timestamp_iso(row.get("created") or row.get("pubdate")),
-        description=str(row.get("description") or row.get("desc") or ""),
-        author_name=_bilibili_author_name(row),
-        tags=tuple(_string_list(row.get("tags"))),
-        stats=_normalized_stats(
-            stats_source,
-            {
-                "play": ("view", "play"), "like": "like", "coin": "coin", "favorite": "favorite",
-                "share": "share", "comment": ("reply", "video_review", "comment"), "danmaku": "danmaku",
-            },
-        ),
-    )
-
-
-def _bilibili_author_name(row: dict[str, Any]) -> str:
-    owner = row.get("owner") if isinstance(row.get("owner"), dict) else {}
-    author = row.get("author")
-    return str(owner.get("name") or author or row.get("owner_name") or "")
-
-
-def _douyin_tags(row: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    challenge = row.get("cha_list") or row.get("challenge")
-    if isinstance(challenge, list):
-        values.extend(str(item.get("cha_name") or item.get("title") or "") for item in challenge if isinstance(item, dict))
-    if isinstance(challenge, dict):
-        values.append(str(challenge.get("cha_name") or challenge.get("title") or ""))
-    return _string_list(values)
-
-
-def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, (list, tuple)):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = str(item.get("name") or item.get("tag_name") or "") if isinstance(item, dict) else str(item or "")
-        if text.strip() and text.strip() not in result:
-            result.append(text.strip())
-    return result[:40]
-
-
-def _normalized_stats(raw: Any, aliases: dict[str, str | tuple[str, ...]]) -> dict[str, int]:
-    source = raw if isinstance(raw, dict) else {}
-    values: dict[str, int] = {}
-    for name, aliases_for_value in aliases.items():
-        keys = (aliases_for_value,) if isinstance(aliases_for_value, str) else aliases_for_value
-        value = next((parsed for key in keys if (parsed := _as_int(source.get(key))) is not None and parsed >= 0), None)
-        if value is not None:
-            values[name] = value
-    return values
-
-
-def _collection_name_from_payload(payload: dict[str, Any]) -> str:
-    root = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    meta = root.get("meta") if isinstance(root.get("meta"), dict) else {}
-    for value in (meta.get("name"), meta.get("title"), root.get("season_name"), root.get("title")):
-        if str(value or "").strip():
-            return str(value).strip()
-    return ""
-
-
-def _duration_from_bilibili(row: dict[str, Any]) -> float | None:
-    raw = row.get("length") or row.get("duration")
-    if isinstance(raw, str) and ":" in raw:
-        try:
-            seconds = 0
-            for part in raw.split(":"):
-                seconds = seconds * 60 + int(part)
-            return float(seconds)
-        except ValueError:
-            return None
-    return _as_float(raw)
-
-
-def _as_float(value: Any, *, scale: float = 1) -> float | None:
-    try:
-        return float(value) / scale if value is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _as_int(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _timestamp_iso(value: Any) -> str | None:
-    timestamp = _as_int(value)
-    if timestamp is None or timestamp <= 0:
-        return None
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
-
-
-def _parse_cutoff(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise CreatorSyncError("起始日期格式无效") from exc
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
-
-
-def _parse_timestamp(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value)
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
 
 
 def _fallback_creator_name(provider: str, creator_key: str) -> str:

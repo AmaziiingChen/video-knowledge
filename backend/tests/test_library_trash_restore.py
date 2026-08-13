@@ -1,7 +1,7 @@
 import asyncio
 import sqlite3
 
-from routers import content as content_router
+from routers import library_trash
 
 
 def _connection():
@@ -32,10 +32,10 @@ def test_restoring_a_file_returns_the_content_id_for_progressive_tree_hydration(
         "INSERT INTO content_items (id, deleted_at, trash_batch_id, updated_at) VALUES (?, ?, ?, ?)",
         ("video-1", "2026-08-01T00:00:00+00:00", "batch-1", ""),
     )
-    monkeypatch.setattr(content_router, "initialize_database", lambda: None)
-    monkeypatch.setattr(content_router, "connect", lambda: connection)
+    monkeypatch.setattr(library_trash, "initialize_database", lambda: None)
+    monkeypatch.setattr(library_trash, "connect", lambda: connection)
 
-    restored = asyncio.run(content_router.restore_library_trash_entry("content", "video-1"))
+    restored = asyncio.run(library_trash.restore_library_trash_entry("content", "video-1"))
 
     assert restored["success"] is True
     assert restored["restored_content_ids"] == ["video-1"]
@@ -58,10 +58,10 @@ def test_restoring_a_folder_returns_every_file_in_its_trash_batch(monkeypatch):
             ("video-1", "2026-08-01T00:00:00+00:00", "batch-1", ""),
         ],
     )
-    monkeypatch.setattr(content_router, "initialize_database", lambda: None)
-    monkeypatch.setattr(content_router, "connect", lambda: connection)
+    monkeypatch.setattr(library_trash, "initialize_database", lambda: None)
+    monkeypatch.setattr(library_trash, "connect", lambda: connection)
 
-    restored = asyncio.run(content_router.restore_library_trash_entry("folder", "folder-1"))
+    restored = asyncio.run(library_trash.restore_library_trash_entry("folder", "folder-1"))
 
     assert restored["restored_folder_ids"] == ["folder-1"]
     assert set(restored["restored_content_ids"]) == {"article-1", "video-1"}

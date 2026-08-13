@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from config import settings
 from main import app
-from routers.content import _local_article_html
 from services import article_fetcher, paddle_ocr, public_url, wechat_reports
+from services.article_preview import build_local_article_html
 from services.content_source_text import ContentSourceText
 from services.paddle_ocr import OcrImageResult
 
@@ -414,7 +414,7 @@ def test_wechat_image_only_article_is_cached_before_background_ocr(monkeypatch):
 
 
 def test_article_preview_uses_local_media_for_cached_ocr_images():
-    html = _local_article_html(
+    html = build_local_article_html(
         '''
         <section style="display: flex; width: 42%; margin: 0 auto; position: fixed; background-image: url(javascript:alert(1))">
           <p>正文</p>

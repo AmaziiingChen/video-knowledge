@@ -1,12 +1,27 @@
-from pathlib import Path
 import time
-from collections.abc import Callable
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from pathlib import Path
 
 from config import settings
+
 from services.ai_call_logger import AICallRecord, record_ai_call
+from services.ai_response_envelope import (
+    AIResponseEnvelope,
+    AIResponseStreamEvent,
+    SuggestionTrailerParser,
+)
 from services.database import connect, initialize_database
-from services.llm_provider import LLMMessage, LLMProvider, LLMResponse, LLMUsage, default_llm_provider
+from services.llm_provider import (
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    LLMStreamChunk,
+    LLMUsage,
+    default_llm_provider,
+)
+from services.pipeline_contracts import MAX_REASONING_CONTENT_CHARS, PipelineCancelled
+from services.prompt_file_store import sync_prompt_files
 from services.prompt_templates import (
     DEFAULT_ARTICLE_MATERIAL_REDUCTION_PROMPT,
     DEFAULT_ARTICLE_SUMMARY_PROMPT,
@@ -14,13 +29,15 @@ from services.prompt_templates import (
     DEFAULT_SUMMARY_PROMPT,
     PromptTemplateRepository,
 )
-from services.prompt_file_store import sync_prompt_files
 from services.source_context import (
     render_source_context_for_prompt,
     render_source_context_markdown,
 )
 from services.source_context_prompt import active_source_context_system_prompt
-from services.video_timestamps import normalize_video_summary_timestamps, timestamped_video_transcript
+from services.video_timestamps import (
+    normalize_video_summary_timestamps,
+    timestamped_video_transcript,
+)
 
 SYSTEM_PROMPT = DEFAULT_SUMMARY_PROMPT
 ARTICLE_SYSTEM_PROMPT = DEFAULT_ARTICLE_SUMMARY_PROMPT
@@ -30,6 +47,39 @@ MAX_QA_TRANSCRIPT_CHARS = 60000
 MAX_REGENERATION_DIRECT_SOURCE_CHARS = 54_000
 MAX_REGENERATION_CHUNK_SOURCE_CHARS = 36_000
 MAX_REGENERATION_FINAL_MATERIAL_CHARS = 54_000
+
+
+@dataclass(frozen=True)
+class SummaryStreamEvent:
+    kind: str
+    title: str = ""
+    summary: str = ""
+    reasoning_content: str = ""
+    reasoning_truncated: bool = False
+
+
+@dataclass(frozen=True)
+class MaterialPreparationEvent:
+    kind: str
+    material: str = ""
+    reasoning_delta: str = ""
+
+
+def _stream_provider_events(llm: LLMProvider, messages: list[LLMMessage], *, temperature: float) -> Iterator[LLMStreamChunk]:
+    stream_events = getattr(llm, "chat_stream_events", None)
+    if callable(stream_events):
+        yield from stream_events(messages, temperature=temperature)
+        return
+    usage: LLMUsage | None = None
+
+    def remember(value: LLMUsage) -> None:
+        nonlocal usage
+        usage = value
+
+    for text in llm.chat_stream(messages, temperature=temperature, on_usage=remember):
+        yield LLMStreamChunk(content=text)
+    if usage:
+        yield LLMStreamChunk(usage=usage)
 
 # Re-generation is intentionally separate from ordinary QA. The normal QA
 # path keeps a short, responsive context; this path must account for every
@@ -144,7 +194,7 @@ def summarize(
                 content_item_id=content_item_id,
                 error=str(e),
             )
-        raise Exception(f"DeepSeek API 调用失败: {str(e)}")
+        raise Exception(f"文本模型 API 调用失败: {str(e)}")
 
 
 def summarize_stream(
@@ -159,6 +209,8 @@ def summarize_stream(
     transcript_segments: list[dict] | None = None,
     source_context: dict[str, object] | None = None,
     on_delta: Callable[[str, str], None] | None = None,
+    on_reasoning_delta: Callable[[str, bool], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
 ) -> tuple[str, str]:
     """Generate a summary while exposing safe, renderable partial text.
 
@@ -166,20 +218,82 @@ def summarize_stream(
     ``on_delta`` receives the same title/body split as the final result, so a
     video title line is never rendered as part of the growing summary body.
     """
+    title = video_title
+    summary = ""
+    for event in summarize_stream_events(
+        transcript,
+        video_title,
+        provider=provider,
+        model=model,
+        task_type=task_type,
+        task_id=task_id,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        transcript_segments=transcript_segments,
+        source_context=source_context,
+        cancel_check=cancel_check,
+    ):
+        if event.kind == "reasoning_delta":
+            if on_reasoning_delta:
+                on_reasoning_delta(event.reasoning_content, event.reasoning_truncated)
+            continue
+        if event.kind in {"summary_delta", "done"}:
+            title = event.title
+            summary = event.summary
+            if event.kind == "summary_delta" and on_delta:
+                on_delta(title, summary)
+    return title, summary
+
+
+def summarize_stream_events(
+    transcript: str,
+    video_title: str = "",
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    task_type: str = "summary",
+    task_id: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    transcript_segments: list[dict] | None = None,
+    source_context: dict[str, object] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+) -> Iterator[SummaryStreamEvent]:
+    """Stream one automatic summary without mixing provider reasoning into its body."""
     should_record = provider is None or ai_call_callback is not None
     llm = provider or default_llm_provider(model)
     normalized_task_type = task_type if task_type in {"summary", "article_summary"} else "summary"
     system_prompt = get_active_system_prompt(normalized_task_type)
     timestamp_seconds: set[int] = set()
+    reasoning_parts: list[str] = []
+    reasoning_chars = 0
+    visible_reasoning_chars = 0
+    reasoning_truncated = False
     if normalized_task_type == "article_summary":
-        material = prepare_article_summary_material(
+        material = ""
+        for preparation_event in prepare_article_summary_material_events(
             transcript,
             llm=llm,
             task_id=task_id,
             content_item_id=content_item_id,
             ai_call_callback=ai_call_callback,
             preparation_call_type="article_summary_prepare",
-        )
+        ):
+            if preparation_event.kind == "done":
+                material = preparation_event.material
+                continue
+            delta = preparation_event.reasoning_delta
+            reasoning_chars += len(delta)
+            remaining = MAX_REASONING_CONTENT_CHARS - visible_reasoning_chars
+            if remaining > 0:
+                visible_chunk = delta[:remaining]
+                reasoning_parts.append(visible_chunk)
+                visible_reasoning_chars += len(visible_chunk)
+            reasoning_truncated = reasoning_chars > MAX_REASONING_CONTENT_CHARS
+            yield SummaryStreamEvent(
+                kind="reasoning_delta",
+                reasoning_content="".join(reasoning_parts),
+                reasoning_truncated=reasoning_truncated,
+            )
         user_content = f"文章标题：{video_title}\n\n正文文本：\n{material}"
     else:
         material, timestamp_seconds = timestamped_video_transcript(transcript, transcript_segments)
@@ -203,10 +317,6 @@ def summarize_stream(
     chunks: list[str] = []
     stream_usage: LLMUsage | None = None
 
-    def remember_usage(usage: LLMUsage) -> None:
-        nonlocal stream_usage
-        stream_usage = usage
-
     def split_summary(raw: str) -> tuple[str, str]:
         content = raw.strip()
         if normalized_task_type == "article_summary":
@@ -219,13 +329,35 @@ def summarize_stream(
         return title, summary
 
     try:
-        for chunk in llm.chat_stream(messages, temperature=0.3, on_usage=remember_usage):
-            chunks.append(chunk)
-            if on_delta:
+        for chunk in _stream_provider_events(llm, messages, temperature=0.3):
+            if cancel_check:
+                cancel_check()
+            if chunk.usage:
+                stream_usage = chunk.usage
+            if chunk.reasoning_content:
+                reasoning_chars += len(chunk.reasoning_content)
+                remaining = MAX_REASONING_CONTENT_CHARS - visible_reasoning_chars
+                if remaining > 0:
+                    visible_chunk = chunk.reasoning_content[:remaining]
+                    reasoning_parts.append(visible_chunk)
+                    visible_reasoning_chars += len(visible_chunk)
+                reasoning_truncated = reasoning_chars > MAX_REASONING_CONTENT_CHARS
+                yield SummaryStreamEvent(
+                    kind="reasoning_delta",
+                    reasoning_content="".join(reasoning_parts),
+                    reasoning_truncated=reasoning_truncated,
+                )
+            if chunk.content:
+                chunks.append(chunk.content)
                 title, partial_summary = split_summary("".join(chunks))
-                on_delta(title, partial_summary)
+                yield SummaryStreamEvent(
+                    kind="summary_delta",
+                    title=title,
+                    summary=partial_summary,
+                )
 
         raw_content = "".join(chunks)
+        visible_reasoning = "".join(reasoning_parts)
         title, summary = split_summary(raw_content)
         if should_record:
             provider_response = LLMResponse(
@@ -233,19 +365,28 @@ def summarize_stream(
                 provider=llm.name,
                 model=llm.model,
                 usage=stream_usage,
+                reasoning_content=visible_reasoning,
             )
             record = record_ai_call(
                 call_type="summary",
                 provider_response=provider_response,
                 input_chars=input_chars,
-                output_chars=len(raw_content),
+                output_chars=len(raw_content) + reasoning_chars,
                 elapsed_seconds=time.perf_counter() - started_at,
                 task_id=task_id,
                 content_item_id=content_item_id,
             )
             if record and ai_call_callback:
                 ai_call_callback(record)
-        return title, summary
+        yield SummaryStreamEvent(
+            kind="done",
+            title=title,
+            summary=summary,
+            reasoning_content=visible_reasoning,
+            reasoning_truncated=reasoning_truncated,
+        )
+    except PipelineCancelled:
+        raise
     except Exception as exc:
         if should_record:
             record_ai_call(
@@ -257,7 +398,7 @@ def summarize_stream(
                 content_item_id=content_item_id,
                 error=str(exc),
             )
-        raise Exception(f"DeepSeek API 调用失败: {str(exc)}") from exc
+        raise Exception(f"文本模型 API 调用失败: {str(exc)}") from exc
 
 
 def _trim_transcript_for_qa(transcript: str) -> str:
@@ -284,6 +425,33 @@ def stream_regenerated_content_summary(
     source_context: dict[str, object] | None = None,
 ) -> Iterator[str]:
     """Stream a fresh article, video, or audio summary from the whole source."""
+    for event in stream_regenerated_content_summary_events(
+        transcript=transcript,
+        video_title=video_title,
+        content_kind=content_kind,
+        provider=provider,
+        model=model,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        transcript_segments=transcript_segments,
+        source_context=source_context,
+    ):
+        if event.kind == "answer_delta":
+            yield event.text
+
+
+def stream_regenerated_content_summary_events(
+    transcript: str,
+    video_title: str = "",
+    content_kind: str = "article",
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    transcript_segments: list[dict] | None = None,
+    source_context: dict[str, object] | None = None,
+) -> Iterator[AIResponseStreamEvent]:
+    """Stream a fresh summary with reasoning and follow-up metadata separated."""
     source_text = str(transcript or "").strip()
     if not source_text:
         raise ValueError("缺少可重新总结的正文、字幕或转写文本")
@@ -295,17 +463,28 @@ def stream_regenerated_content_summary(
     if normalized_kind in {"video", "audio"}:
         source_text, timestamp_seconds = timestamped_video_transcript(source_text, transcript_segments)
 
-    if len(source_text) <= MAX_REGENERATION_DIRECT_SOURCE_CHARS:
-        final_material = source_text
-    else:
-        final_material = prepare_article_summary_material(
-            source_text,
-            llm=llm,
-            task_id=None,
-            content_item_id=content_item_id,
-            ai_call_callback=ai_call_callback,
-            preparation_call_type="article_regeneration_prepare",
-        )
+    reasoning_parts: list[str] = []
+    visible_reasoning_chars = 0
+    final_material = ""
+    for preparation_event in prepare_article_summary_material_events(
+        source_text,
+        llm=llm,
+        task_id=None,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        preparation_call_type="article_regeneration_prepare",
+    ):
+        if preparation_event.kind == "done":
+            final_material = preparation_event.material
+            continue
+        remaining = MAX_REASONING_CONTENT_CHARS - visible_reasoning_chars
+        if remaining <= 0:
+            continue
+        visible_chunk = preparation_event.reasoning_delta[:remaining]
+        reasoning_parts.append(visible_chunk)
+        visible_reasoning_chars += len(visible_chunk)
+        if visible_chunk:
+            yield AIResponseStreamEvent(kind="reasoning_delta", text=visible_chunk)
 
     messages = _build_regeneration_messages(
         video_title,
@@ -317,6 +496,7 @@ def stream_regenerated_content_summary(
     input_chars = sum(len(message.content) for message in messages)
     started_at = time.perf_counter()
     chunks: list[str] = []
+    final_reasoning_chars = 0
     stream_usage: LLMUsage | None = None
 
     def remember_usage(usage: LLMUsage) -> None:
@@ -324,25 +504,52 @@ def stream_regenerated_content_summary(
         stream_usage = usage
 
     try:
-        for chunk in llm.chat_stream(messages, temperature=0.25, on_usage=remember_usage):
-            chunks.append(chunk)
-            yield chunk
+        parser = SuggestionTrailerParser()
+        visible_chars = 0
+        for chunk in _stream_provider_events(llm, messages, temperature=0.25):
+            if chunk.usage:
+                remember_usage(chunk.usage)
+            if chunk.reasoning_content:
+                final_reasoning_chars += len(chunk.reasoning_content)
+                remaining = MAX_REASONING_CONTENT_CHARS - visible_reasoning_chars
+                if remaining > 0:
+                    visible_chunk = chunk.reasoning_content[:remaining]
+                    reasoning_parts.append(visible_chunk)
+                    visible_reasoning_chars += len(visible_chunk)
+                    if visible_chunk:
+                        yield AIResponseStreamEvent(kind="reasoning_delta", text=visible_chunk)
+            if chunk.content:
+                chunks.append(chunk.content)
+                visible = parser.feed(chunk.content)
+                if visible:
+                    visible_chars += len(visible)
+                    yield AIResponseStreamEvent(kind="answer_delta", text=visible)
+        envelope = parser.finish()
+        if len(envelope.answer) > visible_chars:
+            yield AIResponseStreamEvent(kind="answer_delta", text=envelope.answer[visible_chars:])
+        envelope = type(envelope)(
+            answer=envelope.answer,
+            reasoning_content="".join(reasoning_parts),
+            suggested_questions=envelope.suggested_questions,
+        )
         provider_response = LLMResponse(
             content="",
             provider=llm.name,
             model=llm.model,
             usage=stream_usage,
+            reasoning_content=envelope.reasoning_content,
         ) if stream_usage else None
         record = record_ai_call(
             call_type="article_regeneration",
             provider_response=provider_response,
             input_chars=input_chars,
-            output_chars=len("".join(chunks)),
+            output_chars=len("".join(chunks)) + final_reasoning_chars,
             elapsed_seconds=time.perf_counter() - started_at,
             content_item_id=content_item_id,
         )
         if record and ai_call_callback:
             ai_call_callback(record)
+        yield AIResponseStreamEvent(kind="done", envelope=envelope)
     except Exception as exc:
         error_message = str(exc)
         if "timed out" in error_message.lower() or "timeout" in error_message.lower():
@@ -355,7 +562,7 @@ def stream_regenerated_content_summary(
             content_item_id=content_item_id,
             error=error_message,
         )
-        raise Exception(f"DeepSeek API 调用失败: {error_message}") from exc
+        raise Exception(f"文本模型 API 调用失败: {error_message}") from exc
 
 
 def stream_regenerated_article_summary(
@@ -440,11 +647,37 @@ def prepare_article_summary_material(
     preparation_call_type: str,
 ) -> str:
     """Return source text directly or compact oversized material in source order."""
+    material = ""
+    for event in prepare_article_summary_material_events(
+        source_text,
+        llm=llm,
+        task_id=task_id,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        preparation_call_type=preparation_call_type,
+    ):
+        if event.kind == "done":
+            material = event.material
+    return material
+
+
+def prepare_article_summary_material_events(
+    source_text: str,
+    *,
+    llm: LLMProvider,
+    task_id: str | None,
+    content_item_id: str | None,
+    ai_call_callback: Callable[[AICallRecord], None] | None,
+    preparation_call_type: str,
+) -> Iterator[MaterialPreparationEvent]:
+    """Stream material-reduction reasoning, then yield the ordered material."""
     if len(source_text) <= MAX_REGENERATION_DIRECT_SOURCE_CHARS:
-        return source_text
+        yield MaterialPreparationEvent(kind="done", material=source_text)
+        return
     chunks = _split_text_in_order(source_text, MAX_REGENERATION_CHUNK_SOURCE_CHARS)
-    extracts = [
-        _reduce_article_material(
+    extracts: list[str] = []
+    for index, chunk in enumerate(chunks, start=1):
+        for event in _reduce_article_material_events(
             chunk,
             llm=llm,
             task_id=task_id,
@@ -452,9 +685,11 @@ def prepare_article_summary_material(
             ai_call_callback=ai_call_callback,
             call_type=preparation_call_type,
             label=f"原文第 {index} / {len(chunks)} 段",
-        )
-        for index, chunk in enumerate(chunks, start=1)
-    ]
+        ):
+            if event.kind == "done":
+                extracts.append(event.material)
+            else:
+                yield event
 
     # A very long article can still produce too many extracts for the final
     # context. Re-compress in consecutive batches, never reordering source.
@@ -468,8 +703,9 @@ def prepare_article_summary_material(
             # The reduction prompt asks for a compact output. This guard makes
             # progress even if a provider returns an unexpectedly verbose reply.
             batches = _split_text_in_order(batches[0], MAX_REGENERATION_CHUNK_SOURCE_CHARS // 2)
-        extracts = [
-            _reduce_article_material(
+        next_extracts: list[str] = []
+        for index, batch in enumerate(batches, start=1):
+            for event in _reduce_article_material_events(
                 batch,
                 llm=llm,
                 task_id=task_id,
@@ -477,10 +713,13 @@ def prepare_article_summary_material(
                 ai_call_callback=ai_call_callback,
                 call_type=preparation_call_type,
                 label=f"顺序材料汇总第 {index} / {len(batches)} 段",
-            )
-            for index, batch in enumerate(batches, start=1)
-        ]
-    return "\n\n".join(extracts).strip()
+            ):
+                if event.kind == "done":
+                    next_extracts.append(event.material)
+                else:
+                    yield event
+        extracts = next_extracts
+    yield MaterialPreparationEvent(kind="done", material="\n\n".join(extracts).strip())
 
 
 def _split_text_in_order(text: str, limit: int) -> list[str]:
@@ -536,14 +775,52 @@ def _reduce_article_material(
     label: str,
     call_type: str,
 ) -> str:
+    extracted = ""
+    for event in _reduce_article_material_events(
+        material,
+        llm=llm,
+        task_id=task_id,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        label=label,
+        call_type=call_type,
+    ):
+        if event.kind == "done":
+            extracted = event.material
+    return extracted
+
+
+def _reduce_article_material_events(
+    material: str,
+    *,
+    llm: LLMProvider,
+    task_id: str | None,
+    content_item_id: str | None,
+    ai_call_callback: Callable[[AICallRecord], None] | None,
+    label: str,
+    call_type: str,
+) -> Iterator[MaterialPreparationEvent]:
     messages = [
         LLMMessage(role="system", content=get_active_system_prompt("article_material_reduction")),
         LLMMessage(role="user", content=f"{label}：\n\n{material}"),
     ]
     input_chars = sum(len(message.content) for message in messages)
     started_at = time.perf_counter()
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    stream_usage: LLMUsage | None = None
     try:
-        response = llm.chat(messages, temperature=0.1)
+        for chunk in _stream_provider_events(llm, messages, temperature=0.1):
+            if chunk.usage:
+                stream_usage = chunk.usage
+            if chunk.reasoning_content:
+                reasoning_parts.append(chunk.reasoning_content)
+                yield MaterialPreparationEvent(
+                    kind="reasoning_delta",
+                    reasoning_delta=chunk.reasoning_content,
+                )
+            if chunk.content:
+                content_parts.append(chunk.content)
     except Exception as exc:
         record_ai_call(
             call_type=call_type,
@@ -556,9 +833,16 @@ def _reduce_article_material(
         )
         raise Exception(f"全文材料整理失败: {str(exc)}") from exc
 
-    extracted = response.content.strip()
+    extracted = "".join(content_parts).strip()
     if not extracted:
         raise ValueError("全文材料整理未返回内容")
+    response = LLMResponse(
+        content=extracted,
+        provider=llm.name,
+        model=llm.model,
+        usage=stream_usage,
+        reasoning_content="".join(reasoning_parts),
+    )
     record = record_ai_call(
         call_type=call_type,
         provider_response=response,
@@ -570,7 +854,7 @@ def _reduce_article_material(
     )
     if record and ai_call_callback:
         ai_call_callback(record)
-    return extracted
+    yield MaterialPreparationEvent(kind="done", material=extracted)
 
 
 def answer_question(
@@ -586,6 +870,27 @@ def answer_question(
     ai_call_callback: Callable[[AICallRecord], None] | None = None,
     source_context: dict[str, object] | None = None,
 ) -> str:
+    return answer_question_envelope(
+        question=question, summary=summary, transcript=transcript,
+        video_title=video_title, history=history, provider=provider, model=model,
+        task_id=task_id, content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback, source_context=source_context,
+    ).answer
+
+
+def answer_question_envelope(
+    question: str,
+    summary: str,
+    transcript: str,
+    video_title: str = "",
+    history: list[dict] | None = None,
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    task_id: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    source_context: dict[str, object] | None = None,
+) -> AIResponseEnvelope:
     should_record = provider is None or ai_call_callback is not None
     llm = provider or default_llm_provider(model)
     messages, input_chars = build_qa_messages(
@@ -615,7 +920,14 @@ def answer_question(
             )
             if record and ai_call_callback:
                 ai_call_callback(record)
-        return response.content.strip()
+        parser = SuggestionTrailerParser()
+        parser.feed(response.content)
+        parsed = parser.finish()
+        return AIResponseEnvelope(
+            answer=parsed.answer.strip(),
+            reasoning_content=response.reasoning_content,
+            suggested_questions=parsed.suggested_questions,
+        )
     except Exception as e:
         if should_record:
             record_ai_call(
@@ -627,7 +939,7 @@ def answer_question(
                 content_item_id=content_item_id,
                 error=str(e),
             )
-        raise Exception(f"DeepSeek API 调用失败: {str(e)}")
+        raise Exception(f"文本模型 API 调用失败: {str(e)}")
 
 
 def stream_answer_question(
@@ -643,6 +955,36 @@ def stream_answer_question(
     ai_call_callback: Callable[[AICallRecord], None] | None = None,
     source_context: dict[str, object] | None = None,
 ) -> Iterator[str]:
+    for event in stream_answer_question_events(
+        question=question,
+        summary=summary,
+        transcript=transcript,
+        video_title=video_title,
+        history=history,
+        provider=provider,
+        model=model,
+        task_id=task_id,
+        content_item_id=content_item_id,
+        ai_call_callback=ai_call_callback,
+        source_context=source_context,
+    ):
+        if event.kind == "answer_delta":
+            yield event.text
+
+
+def stream_answer_question_events(
+    question: str,
+    summary: str,
+    transcript: str,
+    video_title: str = "",
+    history: list[dict] | None = None,
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    task_id: str | None = None,
+    content_item_id: str | None = None,
+    ai_call_callback: Callable[[AICallRecord], None] | None = None,
+    source_context: dict[str, object] | None = None,
+) -> Iterator[AIResponseStreamEvent]:
     llm = provider or default_llm_provider(model)
     messages, input_chars = build_qa_messages(
         question=question,
@@ -654,6 +996,7 @@ def stream_answer_question(
     )
     started_at = time.perf_counter()
     chunks: list[str] = []
+    reasoning_chunks: list[str] = []
     stream_usage: LLMUsage | None = None
 
     def remember_usage(usage: LLMUsage) -> None:
@@ -661,26 +1004,47 @@ def stream_answer_question(
         stream_usage = usage
 
     try:
-        for chunk in llm.chat_stream(messages, temperature=0.2, on_usage=remember_usage):
-            chunks.append(chunk)
-            yield chunk
+        parser = SuggestionTrailerParser()
+        visible_chars = 0
+        for chunk in _stream_provider_events(llm, messages, temperature=0.2):
+            if chunk.usage:
+                remember_usage(chunk.usage)
+            if chunk.reasoning_content:
+                reasoning_chunks.append(chunk.reasoning_content)
+                yield AIResponseStreamEvent(kind="reasoning_delta", text=chunk.reasoning_content)
+            if chunk.content:
+                chunks.append(chunk.content)
+                visible = parser.feed(chunk.content)
+                if visible:
+                    visible_chars += len(visible)
+                    yield AIResponseStreamEvent(kind="answer_delta", text=visible)
+        envelope = parser.finish()
+        if len(envelope.answer) > visible_chars:
+            yield AIResponseStreamEvent(kind="answer_delta", text=envelope.answer[visible_chars:])
+        envelope = type(envelope)(
+            answer=envelope.answer,
+            reasoning_content="".join(reasoning_chunks),
+            suggested_questions=envelope.suggested_questions,
+        )
         provider_response = LLMResponse(
             content="",
             provider=llm.name,
             model=llm.model,
             usage=stream_usage,
+            reasoning_content=envelope.reasoning_content,
         ) if stream_usage else None
         record = record_ai_call(
             call_type="qa",
             provider_response=provider_response,
             input_chars=input_chars,
-            output_chars=len("".join(chunks)),
+            output_chars=len("".join(chunks)) + len(envelope.reasoning_content),
             elapsed_seconds=time.perf_counter() - started_at,
             task_id=task_id,
             content_item_id=content_item_id,
         )
         if record and ai_call_callback:
             ai_call_callback(record)
+        yield AIResponseStreamEvent(kind="done", envelope=envelope)
     except Exception as e:
         record_ai_call(
             call_type="qa",
@@ -691,7 +1055,7 @@ def stream_answer_question(
             content_item_id=content_item_id,
             error=str(e),
         )
-        raise Exception(f"DeepSeek API 调用失败: {str(e)}")
+        raise Exception(f"文本模型 API 调用失败: {str(e)}")
 
 
 def build_qa_messages(

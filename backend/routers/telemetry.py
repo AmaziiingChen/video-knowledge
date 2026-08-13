@@ -1,25 +1,24 @@
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-
 from services import telemetry
-
 
 router = APIRouter()
 
 
 class TelemetrySettingsRequest(BaseModel):
     enabled: bool
+    privacy_notice_version: str = ""
 
 
 class TelemetryEventRequest(BaseModel):
     event_name: Literal[
         "app_started", "workspace_opened", "import_started", "import_completed", "task_enqueued",
-        "pipeline_stage_completed", "pipeline_stage_failed", "task_finished", "task_control_used",
+        "pipeline_stage_reached", "pipeline_stage_failed", "task_finished", "task_control_used",
         "paddle_ocr_completed", "obsidian_sync_completed", "search_completed", "clipboard_listener_changed",
         "update_check_completed", "telemetry_consent_changed", "update_download_page_opened",
-        "media_download_completed", "asr_completed", "ai_summary_completed", "export_completed",
+        "export_completed",
     ]
     properties: dict[str, str] = {}
 
@@ -31,7 +30,10 @@ def telemetry_status() -> dict[str, object]:
 
 @router.put("/telemetry")
 def save_telemetry_settings(request: TelemetrySettingsRequest) -> dict[str, object]:
-    return telemetry.set_enabled(request.enabled)
+    try:
+        return telemetry.set_enabled(request.enabled, notice_version=request.privacy_notice_version)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.post("/telemetry/events", status_code=204)

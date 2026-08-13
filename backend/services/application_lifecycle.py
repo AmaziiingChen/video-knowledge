@@ -1,7 +1,13 @@
 """Application startup and shutdown orchestration for the local backend."""
 
 from config import settings
+
 from services import telemetry as telemetry_service
+from services.article_ingest_preparation import (
+    enqueue_pending_article_preparation,
+    shutdown_article_source_preparation,
+    start_article_source_preparation,
+)
 from services.cache_retention import cache_retention_scheduler
 from services.campus_digest_scheduler import campus_digest_scheduler
 from services.campus_source_scheduler import campus_source_scheduler
@@ -10,7 +16,10 @@ from services.creator_scheduler import creator_subscription_scheduler
 from services.database import connect, initialize_database
 from services.favorite_scheduler import favorite_subscription_scheduler
 from services.forum_capture_repository import repair_forum_capture_document_types
-from services.knowledge_library import ensure_library_layout, recover_legacy_report_documents
+from services.knowledge_library import (
+    ensure_library_layout,
+    recover_legacy_report_documents,
+)
 from services.llm_settings import apply_saved_llm_settings
 from services.miniprogram_forum_collector import miniprogram_forum_collector
 from services.miniprogram_forum_settings import miniprogram_forum_scheduler
@@ -24,6 +33,7 @@ from services.report_group_scheduler import report_group_scheduler
 from services.rss_scheduler import rss_subscription_scheduler
 from services.search_index_scheduler import search_index_scheduler
 from services.task_manager import task_manager
+from services.telemetry_uploader import telemetry_uploader
 from services.watcher_restore import restore_enabled_watchers, stop_watchers
 from services.wechat_draft_tasks import wechat_draft_task_manager
 from services.wechat_public_scheduler import wechat_public_album_scheduler
@@ -35,6 +45,10 @@ from services.wechat_subscription import (
 
 
 async def start_application() -> None:
+    # Resolve the durable telemetry preference before the first event. A fresh
+    # installation starts enabled; an explicit local opt-out remains disabled
+    # across restarts and manual application updates.
+    telemetry_service.bootstrap()
     telemetry_service.record("app_started")
     ensure_library_layout()
     try:
@@ -64,6 +78,12 @@ async def start_application() -> None:
         connection.commit()
     miniprogram_forum_collector.recover_stale_runs()
     interrupted_initial_syncs = wechat_subscription_service.recover_interrupted_initial_syncs()
+    # Body capture and OCR preparation use in-memory executors.  Their durable
+    # readiness state lives on the content item, so rebuild that bounded queue
+    # once after database/index repair when a previous desktop session ended.
+    start_article_source_preparation()
+    enqueue_pending_article_preparation()
+    telemetry_uploader.start()
     if settings.miniprogram_forum_capture_enabled:
         miniprogram_forum_scheduler.start()
     task_manager.recover_from_database()
@@ -99,6 +119,7 @@ async def start_application() -> None:
 
 
 async def stop_application() -> None:
+    telemetry_uploader.stop()
     telemetry_service.flush()
     stop_watchers()
     openclaw_notification_scheduler.stop()
@@ -115,3 +136,4 @@ async def stop_application() -> None:
     favorite_subscription_scheduler.stop()
     rss_subscription_scheduler.stop()
     report_group_scheduler.stop()
+    shutdown_article_source_preparation(wait=True)

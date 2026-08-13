@@ -19,6 +19,7 @@ from services.creator_sync import (
 )
 from services.bilibili_auth import get_bilibili_cookie_status
 from services.douyin_cookie_status import get_douyin_cookie_status
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
 
 
 router = APIRouter()
@@ -152,6 +153,8 @@ async def preview_creator_source_endpoint(req: CreatorSourceRequest):
             published_before=req.published_before,
             allow_personal_sources=req.allow_personal_sources,
         )
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CreatorSyncError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _preview_response(preview)
@@ -161,6 +164,8 @@ async def preview_creator_source_endpoint(req: CreatorSourceRequest):
 async def sync_creator_source_endpoint(req: CreatorSourceRequest):
     try:
         result = await asyncio.to_thread(sync_creator_source, **req.model_dump())
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CreatorSyncError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CreatorSyncResponse(**result.__dict__)
@@ -172,6 +177,8 @@ async def sync_saved_creator_source_endpoint(source_id: str):
         # This endpoint is the ordinary update check. Historical failures are
         # retried only through the explicit retry action/task payload.
         result = await asyncio.to_thread(sync_saved_creator_source, source_id, retry_existing_items=False)
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="创作者订阅不存在") from exc
     except CreatorSyncError as exc:

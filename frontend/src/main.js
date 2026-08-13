@@ -30,6 +30,7 @@ import 'element-plus/dist/index.css'
 import axios from 'axios'
 import App from './App.vue'
 import AppTooltip from './components/AppTooltip.vue'
+import { DEFAULT_APPEARANCE_THEME } from './config/desktopPresentation.js'
 import { installLocalApiAuth } from './utils/localApiAuth.js'
 
 const root = document.querySelector('#app')
@@ -108,9 +109,9 @@ const elementComponents = [
 try {
   const rawAppearance = localStorage.getItem('video-knowledge.appearance-settings.v1')
   const savedTheme = rawAppearance ? JSON.parse(rawAppearance).theme : ''
-  document.documentElement.dataset.theme = savedTheme || 'paper'
+  document.documentElement.dataset.theme = savedTheme || DEFAULT_APPEARANCE_THEME
 } catch {
-  document.documentElement.dataset.theme = 'paper'
+  document.documentElement.dataset.theme = DEFAULT_APPEARANCE_THEME
 }
 
 try {

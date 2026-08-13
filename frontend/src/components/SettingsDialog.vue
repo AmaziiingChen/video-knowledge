@@ -87,17 +87,32 @@
         </section>
 
         <section v-show="settingsSection === 'privacy'" class="settings-page settings-form-page" aria-label="隐私与诊断">
-          <div class="settings-group">
+          <div class="settings-group" :aria-busy="telemetryStatusLoading || telemetrySaving">
             <div class="settings-row">
               <div class="settings-row-copy">
-                <h3>发送匿名使用数据</h3>
-                <p>默认关闭。只记录 20 个固定检查点的结果，不包含文章、视频、OCR 文本、搜索词、路径、链接、账号或密钥。关闭会删除本机待发送事件。</p>
+                <h3>发送去标识使用诊断</h3>
+                <p>新安装默认开启，低频发送 17 个固定检查点到 Cloudflare。不会包含文章、视频、OCR 文本、搜索词、路径、链接、账号、密钥或错误原文；数据最多保留 3 个月。事件范围或用途变更时会再次告知。</p>
               </div>
               <div class="settings-row-control settings-switch-control">
-                <el-switch v-model="telemetryEnabled" :loading="telemetrySaving" aria-label="发送匿名使用数据" @change="saveTelemetry" />
+                <el-switch
+                  v-model="telemetryEnabled"
+                  :loading="telemetryStatusLoading || telemetrySaving"
+                  :disabled="!telemetryStatusLoaded || telemetryStatusLoading || telemetrySaving"
+                  aria-label="发送去标识使用诊断"
+                  aria-describedby="telemetry-status-note"
+                  @change="saveTelemetry"
+                />
               </div>
             </div>
-            <p class="settings-group-note">本机待发送：{{ telemetryPendingEvents }} 条。未配置官方 HTTPS 收集端前不会上传。</p>
+            <p id="telemetry-status-note" class="settings-group-note" role="status" aria-live="polite">
+              <template v-if="telemetryStatusLoading">正在读取当前诊断状态…</template>
+              <template v-else-if="telemetryStatusError">
+                {{ telemetryStatusError }}
+                <el-button link size="small" @click="loadTelemetryStatus">重试</el-button>
+              </template>
+              <template v-else-if="telemetryStatusLoaded">本机待发送：{{ telemetryPendingEvents }} 条。关闭会删除本机队列和随机安装标识，只保留“不发送”的本机偏好；已发送数据将在保留期结束后删除。</template>
+              <template v-else>尚未读取当前诊断状态。</template>
+            </p>
           </div>
         </section>
 
@@ -123,30 +138,17 @@
             <div class="settings-group-head">文本模型</div>
             <div class="settings-ai-field settings-ai-service">
               <div class="settings-ai-field-heading">
-                <h3>DeepSeek 大语言模型</h3>
-                <p>用于文章总结与追问。密钥只保存在本机。</p>
+                <h3>文本模型服务</h3>
+                <p>管理 DeepSeek、千问、MiMo 与其他 OpenAI 兼容服务。不会自动切换服务。</p>
               </div>
-              <label class="settings-ai-input-label" for="default-ai-model">Model</label>
-              <el-select id="default-ai-model" v-model="selectedAiModel" class="settings-ai-select" name="default-ai-model" filterable allow-create default-first-option aria-label="默认 AI 模型" placeholder="选择或输入模型">
-                <el-option v-for="option in aiModelOptions" :key="option.value" :label="option.label" :value="option.value" />
-              </el-select>
-              <label class="settings-ai-input-label" for="deepseek-api-key">API Key</label>
-              <el-input id="deepseek-api-key" v-model="deepseekApiKey" class="settings-ai-icon-input" :type="showDeepseekApiKey ? 'text' : 'password'" name="deepseek-api-key" autocomplete="off" spellcheck="false" aria-label="DeepSeek API Key" :placeholder="credentialPlaceholder(deepseekConfigured, 'API Key')">
-                <template #prefix><SvgMaskIcon :src="keyCircleIcon" :size="17" /></template>
-                <template #suffix><button class="settings-ai-input-icon-button" type="button" :aria-label="showDeepseekApiKey ? '隐藏 DeepSeek API Key' : '显示 DeepSeek API Key'" @mousedown.prevent @click="toggleDeepseekApiKeyVisibility"><SvgMaskIcon :src="showDeepseekApiKey ? eyeSlashIcon : eyeIcon" :size="17" /></button></template>
-              </el-input>
-              <label class="settings-ai-input-label" for="deepseek-base-url">Base URL</label>
-              <el-input id="deepseek-base-url" v-model="deepseekBaseUrl" class="settings-ai-icon-input" type="url" name="deepseek-base-url" autocomplete="off" inputmode="url" spellcheck="false" aria-label="DeepSeek Base URL" placeholder="https://api.deepseek.com">
-                <template #prefix><SvgMaskIcon :src="globeIcon" :size="17" /></template>
-              </el-input>
-              <div class="settings-ai-field-actions">
-                <el-button size="small" :loading="testingDeepseekConnection" :disabled="savingDeepseekSettings" @click="emit('test-deepseek-connection')">测试连接</el-button>
-                <el-button size="small" type="primary" :loading="savingDeepseekSettings" :disabled="testingDeepseekConnection" @click="emit('save-deepseek-settings')">保存</el-button>
-              </div>
+              <TextModelProviderSettings
+                v-model:selected-model="selectedAiModel"
+                @options-updated="emit('text-model-options-updated', $event)"
+              />
             </div>
             <div class="settings-ai-field settings-ai-pricing-field">
               <details class="settings-ai-pricing-disclosure" open>
-                <summary><span>Token 估算价格</span></summary>
+                <summary><span>DeepSeek Token 估算价格</span></summary>
                 <p>单位为元／百万 tokens；仅用于本机估算，最终扣费以服务商账单为准。</p>
                 <div class="settings-pricing-control">
                   <div v-for="model in textPricingModels" :key="model.key" class="settings-pricing-card">
@@ -159,6 +161,9 @@
                     <span><strong>高峰计价</strong> 如服务商账单启用，北京时间每日 9:00–12:00、14:00–18:00</span>
                     <label>高峰倍率<el-input-number v-model="deepseekPeakPricingMultiplier" :min="0" :max="100" :step="0.1" :precision="2" :controls="false" /></label>
                   </div>
+                </div>
+                <div class="settings-actions settings-ai-actions">
+                  <el-button type="primary" size="small" :loading="savingDeepseekSettings" :disabled="savingDeepseekSettings" @click="emit('save-deepseek-settings')">保存估算价格</el-button>
                 </div>
               </details>
             </div>
@@ -476,21 +481,21 @@
             <div class="settings-platform-credential">
               <div class="settings-row-copy">
                 <h3>小红书登录凭据</h3>
-                <p>{{ xiaohongshuCookieConfigured ? '已保存，可用于读取主动导入的图文。' : '在应用内登录后自动保存，不需要复制浏览器 Cookie。' }}</p>
+                <p>{{ xiaohongshuNoteCaptureAvailable ? (xiaohongshuCookieConfigured ? '已保存，可用于主动导入单篇图文。' : '在应用内登录后自动保存，不需要复制浏览器 Cookie。') : xiaohongshuNoteCaptureReason }}</p>
               </div>
               <div class="settings-platform-credential-meta">
                 <span class="settings-status" :class="`is-${xiaohongshuCookieState}`">{{ xiaohongshuCookieStatusText }}</span>
                 <span class="settings-credential-domain">xiaohongshu.com</span>
               </div>
               <div class="settings-platform-credential-actions">
-                <span>登录窗口与主应用隔离；只保存本机小红书会话，不会展示原始 Cookie。</span>
+                <span>登录窗口与主应用隔离；凭据仅保存在本机且不会展示。当前仅支持主动导入单篇图文，收藏、创作者同步与评论采集暂未开放。</span>
                 <div class="settings-platform-credential-buttons">
-                  <el-button size="small" type="primary" round :loading="xiaohongshuAuthConnecting" :disabled="!platformAuthAvailable" @click="connectXiaohongshuAuth">登录并连接</el-button>
-                  <el-button size="small" plain round :loading="xiaohongshuCookieState === 'loading'" @click="loadXiaohongshuCookieStatus(true)">检查可用性</el-button>
+                  <el-button size="small" type="primary" round :loading="xiaohongshuAuthConnecting" :disabled="!platformAuthAvailable || !xiaohongshuSessionProbeAvailable" @click="connectXiaohongshuAuth">登录并连接</el-button>
+                  <el-button size="small" plain round :loading="xiaohongshuCookieState === 'loading'" :disabled="!xiaohongshuSessionProbeAvailable" @click="loadXiaohongshuCookieStatus(true)">检查可用性</el-button>
                   <el-button v-if="xiaohongshuCookieConfigured && platformAuthAvailable" size="small" text class="settings-disconnect-button" :disabled="xiaohongshuAuthConnecting" @click="disconnectXiaohongshuAuth">断开</el-button>
                 </div>
               </div>
-              <details class="settings-manual-credential"><summary>手动粘贴 Cookie（备用）</summary><div class="settings-platform-credential-input"><div class="settings-input-group"><span class="settings-input-group-addon">Cookie</span><el-input class="settings-cookie-input" v-model="xiaohongshuCookieInput" type="password" name="xiaohongshu-cookie" autocomplete="off" spellcheck="false" aria-label="小红书 Cookie" :placeholder="credentialPlaceholder(xiaohongshuCookieConfigured, 'Cookie')" /><el-button class="settings-input-group-action" type="primary" :loading="savingXiaohongshuCookie" :disabled="!xiaohongshuCookieInput.trim()" @click="saveXiaohongshuCookie">保存</el-button></div></div></details>
+              <details v-if="xiaohongshuCredentialStorageAvailable" class="settings-manual-credential"><summary>手动粘贴 Cookie（备用）</summary><div class="settings-platform-credential-input"><div class="settings-input-group"><span class="settings-input-group-addon">Cookie</span><el-input class="settings-cookie-input" v-model="xiaohongshuCookieInput" type="password" name="xiaohongshu-cookie" autocomplete="off" spellcheck="false" aria-label="小红书 Cookie" :placeholder="credentialPlaceholder(xiaohongshuCookieConfigured, 'Cookie')" /><el-button class="settings-input-group-action" type="primary" :loading="savingXiaohongshuCookie" :disabled="!xiaohongshuCookieInput.trim()" @click="saveXiaohongshuCookie">保存</el-button></div></div></details>
             </div>
           </div>
         </section>
@@ -503,8 +508,10 @@
 import { computed, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import { IconX } from '@tabler/icons-vue'
+import { IconX } from './macosSymbolComponents.js'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
+import TextModelProviderSettings from '../features/settings/TextModelProviderSettings.vue'
+import { useTelemetrySettingsController } from '../features/telemetry/useTelemetrySettingsController.js'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import { API_BASE as API } from '../utils/localApiAuth.js'
 import SvgMaskIcon from './SvgMaskIcon.vue'
@@ -522,8 +529,6 @@ import { requestDestructiveConfirmation } from '../composables/useDestructiveCon
 const modelValue = defineModel({ type: Boolean, default: false })
 const selectedTheme = defineModel('selectedTheme', { type: String, default: '' })
 const selectedAiModel = defineModel('selectedAiModel', { type: String, default: '' })
-const deepseekApiKey = defineModel('deepseekApiKey', { type: String, default: '' })
-const deepseekBaseUrl = defineModel('deepseekBaseUrl', { type: String, default: 'https://api.deepseek.com' })
 const deepseekPricing = defineModel('deepseekPricing', {
   type: Object,
   default: () => ({
@@ -538,7 +543,6 @@ const embeddingModel = defineModel('embeddingModel', { type: String, default: 'q
 const paddleOcrAccessToken = defineModel('paddleOcrAccessToken', { type: String, default: '' })
 const paddleOcrBaseUrl = defineModel('paddleOcrBaseUrl', { type: String, default: 'https://paddleocr.aistudio-app.com/api/v2/ocr/jobs' })
 const paddleOcrModel = defineModel('paddleOcrModel', { type: String, default: 'PaddleOCR-VL-1.6' })
-const showDeepseekApiKey = ref(false)
 const showEmbeddingApiKey = ref(false)
 const showPaddleOcrAccessToken = ref(false)
 const showWechatQwenCoverApiKey = ref(false)
@@ -616,7 +620,6 @@ const {
   savingMediaTools,
   deepseekConfigured,
   savingDeepseekSettings,
-  testingDeepseekConnection,
   embeddingConfigured,
   savingEmbeddingSettings,
   testingEmbeddingConnection,
@@ -677,7 +680,6 @@ const {
   savingMediaTools: Boolean,
   deepseekConfigured: Boolean,
   savingDeepseekSettings: Boolean,
-  testingDeepseekConnection: Boolean,
   embeddingConfigured: Boolean,
   savingEmbeddingSettings: Boolean,
   testingEmbeddingConnection: Boolean,
@@ -753,7 +755,7 @@ const emit = defineEmits([
   'save-media-tools',
   'choose-media-tool',
   'save-deepseek-settings',
-  'test-deepseek-connection',
+  'text-model-options-updated',
   'save-embedding-settings',
   'test-embedding-connection',
   'save-paddle-ocr-settings',
@@ -773,11 +775,12 @@ const builtInTextPricingModels = [
 ]
 const selectedTextModelName = computed(() => {
   const configured = String(selectedAiModel.value || 'deepseek-v4-flash:enabled').trim()
-  return configured.split(':', 1)[0] || 'deepseek-v4-flash'
+  const withoutThinking = configured.replace(/:(?:enabled|disabled)$/u, '')
+  return withoutThinking.includes('::') ? '' : withoutThinking || 'deepseek-v4-flash'
 })
 const textPricingModels = computed(() => {
   const selected = selectedTextModelName.value
-  return builtInTextPricingModels.some((model) => model.key === selected)
+  return !selected || builtInTextPricingModels.some((model) => model.key === selected)
     ? builtInTextPricingModels
     : [...builtInTextPricingModels, { key: selected, label: selected }]
 })
@@ -795,14 +798,17 @@ function ensureTextModelPricing() {
 watch([selectedTextModelName, deepseekPricing], ensureTextModelPricing, { immediate: true })
 const FAVORITE_API = `${API}/favorite-sources`
 const XIAOHONGSHU_COOKIE_API = `${API}/xiaohongshu-cookie`
-const TELEMETRY_API = `${API}/telemetry`
-const DEEPSEEK_SECRET_REVEAL_API = `${API}/llm-settings/deepseek/reveal`
 const EMBEDDING_SECRET_REVEAL_API = `${API}/llm-settings/campus-embedding/reveal`
 const PADDLE_OCR_SECRET_REVEAL_API = `${API}/paddle-ocr-settings/reveal`
 const VISUAL_MODEL_SECRET_REVEAL_API = `${API}/wechat-publishing/cover-settings/reveal`
-const telemetryEnabled = ref(false)
-const telemetryPendingEvents = ref(0)
-const telemetrySaving = ref(false)
+const {
+  telemetryEnabled, telemetryPendingEvents, telemetrySaving,
+  telemetryStatusLoading, telemetryStatusLoaded, telemetryStatusError,
+  loadTelemetryStatus, saveTelemetry,
+} = useTelemetrySettingsController({
+  notifySuccess: (message) => ElMessage.success(message),
+  notifyError: (message) => ElMessage.error(message),
+})
 const favoriteSources = ref([])
 const favoriteSourcesLoading = ref(false)
 const favoriteBusyId = ref('')
@@ -814,6 +820,12 @@ const xiaohongshuCookieInput = ref('')
 const xiaohongshuCookieConfigured = ref(false)
 const xiaohongshuCookieState = ref('loading')
 const xiaohongshuCookieStatusText = ref('正在读取小红书登录态')
+const xiaohongshuCapabilities = ref({})
+const xiaohongshuCredentialStorageAvailable = computed(() => xiaohongshuCapabilities.value.credential_storage?.available !== false)
+const xiaohongshuSessionProbeAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.session_probe?.available))
+const xiaohongshuNoteCaptureAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.note_capture?.available))
+const xiaohongshuFavoritesAvailable = computed(() => Boolean(xiaohongshuCapabilities.value.favorites_sync?.available))
+const xiaohongshuNoteCaptureReason = computed(() => xiaohongshuCapabilities.value.note_capture?.reason || '小红书单篇图文读取暂不可用；已缓存资料仍可阅读')
 const savingXiaohongshuCookie = ref(false)
 const xiaohongshuAuthConnecting = ref(false)
 const syncingXiaohongshuFavorites = ref(false)
@@ -935,19 +947,6 @@ async function revealStoredSecret(endpoint, credentialName) {
   }
 }
 
-async function toggleDeepseekApiKeyVisibility() {
-  if (showDeepseekApiKey.value) {
-    showDeepseekApiKey.value = false
-    return
-  }
-  if (!deepseekApiKey.value && deepseekConfigured) {
-    const secret = await revealStoredSecret(DEEPSEEK_SECRET_REVEAL_API, 'DeepSeek API Key')
-    if (!secret) return
-    deepseekApiKey.value = secret
-  }
-  showDeepseekApiKey.value = true
-}
-
 async function toggleEmbeddingApiKeyVisibility() {
   if (showEmbeddingApiKey.value) {
     showEmbeddingApiKey.value = false
@@ -1018,8 +1017,15 @@ async function loadFavoriteSources() {
 async function loadXiaohongshuCookieStatus(refresh = false) {
   xiaohongshuCookieState.value = 'loading'
   try {
-    const response = await axios.get(XIAOHONGSHU_COOKIE_API, { params: refresh ? { refresh: true } : undefined, timeout: refresh ? 30000 : 5000 })
+    const response = await axios.get(XIAOHONGSHU_COOKIE_API, { params: refresh ? { refresh: true } : undefined, timeout: refresh ? 35000 : 5000 })
     xiaohongshuCookieConfigured.value = Boolean(response.data?.configured)
+    const fallbackAvailable = response.data?.collector_available !== false
+    xiaohongshuCapabilities.value = response.data?.capabilities || {
+      credential_storage: { available: true },
+      session_probe: { available: fallbackAvailable, reason: response.data?.collector_reason || '' },
+      note_capture: { available: fallbackAvailable, reason: response.data?.collector_reason || '' },
+      favorites_sync: { available: false, reason: '个人收藏同步暂未开放' },
+    }
     xiaohongshuCookieState.value = response.data?.state || (xiaohongshuCookieConfigured.value ? 'unknown' : 'missing')
     xiaohongshuCookieStatusText.value = response.data?.detail || response.data?.label || (xiaohongshuCookieConfigured.value ? '小红书登录态已保存' : '小红书登录态未连接')
   } catch (error) {
@@ -1030,6 +1036,7 @@ async function loadXiaohongshuCookieStatus(refresh = false) {
 }
 
 async function saveXiaohongshuCookie() {
+  if (!xiaohongshuCredentialStorageAvailable.value) return
   savingXiaohongshuCookie.value = true
   try {
     const response = await axios.post(XIAOHONGSHU_COOKIE_API, { cookie: xiaohongshuCookieInput.value }, { timeout: 10000 })
@@ -1054,6 +1061,7 @@ async function saveXiaohongshuCookie() {
 }
 
 async function connectXiaohongshuAuth() {
+  if (!xiaohongshuSessionProbeAvailable.value) return
   const connect = window.knowledgeHubDesktop?.connectPlatformAuth
   if (!connect) {
     ElMessage.warning('请使用桌面版在应用内登录；浏览器版仍可手动粘贴 Cookie。')
@@ -1084,7 +1092,7 @@ async function disconnectXiaohongshuAuth() {
   if (!disconnect) return
   const confirmed = await requestDestructiveConfirmation({
     title: '断开小红书登录态',
-    message: '这会清除本应用保存的小红书登录会话；之后需要重新登录才能读取受限图文和“我的收藏”。',
+    message: '这会清除本应用保存的小红书登录会话；之后需要重新登录才能主动导入受限单篇图文。已缓存资料不会删除。',
     confirmLabel: '断开登录态',
   })
   if (!confirmed) return
@@ -1101,6 +1109,7 @@ async function disconnectXiaohongshuAuth() {
 }
 
 async function syncXiaohongshuFavorites() {
+  if (!xiaohongshuFavoritesAvailable.value) return
   syncingXiaohongshuFavorites.value = true
   try {
     const task = await enqueueSourceSyncTask({ kind: 'favorite_xiaohongshu', source_title: '小红书个人收藏', source_id: xiaohongshuFavoriteSource.value?.id, auto_analyze: true })
@@ -1138,31 +1147,6 @@ async function updateXiaohongshuFavorite(changes) {
     ElMessage.error(favoriteErrorMessage(error, '小红书收藏设置保存失败'))
   } finally {
     syncingXiaohongshuFavorites.value = false
-  }
-}
-
-async function loadTelemetryStatus() {
-  try {
-    const response = await axios.get(TELEMETRY_API, { timeout: 5000 })
-    telemetryEnabled.value = Boolean(response.data?.enabled)
-    telemetryPendingEvents.value = Number(response.data?.pending_events || 0)
-  } catch {
-    // The settings dialog remains usable if an older backend lacks telemetry.
-  }
-}
-
-async function saveTelemetry(enabled) {
-  telemetrySaving.value = true
-  try {
-    const response = await axios.put(TELEMETRY_API, { enabled: Boolean(enabled) }, { timeout: 5000 })
-    telemetryEnabled.value = Boolean(response.data?.enabled)
-    telemetryPendingEvents.value = Number(response.data?.pending_events || 0)
-    ElMessage.success(telemetryEnabled.value ? '已开启匿名使用数据' : '已关闭并清除本机遥测数据')
-  } catch {
-    telemetryEnabled.value = !Boolean(enabled)
-    ElMessage.error('遥测设置保存失败')
-  } finally {
-    telemetrySaving.value = false
   }
 }
 
@@ -1294,7 +1278,7 @@ async function deleteFavorite(source) {
 watch(modelValue, (opened) => {
   if (opened) {
     loadXiaohongshuCookieStatus()
-    loadTelemetryStatus()
+    void loadTelemetryStatus()
   }
 })
 

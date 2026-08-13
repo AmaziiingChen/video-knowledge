@@ -5,7 +5,6 @@ from threading import Lock
 from time import monotonic, sleep
 from typing import Any
 
-import requests
 
 from services.network_policy import direct_requests_session
 

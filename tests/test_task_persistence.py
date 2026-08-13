@@ -78,6 +78,54 @@ def test_source_sync_task_is_persisted_and_exposes_its_provider_result():
         settings.data_dir = old_data_dir
 
 
+def test_completed_summary_reasoning_survives_task_manager_restart():
+    old_data_dir = settings.data_dir
+    first = None
+    recovered = None
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings.data_dir = Path(temp_dir)
+            first = TaskManager()
+            record = first._record_from_request(
+                "reasoning-restart",
+                PipelineRequest(share_text="https://example.com/video"),
+            )
+            first._persist_create(record)
+            record.status = "succeeded"
+            record.result = PipelineResponse(
+                success=True,
+                summary="可见摘要",
+                reasoning_content="独立思考",
+                reasoning_truncated=False,
+            )
+            assert first._persist_state(record) is True
+
+            recovered = TaskManager()
+            recovered.recover_from_database()
+            restored = recovered.get(record.task_id)
+
+            assert restored is not None
+            assert restored.status == "succeeded"
+            assert restored.result is not None
+            assert restored.result.summary == "可见摘要"
+            assert restored.result.reasoning_content == "独立思考"
+            assert restored.result.reasoning_truncated is False
+    finally:
+        if first is not None:
+            first._executor.shutdown(wait=True, cancel_futures=True)
+        if recovered is not None:
+            recovered._executor.shutdown(wait=True, cancel_futures=True)
+        settings.data_dir = old_data_dir
+
+
+def test_legacy_task_result_without_reasoning_fields_remains_compatible():
+    result = PipelineResponse.model_validate_json('{"success":true,"summary":"旧摘要"}')
+
+    assert result.summary == "旧摘要"
+    assert result.reasoning_content == ""
+    assert result.reasoning_truncated is False
+
+
 def test_task_state_persistence_retries_busy_database_and_exposes_failure():
     manager = TaskManager()
     try:
@@ -142,6 +190,49 @@ def test_task_cancel_persists_after_releasing_manager_lock():
         manager._executor.shutdown(wait=True, cancel_futures=True)
 
 
+def test_task_telemetry_reports_reached_buckets_and_proven_failures_without_inventing_stage_results():
+    manager = TaskManager()
+    events = []
+    record = manager._record_from_request(
+        "telemetry-task",
+        PipelineRequest(share_text="https://example.com/article"),
+    )
+    with manager._lock:
+        manager._tasks[record.task_id] = record
+
+    def run_pipeline(*args, on_update, **kwargs):
+        on_update(PipelineResponse(success=False, step="parse"))
+        on_update(PipelineResponse(success=False, step="info"))
+        on_update(PipelineResponse(success=False, step="summarize"))
+        return PipelineResponse(
+            success=False,
+            step="summarize",
+            error="provider unavailable",
+            timings={"download": 0.0, "transcribe": 0.0, "summarize": 1.0},
+        )
+
+    try:
+        with (
+            patch("services.task_manager.run_pipeline_sync", side_effect=run_pipeline),
+            patch("services.task_manager.record_telemetry", side_effect=lambda name, properties: events.append((name, properties))),
+            patch.object(manager, "_persist_state", return_value=True),
+            patch.object(manager, "_persist_content_status"),
+            patch.object(manager, "_broadcast_update"),
+            patch.object(manager, "_schedule_next"),
+            patch.object(manager, "_wake_openclaw_terminal_delivery"),
+        ):
+            manager._run(record.task_id)
+
+        assert events == [
+            ("pipeline_stage_reached", {"stage": "prepare"}),
+            ("pipeline_stage_reached", {"stage": "summary"}),
+            ("pipeline_stage_failed", {"stage": "summary"}),
+            ("task_finished", {"result": "failed", "stage": "summary"}),
+        ]
+    finally:
+        manager._executor.shutdown(wait=True, cancel_futures=True)
+
+
 def test_task_persistence_failure_is_returned_as_service_unavailable():
     with patch(
         "routers.tasks.task_manager.create",
@@ -166,6 +257,8 @@ def test_task_list_returns_compact_summaries_and_detail_endpoint_keeps_logs():
             success=False,
             transcript="长转写",
             summary="长摘要",
+            reasoning_content="独立思考",
+            reasoning_truncated=True,
             text_source=TextSourceInfo(kind="subtitle", source="provider"),
             ai_calls=[AICallInfo(call_type="summary", prompt_tokens=12)],
             cache_hits=["transcript"],
@@ -194,6 +287,9 @@ def test_task_list_returns_compact_summaries_and_detail_endpoint_keeps_logs():
     assert summary["details_included"] is False
     assert summary["transcript"] is None
     assert summary["summary"] is None
+    assert summary["reasoning_content"] == ""
+    assert summary["reasoning_length"] == 4
+    assert summary["reasoning_truncated"] is True
     assert summary["text_source"] is None
     assert summary["ai_calls"] == []
     assert summary["cache_hits"] == []
@@ -205,6 +301,7 @@ def test_task_list_returns_compact_summaries_and_detail_endpoint_keeps_logs():
 
     assert detail["details_included"] is True
     assert detail["transcript"] == "长转写"
+    assert detail["reasoning_content"] == "独立思考"
     assert detail["logs"][0]["message"] == "失败详情"
     assert detail["ai_calls"][0]["prompt_tokens"] == 12
     assert detail["error_info"]["message"] == "服务暂不可用"

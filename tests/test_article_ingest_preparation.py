@@ -3,24 +3,30 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from services import article_ingest_preparation
 from config import settings
+from services import article_ingest_preparation
 from services.content_index import ensure_content_item_for_media
-from services.content_source_text import ContentTextReadiness, should_resume_article_preparation
+from services.content_source_text import (
+    ContentTextReadiness,
+    should_resume_article_preparation,
+)
 from services.database import initialize_database
 
 
 class _RecordingExecutor:
     def __init__(self) -> None:
         self.calls: list[tuple[object, str, dict[str, object]]] = []
+        self.shutdown_calls: list[tuple[bool, bool]] = []
 
     def submit(self, callback, content_item_id: str, **kwargs) -> None:
         self.calls.append((callback, content_item_id, kwargs))
+
+    def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+        self.shutdown_calls.append((wait, cancel_futures))
 
 
 def _reset_preparation_state() -> None:
@@ -156,6 +162,28 @@ def test_wechat_waiters_do_not_occupy_web_capture_workers(monkeypatch):
     assert status["wechat_capture_queued_count"] == 1
     assert status["web_capture_queued_count"] == 1
     _reset_preparation_state()
+
+
+def test_preparation_executors_stop_idempotently_and_restart(monkeypatch):
+    executors = (_RecordingExecutor(), _RecordingExecutor(), _RecordingExecutor())
+    restarted = (_RecordingExecutor(), _RecordingExecutor(), _RecordingExecutor())
+    monkeypatch.setattr(article_ingest_preparation, "_web_capture_executor", executors[0])
+    monkeypatch.setattr(article_ingest_preparation, "_wechat_capture_executor", executors[1])
+    monkeypatch.setattr(article_ingest_preparation, "_ocr_executor", executors[2])
+    monkeypatch.setattr(article_ingest_preparation, "_accepting_work", True)
+    monkeypatch.setattr(article_ingest_preparation, "_new_executors", lambda: restarted)
+    _reset_preparation_state()
+
+    article_ingest_preparation.shutdown_article_source_preparation(wait=True)
+    article_ingest_preparation.shutdown_article_source_preparation(wait=True)
+
+    assert [executor.shutdown_calls for executor in executors] == [[(True, True)], [(True, True)], [(True, True)]]
+    assert article_ingest_preparation.enqueue_article_source_preparation("stopped") is False
+
+    article_ingest_preparation.start_article_source_preparation()
+
+    assert article_ingest_preparation._accepting_work is True
+    assert article_ingest_preparation._web_capture_executor is restarted[0]
 
 
 def test_prioritizing_ocr_moves_an_existing_ocr_job_to_the_front(monkeypatch):

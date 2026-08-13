@@ -14,11 +14,21 @@ LOG_DIR="$ROOT_DIR/data/logs"
 BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
 BACKEND_TOKEN_FILE="$RUN_DIR/backend-instance-token"
+MCP_TOKEN_FILE="$RUN_DIR/mcp-bridge-token"
+MCP_LEASE_FILE="$RUN_DIR/mcp-bridge-lease.json"
+MCP_HEARTBEAT_PID_FILE="$RUN_DIR/mcp-bridge-heartbeat.pid"
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 BACKEND_URL="http://127.0.0.1:8000"
 FRONTEND_URL="http://127.0.0.1:5173"
 INSTANCE_TOKEN=""
+MCP_TOKEN=""
+MCP_SESSION_ID=""
+MCP_SESSION_STARTED=0
+MCP_HEARTBEAT_PID=""
+STARTED_BACKEND_PID=""
+STARTED_FRONTEND_PID=""
+STARTUP_COMPLETE=0
 
 if [ -z "${PYTHON_BIN:-}" ]; then
     if command -v python >/dev/null 2>&1; then
@@ -60,6 +70,97 @@ generate_instance_token() {
 write_instance_token() {
     printf '%s\n' "$INSTANCE_TOKEN" > "$BACKEND_TOKEN_FILE"
     chmod 600 "$BACKEND_TOKEN_FILE"
+}
+
+stop_stale_mcp_heartbeat() {
+    local pid="" command_line=""
+    if [ -L "$MCP_HEARTBEAT_PID_FILE" ]; then
+        echo "MCP bridge 心跳 PID 文件不安全，请先检查 $MCP_HEARTBEAT_PID_FILE"
+        return 1
+    fi
+    if [ -f "$MCP_HEARTBEAT_PID_FILE" ]; then
+        pid="$(tr -d '[:space:]' < "$MCP_HEARTBEAT_PID_FILE")"
+    fi
+    if ! is_pid_alive "$pid"; then
+        rm -f "$MCP_HEARTBEAT_PID_FILE"
+        return 0
+    fi
+    command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    case "$command_line" in
+        *manage_mcp_bridge_session.py*heartbeat*"$MCP_LEASE_FILE"*) ;;
+        *)
+            echo "PID $pid 不是 KnowledgeHub MCP bridge 心跳，拒绝终止"
+            return 1
+            ;;
+    esac
+    kill "$pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+        if ! is_pid_alive "$pid"; then
+            rm -f "$MCP_HEARTBEAT_PID_FILE"
+            return 0
+        fi
+        sleep 0.1
+    done
+    echo "旧 MCP bridge 心跳未能停止，请先运行 ./stop.sh"
+    return 1
+}
+
+start_mcp_bridge_session() {
+    local session_json
+    stop_stale_mcp_heartbeat
+    session_json="$("$PYTHON_BIN" scripts/manage_mcp_bridge_session.py create \
+        --run-dir "$RUN_DIR" \
+        --api-base "$BACKEND_URL/api")"
+    MCP_SESSION_STARTED=1
+    MCP_TOKEN="$(printf '%s' "$session_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+    MCP_SESSION_ID="$(printf '%s' "$session_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["session_id"])')"
+    (
+        exec "$PYTHON_BIN" scripts/manage_mcp_bridge_session.py heartbeat \
+            --lease-file "$MCP_LEASE_FILE" \
+            --session-id "$MCP_SESSION_ID" \
+            --api-base "$BACKEND_URL/api" \
+            --interval 5
+    ) >> "$LOG_DIR/mcp-bridge.log" 2>&1 &
+    MCP_HEARTBEAT_PID=$!
+    echo "$MCP_HEARTBEAT_PID" > "$MCP_HEARTBEAT_PID_FILE"
+}
+
+cleanup_failed_start() {
+    local status=$?
+    if [ "$status" -ne 0 ] && [ "$STARTUP_COMPLETE" -eq 0 ]; then
+        if is_pid_alive "$STARTED_FRONTEND_PID"; then
+            kill "$STARTED_FRONTEND_PID" >/dev/null 2>&1 || true
+            rm -f "$FRONTEND_PID_FILE"
+        fi
+        if is_pid_alive "$STARTED_BACKEND_PID"; then
+            kill "$STARTED_BACKEND_PID" >/dev/null 2>&1 || true
+            rm -f "$BACKEND_PID_FILE"
+        fi
+        if [ "$MCP_SESSION_STARTED" -eq 1 ]; then
+            if is_pid_alive "$MCP_HEARTBEAT_PID"; then
+                kill "$MCP_HEARTBEAT_PID" >/dev/null 2>&1 || true
+                for _ in $(seq 1 20); do
+                    is_pid_alive "$MCP_HEARTBEAT_PID" || break
+                    sleep 0.1
+                done
+            fi
+            "$PYTHON_BIN" scripts/manage_mcp_bridge_session.py cleanup --run-dir "$RUN_DIR" \
+                >/dev/null 2>&1 || true
+            rm -f "$MCP_HEARTBEAT_PID_FILE"
+        fi
+    fi
+    return "$status"
+}
+
+trap cleanup_failed_start EXIT
+
+mcp_bridge_ready() {
+    local heartbeat_pid=""
+    if [ -f "$MCP_HEARTBEAT_PID_FILE" ]; then
+        heartbeat_pid="$(tr -d '[:space:]' < "$MCP_HEARTBEAT_PID_FILE")"
+    fi
+    is_pid_alive "$heartbeat_pid" \
+        && "$PYTHON_BIN" scripts/manage_mcp_bridge_session.py validate --run-dir "$RUN_DIR"
 }
 
 health_matches_instance_token() {
@@ -107,6 +208,10 @@ ensure_backend() {
             echo "[1/2] 后端已在运行，但不属于当前安全会话。请先运行 ./stop.sh 后重试。"
             exit 1
         fi
+        if ! mcp_bridge_ready; then
+            echo "[1/2] 后端仍在运行，但 MCP bridge 会话已失效。请先运行 ./stop.sh 后重试。"
+            exit 1
+        fi
         echo "[1/2] 后端已在运行，安全复用"
         return 0
     fi
@@ -120,12 +225,20 @@ ensure_backend() {
     echo "[1/2] 启动后端..."
     INSTANCE_TOKEN="$(generate_instance_token)"
     write_instance_token
+    start_mcp_bridge_session
     : > "$BACKEND_LOG"
     (
         cd "$BACKEND_DIR"
-        exec env KNOWLEDGEHUB_INSTANCE_TOKEN="$INSTANCE_TOKEN" nohup "$PYTHON_BIN" -m uvicorn main:app --host 127.0.0.1 --port 8000
+        exec env \
+            KNOWLEDGEHUB_INSTANCE_TOKEN="$INSTANCE_TOKEN" \
+            KNOWLEDGEHUB_MCP_BRIDGE_TOKEN="$MCP_TOKEN" \
+            KNOWLEDGEHUB_MCP_BRIDGE_SESSION_ID="$MCP_SESSION_ID" \
+            KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE="$MCP_TOKEN_FILE" \
+            KNOWLEDGEHUB_MCP_BRIDGE_LEASE_FILE="$MCP_LEASE_FILE" \
+            nohup "$PYTHON_BIN" -m uvicorn main:app --host 127.0.0.1 --port 8000
     ) >> "$BACKEND_LOG" 2>&1 &
-    echo $! > "$BACKEND_PID_FILE"
+    STARTED_BACKEND_PID=$!
+    echo "$STARTED_BACKEND_PID" > "$BACKEND_PID_FILE"
 
     wait_for_url "后端" "$BACKEND_URL/api/health" "$BACKEND_LOG" 45
 }
@@ -152,7 +265,8 @@ ensure_frontend() {
         cd "$FRONTEND_DIR"
         exec env KNOWLEDGEHUB_INSTANCE_TOKEN="$INSTANCE_TOKEN" nohup npm run dev -- --host 127.0.0.1
     ) >> "$FRONTEND_LOG" 2>&1 &
-    echo $! > "$FRONTEND_PID_FILE"
+    STARTED_FRONTEND_PID=$!
+    echo "$STARTED_FRONTEND_PID" > "$FRONTEND_PID_FILE"
 
     wait_for_url "前端" "$FRONTEND_URL" "$FRONTEND_LOG" 45
 }
@@ -195,3 +309,4 @@ if [ "${OPEN_BROWSER:-1}" != "0" ]; then
     open "$FRONTEND_URL" >/dev/null 2>&1 || true
 fi
 print_status
+STARTUP_COMPLETE=1

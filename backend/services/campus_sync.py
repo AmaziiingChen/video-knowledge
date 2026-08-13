@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
 from threading import Lock
 from urllib.parse import urlparse
 
-from config import settings
 from services.campus_sources import CampusArticle, discover_campus_articles, get_campus_source
 from services.campus_source_settings import load_campus_source_settings, record_campus_source_sync
 from services.article_ingest_preparation import enqueue_article_source_preparation

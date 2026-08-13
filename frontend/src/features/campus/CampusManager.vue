@@ -72,19 +72,7 @@
           </div>
           <div v-for="source in sources" :key="source.slug" class="campus-manager-table-row">
             <span class="campus-manager-source-cell column-source">
-              <SvgMaskIcon
-                v-if="isProcurementSource(source)"
-                class="campus-manager-source-mark is-procurement"
-                :src="sourceIcon(source)"
-                :size="28"
-                :style="{ color: sourceIconColor(source) }"
-              />
-              <SvgMaskIcon
-                v-else
-                class="campus-manager-source-mark"
-                :src="sourceIcon(source)"
-                :size="28"
-              />
+              <CampusSourceIcon :source-slug="source.slug" />
               <span class="campus-manager-source-copy">
                 <strong>{{ source.name }}</strong>
                 <small :title="source.base_url">{{ sourceHost(source) }}</small>
@@ -147,28 +135,12 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { MoreFilled } from '@element-plus/icons-vue'
+import { MoreFilled } from '../../components/macosSymbolComponents.js'
 import MiniProgramForumCapture from './MiniProgramForumCapture.vue'
 import HistorySyncDialog from '../../components/HistorySyncDialog.vue'
 import ReportGroupMultiSelect from '../../components/ReportGroupMultiSelect.vue'
 import CollectionState from '../../components/CollectionState.vue'
-import SvgMaskIcon from '../../components/SvgMaskIcon.vue'
-const gwtIcon = '01-公文通'
-const sztuIcon = 'shield.fill'
-const sgimIcon = '02-中德智能制造学院'
-const aiIcon = '03-人工智能学院'
-const nmneIcon = '04-新材料与新能源学院'
-const utlIcon = '05-城市交通与物流学院'
-const hseeIcon = '06-健康与环境工程学院'
-const cepIcon = '07-工程物理学院'
-const copIcon = '08-药学院'
-const icocIcon = '09-集成电路与光电芯片学院'
-const futureIcon = '10-未来技术学院'
-const designIcon = '11-创意设计学院'
-const businessIcon = '12-商学院'
-const sflIcon = '13-外国语学院'
-const musicIcon = '14-音乐学院'
-const procurementIcon = 'chineseyuanrenminbisign.bank.building.fill'
+import CampusSourceIcon from './CampusSourceIcon.vue'
 
 const props = defineProps({
   campusAccess: { type: Object, default: () => ({ state: 'disconnected', label: '尚未连接', detail: '', connected: false }) },
@@ -207,29 +179,6 @@ const intervalOptions = [
   { value: 1440, label: '每天' }
 ]
 
-const sourceIcons = {
-  gwt: gwtIcon,
-  sztu: sztuIcon,
-  sgim: sgimIcon,
-  ai: aiIcon,
-  nmne: nmneIcon,
-  utl: utlIcon,
-  hsee: hseeIcon,
-  cep: cepIcon,
-  cop: copIcon,
-  icoc: icocIcon,
-  'future-tech': futureIcon,
-  design: designIcon,
-  business: businessIcon,
-  sfl: sflIcon,
-  music: musicIcon,
-  'sztu-procurement': procurementIcon
-}
-
-const sourceIconColors = {
-  'sztu-procurement': '#1C3387'
-}
-
 const enabledSourceCount = computed(() => props.sources.filter((source) => source.enabled).length)
 const syncingSourceSlugs = computed(() => new Set(props.syncingSources.map(String)))
 const bulkSyncSourcePosition = computed(() => props.sources
@@ -263,18 +212,6 @@ function handleHeaderCommand(command) {
   }
   if (command === 'connect') emit('connect-campus')
   if (command === 'disconnect') emit('disconnect-campus')
-}
-
-function sourceIcon(source) {
-  return sourceIcons[String(source?.slug || '').trim().toLowerCase()] || gwtIcon
-}
-
-function sourceIconColor(source) {
-  return sourceIconColors[String(source?.slug || '').trim().toLowerCase()] || undefined
-}
-
-function isProcurementSource(source) {
-  return String(source?.slug || '').trim().toLowerCase() === 'sztu-procurement'
 }
 
 function isSourceSyncing(source) {

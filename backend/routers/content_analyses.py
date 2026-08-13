@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from config import settings
 from services.content_analysis import ContentAnalysisRecord, create_content_analysis, list_content_analyses
+from services.llm_settings import text_model_configured
 
 
 router = APIRouter()
@@ -49,8 +49,8 @@ async def get_content_analyses(item_id: str, limit: int = Query(default=20, ge=1
 
 @router.post("/content/{item_id}/analyses", response_model=ContentAnalysisResponse)
 def run_content_analysis(item_id: str, req: CreateContentAnalysisRequest):
-    if not settings.deepseek_api_key:
-        raise HTTPException(status_code=400, detail="请先在设置中配置 DeepSeek API Key")
+    if not text_model_configured(req.ai_model):
+        raise HTTPException(status_code=400, detail="请先在设置中配置所选文本模型的 API Key")
     try:
         record = create_content_analysis(
             item_id,

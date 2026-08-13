@@ -2,7 +2,6 @@ import ast
 from pathlib import Path
 
 from fastapi import FastAPI
-
 from router_registry import API_ROUTERS, register_api_routers
 
 
@@ -32,4 +31,9 @@ def test_router_registry_has_unique_tags_and_registers_core_routes():
         for router, _tag in API_ROUTERS
         for route in router.routes
     }
-    assert {"/api/tasks", "/api/inbox", "/api/ingest/link"} <= paths
+    assert {
+        "/api/tasks",
+        "/api/inbox",
+        "/api/ingest/link",
+        "/api/content/{item_id}/article-preview",
+    } <= paths

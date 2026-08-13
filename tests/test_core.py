@@ -1,30 +1,36 @@
 import hashlib
+import io
 import json
 import subprocess
 import sys
 import tempfile
-import time
 import threading
+import time
 import unittest
-import io
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from fastapi.testclient import TestClient
-
 from config import settings
+from fastapi.testclient import TestClient
 from main import app
 from routers.cookie import _write_netscape_cookie_file
 from routers.qa import _require_regenerable_content
-from services.bilibili_auth import bilibili_yt_dlp_cookie_args, get_bilibili_cookie_status, save_bilibili_cookie
+from services import paddle_ocr
 from services.ai_call_logger import record_ai_call, record_image_generation_call
+from services.ai_response_envelope import AIResponseEnvelope, AIResponseStreamEvent
+from services.article_fetcher import ArticleFetchResult, _image_filter_reason
+from services.article_preview import ARTICLE_NORMALIZER_VERSION
+from services.bilibili_auth import (
+    bilibili_yt_dlp_cookie_args,
+    get_bilibili_cookie_status,
+    save_bilibili_cookie,
+)
 from services.cache import (
     cache_dir_for_url,
     cache_key_for_url,
@@ -36,13 +42,17 @@ from services.cache import (
     write_cached_subtitle_transcript,
     write_cached_transcript,
 )
-from services.clipboard_watcher import ClipboardWatcher, extract_supported_links, read_system_clipboard
-from services.clipboard_settings import load_clipboard_watcher_settings, save_clipboard_watcher_settings
-from services.folder_import_settings import load_folder_import_watcher_settings, save_folder_import_watcher_settings
-from services.folder_import_watcher import FolderImportWatcher
+from services.clipboard_settings import (
+    load_clipboard_watcher_settings,
+    save_clipboard_watcher_settings,
+)
+from services.clipboard_watcher import (
+    ClipboardWatcher,
+    extract_supported_links,
+    read_system_clipboard,
+)
 from services.content_analysis import create_content_analysis, list_content_analyses
 from services.content_index import ensure_content_item_for_media
-from services.knowledge_library import materialize_source_document
 from services.content_source_text import (
     ContentSourceText,
     _article_text_readiness,
@@ -51,50 +61,80 @@ from services.content_source_text import (
     load_content_source_text,
 )
 from services.database import SCHEMA_VERSION, connect, initialize_database
-from services.douyin_cookie_status import get_douyin_cookie_status, invalidate_douyin_cookie_status
-from services.douyin_cookie_status import _douyin_page_login_state
+from services.douyin_cookie_status import (
+    _douyin_page_login_state,
+    get_douyin_cookie_status,
+    invalidate_douyin_cookie_status,
+)
 from services.downloader import (
     BILIBILI_1080P_FORMAT,
     _browser_capture_failure_message,
     _compress_video_for_storage,
-    _lowest_douyin_video_variant,
     _looks_like_douyin_video_url,
+    _lowest_douyin_video_variant,
     _needs_douyin_media_refresh,
     _yt_dlp_bytes_per_second,
 )
+from services.folder_import_settings import (
+    load_folder_import_watcher_settings,
+    save_folder_import_watcher_settings,
+)
+from services.folder_import_watcher import FolderImportWatcher
 from services.inbox import capture_link_to_inbox, list_inbox_items, process_inbox_item
+from services.knowledge_library import materialize_source_document
+from services.llm_provider import (
+    LLMMessage,
+    LLMResponse,
+    LLMUsage,
+    resolve_deepseek_model,
+)
 from services.llm_settings import (
     load_llm_settings,
     reveal_campus_embedding_api_key,
     reveal_deepseek_api_key,
     save_campus_embedding_settings,
     save_deepseek_settings,
+)
+from services.llm_settings import (
     test_campus_embedding_connection as run_campus_embedding_connection_test,
+)
+from services.llm_settings import (
     test_deepseek_connection as run_deepseek_connection_test,
 )
-from services.llm_provider import LLMMessage, LLMResponse, LLMUsage, resolve_deepseek_model
+from services.local_file_imports import run_pdf_import
 from services.markdown_sync import (
     get_markdown_state,
-    replace_content_summary_and_sync,
     replace_article_summary_and_sync,
+    replace_content_summary_and_sync,
     save_markdown_draft_and_sync,
     sync_markdown_to_obsidian,
     update_markdown_draft,
 )
-from services.obsidian_settings import is_managed_obsidian_note_path, save_obsidian_settings
-from services.pipeline_runner import PipelineRequest, PipelineResponse, classify_pipeline_error, run_pipeline_sync
-from services.paddle_ocr import OcrImageResult, _extract_json_result_text, _recognize_one, _wait_for_result
-from services import paddle_ocr
-from services.local_file_imports import run_pdf_import
+from services.obsidian_settings import (
+    is_managed_obsidian_note_path,
+    save_obsidian_settings,
+)
+from services.paddle_ocr import (
+    OcrImageResult,
+    _extract_json_result_text,
+    _recognize_one,
+    _wait_for_result,
+)
 from services.paddle_ocr_settings import (
     load_paddle_ocr_settings,
     reveal_paddle_ocr_access_token,
     save_paddle_ocr_settings,
 )
+from services.pipeline_runner import (
+    PipelineRequest,
+    PipelineResponse,
+    classify_pipeline_error,
+    run_pipeline_sync,
+)
+from services.prompt_templates import PromptTemplateRepository
 from services.providers.bilibili import BilibiliProvider
 from services.providers.douyin import DouyinProvider
 from services.providers.registry import get_provider_for_url
-from services.prompt_templates import PromptTemplateRepository
 from services.repository import ContentRepository, TaskRepository
 from services.runtime_components import (
     HUGGING_FACE_HUB_ENDPOINT,
@@ -104,7 +144,12 @@ from services.runtime_components import (
     _mlx_model_available,
     mlx_whisper_model_dir,
 )
-from services.search_index import rebuild_search_index, search_documents, upsert_search_document, upsert_source_text_document
+from services.search_index import (
+    rebuild_search_index,
+    search_documents,
+    upsert_search_document,
+    upsert_source_text_document,
+)
 from services.subtitles import (
     SubtitleFetchResult,
     _browser_bound_bilibili_tracks,
@@ -112,8 +157,6 @@ from services.subtitles import (
     fetch_bilibili_subtitle,
     parse_subtitle_text,
 )
-from services.article_fetcher import ArticleFetchResult, _image_filter_reason
-from services.article_preview import ARTICLE_NORMALIZER_VERSION
 from services.summarizer import (
     QA_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
@@ -121,19 +164,25 @@ from services.summarizer import (
     append_qa_to_markdown,
     generate_article_markdown,
     generate_markdown,
-    stream_regenerated_content_summary,
-    stream_regenerated_article_summary,
-    summarize,
     stream_answer_question,
+    stream_regenerated_article_summary,
+    stream_regenerated_content_summary,
+    summarize,
 )
 from services.task_manager import TaskManager, TaskRecord
-from services.text_normalizer import normalize_transcript_segments, normalize_transcript_text
-from services.transcriber import TranscriptionResult, transcribe_with_details
 from services.telegram_settings import load_telegram_settings, save_telegram_settings
 from services.telegram_watcher import TelegramWatcher
-from services.watcher_restore import restore_enabled_watchers
+from services.text_normalizer import (
+    normalize_transcript_segments,
+    normalize_transcript_text,
+)
+from services.transcriber import TranscriptionResult, transcribe_with_details
 from services.url_parser import parse_share_text
-from services.wechat_subscription import WeChatSubscriptionScheduler, WeChatSubscriptionService
+from services.watcher_restore import restore_enabled_watchers
+from services.wechat_subscription import (
+    WeChatSubscriptionScheduler,
+    WeChatSubscriptionService,
+)
 
 
 class UrlParserTests(unittest.TestCase):
@@ -654,7 +703,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 initialize_database()
                 client = TestClient(app)
                 created = SimpleNamespace(task_id="external-task")
-                with patch("routers.content.task_manager.create", return_value=created):
+                with patch("routers.local_imports.task_manager.create", return_value=created):
                     pdf_result = client.post(
                         "/api/content/import-file",
                         files={"file": ("扫描件.pdf", b"%PDF-1.4\nplaceholder", "application/pdf")},
@@ -689,7 +738,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 settings.obsidian_vault = root / "vault"
                 initialize_database()
                 client = TestClient(app)
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
                     audio = client.post(
                         "/api/content/import-file",
                         files={"file": ("访谈.mp3", b"audio-bytes", "audio/mpeg")},
@@ -705,7 +754,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 image_item = image.json()["item"]
                 self.assertEqual(image_item["content_type"], "image")
                 self.assertTrue(image_item["original_file_path"].endswith("original--扫描图.png"))
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="retry-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="retry-task")):
                     retried = client.post(f"/api/content/{image_item['id']}/reprocess-local-source")
                 self.assertEqual(retried.status_code, 200)
                 self.assertEqual(retried.json()["task_id"], "retry-task")
@@ -724,7 +773,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 settings.obsidian_vault = root / "vault"
                 initialize_database()
                 client = TestClient(app)
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
                     imported = client.post(
                         "/api/content/import-file",
                         files={"file": ("扫描件.pdf", b"%PDF-1.4\nplaceholder", "application/pdf")},
@@ -757,7 +806,7 @@ class ContentLibraryApiTests(unittest.TestCase):
                 settings.obsidian_vault = root / "vault"
                 initialize_database()
                 client = TestClient(app)
-                with patch("routers.content.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
+                with patch("routers.local_imports.task_manager.create", return_value=SimpleNamespace(task_id="external-task")):
                     imported = client.post(
                         "/api/content/import-file",
                         files={"file": ("扫描件.pdf", b"%PDF-1.4\npending", "application/pdf")},
@@ -1324,7 +1373,8 @@ class CredentialSettingsTests(unittest.TestCase):
                 )
 
                 saved = load_llm_settings()
-                self.assertEqual(saved["deepseek_api_key"], "saved-deepseek-key")
+                self.assertNotIn("deepseek_api_key", saved)
+                self.assertEqual(reveal_deepseek_api_key(), "saved-deepseek-key")
                 self.assertEqual(saved["deepseek_base_url"], "https://proxy.example.test/v1")
         finally:
             settings.data_dir = old_data_dir
@@ -1435,6 +1485,10 @@ class CredentialSettingsTests(unittest.TestCase):
                 base_url="https://proxy.example.test/v1",
                 model="deepseek-v4-flash",
                 thinking_type="enabled",
+                thinking_parameter="thinking",
+                send_temperature=False,
+                supports_stream_options=True,
+                supports_response_format=True,
                 provider_name="deepseek",
                 request_timeout_seconds=20,
             )
@@ -1890,7 +1944,8 @@ class LLMProviderTests(unittest.TestCase):
         self.assertEqual(title, "测试标题")
         self.assertIn("这是总结", summary)
         self.assertEqual(provider.calls[0][1], 0.3)
-        self.assertIn("视频标题：原始标题", provider.calls[0][0][1].content)
+        sent_user = next(message.content for message in provider.calls[0][0] if message.role == "user")
+        self.assertIn("视频标题：原始标题", sent_user)
 
     def test_summarize_uses_active_database_prompt_template(self):
         old_data_dir = settings.data_dir
@@ -2035,7 +2090,7 @@ class LLMProviderTests(unittest.TestCase):
 
         self.assertEqual(answer, "新的文章总结")
         self.assertEqual(len(provider.calls), 1)
-        sent_material = provider.calls[0][0][1].content
+        sent_material = next(message.content for message in provider.calls[0][0] if message.role == "user")
         self.assertLess(sent_material.index("段落一"), sent_material.index("[图片文字 1]"))
         self.assertLess(sent_material.index("[图片文字 1]"), sent_material.index("段落二"))
 
@@ -2070,8 +2125,9 @@ class LLMProviderTests(unittest.TestCase):
         self.assertEqual(answer, "视频总结")
         self.assertEqual(len(provider.calls), 1)
         messages = provider.calls[0][0]
-        self.assertIn("视频标题：测试视频", messages[1].content)
-        self.assertIn("字幕或转写", messages[1].content)
+        user_message = next(message.content for message in messages if message.role == "user")
+        self.assertIn("视频标题：测试视频", user_message)
+        self.assertIn("字幕或转写", user_message)
         self.assertTrue(messages[0].content.strip())
 
     def test_regenerated_audio_summary_preserves_timestamped_transcript_material(self):
@@ -2087,8 +2143,9 @@ class LLMProviderTests(unittest.TestCase):
 
         self.assertEqual(answer, "音频总结")
         messages = provider.calls[0][0]
-        self.assertIn("音频标题：测试录音", messages[1].content)
-        self.assertIn("[01:15](#video-t=75) 关键结论", messages[1].content)
+        user_message = next(message.content for message in messages if message.role == "user")
+        self.assertIn("音频标题：测试录音", user_message)
+        self.assertIn("[01:15](#video-t=75) 关键结论", user_message)
 
 
 class CacheAndModelTests(unittest.TestCase):
@@ -3466,7 +3523,7 @@ class DownloadStorageTests(unittest.TestCase):
                     output_path.write_bytes(b"2" * 12000)
                     return SimpleNamespace(success=True, cancelled=False, stalled=False, returncode=0, stderr="")
 
-                with patch("services.downloader.run_ffmpeg", side_effect=fake_run):
+                with patch("services.download_media_processing.run_ffmpeg", side_effect=fake_run):
                     optimized = _compress_video_for_storage(video_path, logs)
 
                 self.assertEqual(optimized.name, "source_compact.mp4")
@@ -3870,8 +3927,19 @@ class QAApiTests(unittest.TestCase):
                 with (
                     patch("routers.qa.load_content_source_text", return_value=source),
                     patch(
-                        "routers.qa.stream_regenerated_content_summary",
-                        return_value=iter(["模型生成的文件名标题\n\n", "## 新总结\n\n新的主总结。"]),
+                        "routers.qa.stream_regenerated_content_summary_events",
+                        return_value=iter([
+                            AIResponseStreamEvent(kind="answer_delta", text="模型生成的文件名标题\n\n"),
+                            AIResponseStreamEvent(kind="answer_delta", text="## 新总结\n\n新的主总结。"),
+                            AIResponseStreamEvent(
+                                kind="done",
+                                envelope=AIResponseEnvelope(
+                                    answer="模型生成的文件名标题\n\n## 新总结\n\n新的主总结。",
+                                    reasoning_content="摘要内部思考",
+                                    suggested_questions=["下一步怎么理解？"],
+                                ),
+                            ),
+                        ]),
                     ),
                 ):
                     response = TestClient(app).post(
@@ -3895,6 +3963,8 @@ class QAApiTests(unittest.TestCase):
                 self.assertNotIn("模型生成的文件名标题", updated)
                 self.assertIn("新的主总结", updated)
                 self.assertIn("公众号完整正文", updated)
+                self.assertNotIn("摘要内部思考", updated)
+                self.assertNotIn("下一步怎么理解", updated)
                 history = TestClient(app).get(f"/api/content/{item.id}/qa-history").json()["items"]
                 self.assertEqual(history, [])
         finally:
@@ -4001,7 +4071,7 @@ class QAApiTests(unittest.TestCase):
                 client = TestClient(app)
                 with (
                     patch("routers.qa.load_content_source_text", return_value=source),
-                    patch("routers.qa.answer_question", return_value="已基于正文给出回答。"),
+                    patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="已基于正文给出回答。")),
                 ):
                     response = client.post(
                         "/api/qa",
@@ -4052,7 +4122,7 @@ class QAApiTests(unittest.TestCase):
                 client = TestClient(app)
                 with (
                     patch("routers.qa.load_content_source_text", return_value=source),
-                    patch("routers.qa.answer_question", return_value="旧回答。"),
+                    patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="旧回答。")),
                 ):
                     first = client.post(
                         "/api/qa",
@@ -4067,7 +4137,22 @@ class QAApiTests(unittest.TestCase):
 
                 with (
                     patch("routers.qa.load_content_source_text", return_value=source),
-                    patch("routers.qa.stream_answer_question", return_value=iter(["重新生成后的回答。"])),
+                    patch(
+                        "routers.qa.stream_answer_question_events",
+                        return_value=iter([
+                            AIResponseStreamEvent(
+                                kind="answer_delta", text="重新生成后的回答。"
+                            ),
+                            AIResponseStreamEvent(
+                                kind="done",
+                                envelope=AIResponseEnvelope(
+                                    answer="重新生成后的回答。",
+                                    reasoning_content="重新核对依据",
+                                    suggested_questions=["还有哪些证据？"],
+                                ),
+                            ),
+                        ]),
+                    ),
                 ):
                     regenerated = client.post(
                         "/api/qa/stream",
@@ -4082,9 +4167,13 @@ class QAApiTests(unittest.TestCase):
                 self.assertEqual(regenerated.status_code, 200)
                 updated_history = client.get(f"/api/content/{item.id}/qa-history").json()["items"]
                 self.assertEqual([(entry["question"], entry["answer"]) for entry in updated_history], [("原始问题", "重新生成后的回答。")])
+                self.assertEqual(updated_history[0]["reasoning_content"], "重新核对依据")
+                self.assertEqual(updated_history[0]["suggested_questions"], ["还有哪些证据？"])
                 markdown = document_path.read_text(encoding="utf-8")
                 self.assertIn("重新生成后的回答。", markdown)
                 self.assertNotIn("旧回答。", markdown)
+                self.assertNotIn("重新核对依据", markdown)
+                self.assertNotIn("还有哪些证据", markdown)
         finally:
             settings.data_dir = old_data_dir
             settings.deepseek_api_key = old_key
@@ -4119,7 +4208,7 @@ class QAApiTests(unittest.TestCase):
                 client = TestClient(app)
                 with (
                     patch("routers.qa.load_content_source_text", return_value=source),
-                    patch("routers.qa.answer_question", return_value="第一轮回答。"),
+                    patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="第一轮回答。")),
                 ):
                     first = client.post(
                         "/api/qa",
@@ -4143,7 +4232,7 @@ class QAApiTests(unittest.TestCase):
 
                 with (
                     patch("routers.qa.load_content_source_text", return_value=source),
-                    patch("routers.qa.answer_question", return_value="第二轮回答。"),
+                    patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="第二轮回答。")),
                 ):
                     second = client.post(
                         "/api/qa",
@@ -4239,7 +4328,7 @@ class QAApiTests(unittest.TestCase):
                 client = TestClient(app)
                 with (
                     patch("routers.qa.load_content_source_text", return_value=source),
-                    patch("routers.qa.answer_question", return_value="仍然需要保留的回答。"),
+                    patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="仍然需要保留的回答。")),
                     patch("routers.qa.append_qa_to_source_document", side_effect=ValueError("笔记不存在")),
                 ):
                     response = client.post(
@@ -4276,7 +4365,7 @@ class QAApiTests(unittest.TestCase):
             client = TestClient(app)
             with (
                 patch("routers.qa.load_content_source_text", return_value=source),
-                patch("routers.qa.answer_question", return_value="基于正文的回答") as answer_mock,
+                patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="基于正文的回答")) as answer_mock,
             ):
                 response = client.post(
                     "/api/qa",
@@ -4307,7 +4396,7 @@ class QAApiTests(unittest.TestCase):
                 note_path.write_text("# 追问测试\n\n## 总结\n已有内容\n", encoding="utf-8")
 
                 client = TestClient(app)
-                with patch("routers.qa.answer_question", return_value="这是追问答案。"):
+                with patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="这是追问答案。")):
                     response = client.post(
                         "/api/qa",
                         json={
@@ -4625,7 +4714,7 @@ class PipelineApiTests(unittest.TestCase):
                     timings={"whisper_model_load": 0.1, "whisper_decode": 0.2},
                 )
                 with (
-                    patch("services.pipeline_runner.attachments_root", return_value=attachment_root),
+                    patch("services.pipeline_local_media_policy.attachments_root", return_value=attachment_root),
                     patch("services.pipeline_runner.media_duration_seconds", return_value=8),
                     patch("services.pipeline_runner.extract_audio_with_details") as extract_audio,
                     patch("services.pipeline_runner.transcribe_with_details", return_value=transcribe_result),
@@ -4734,7 +4823,13 @@ class TaskApiTests(unittest.TestCase):
                         created = manager.create(
                             PipelineRequest(share_text="https://www.bilibili.com/video/BV1xx411c7mD")
                         )
-                        created.future.result(timeout=2)
+                        deadline = time.monotonic() + 2
+                        scheduled = manager.get(created.task_id)
+                        while scheduled.future is None and time.monotonic() < deadline:
+                            time.sleep(0.01)
+                            scheduled = manager.get(created.task_id)
+                        self.assertIsNotNone(scheduled.future)
+                        scheduled.future.result(timeout=2)
 
                     current = manager.get(created.task_id)
                     self.assertEqual(current.status, "failed")

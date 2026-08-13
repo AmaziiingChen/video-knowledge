@@ -3,7 +3,7 @@
     <a class="skip-link" href="#main-workspace">跳到主内容</a>
     <header v-if="isSinglePaneWorkspaceView(activeView)" class="topbar is-single-pane-topbar">
       <div class="brand">
-        <div class="brand-mark">KH</div>
+        <img class="brand-mark" :src="appIconUrl" width="22" height="22" alt="" aria-hidden="true" draggable="false" />
         <h1>KnowledgeHub</h1>
       </div>
 
@@ -18,6 +18,14 @@
         />
       </div>
     </header>
+
+    <TelemetryConsentNotice
+      v-if="telemetryNoticeVisible"
+      :saving="telemetryConsentSaving"
+      @acknowledge="acknowledgeTelemetryNotice"
+      @disable="disableTelemetryFromNotice"
+      @open-privacy="openPrivacySettings"
+    />
 
     <main id="main-workspace" class="workspace" tabindex="-1" :aria-busy="startupBlocking">
       <WorkbenchShell
@@ -348,8 +356,6 @@
             :workspace-tabs="workspaceTabs"
             :active-workspace-tab="activeWorkspaceTab"
             :selected-content-item="selectedContentItem"
-            :running="running"
-            :result="result"
             :selected-markdown-preview="selectedMarkdownPreview"
             :selected-markdown-size-bytes="selectedMarkdownSizeBytes"
             :selected-markdown-path="markdownState.markdown_draft_path"
@@ -378,7 +384,6 @@
             :format-duration="formatDuration"
             :format-date-time="formatDateTime"
             :format-bytes="formatBytes"
-            :format-token-count="formatTokenCount"
             :retrying-content-id="retryingContentId"
             :wechat-publishing-configured="wechatPublishingSettings.configured"
             :wechat-cover-generating-content-ids="wechatCoverGeneratingContentIds"
@@ -451,10 +456,10 @@
             :selected-text-context="activeSelectedTextContext"
             :current-insight-html="currentInsightHtml"
             :current-insight-title="currentInsightTitle"
+            :current-insight-reasoning="currentInsightReasoning"
+            :current-insight-reasoning-truncated="currentInsightReasoningTruncated"
             :content-context="activeWorkspaceContent || selectedContentItem"
-            :current-obsidian-path="currentObsidianPath"
             :conversation-key="activeWorkspaceContent?.id || result.content_item_id || ''"
-            :markdown-state="markdownState"
             :content-analysis-templates="contentAnalysisTemplates"
             :qa-history="qaHistory"
             :qa-history-loading="qaHistoryLoading"
@@ -465,36 +470,28 @@
             :article-ocr-status="currentArticleOcrStatus"
             :prioritizing-article-ocr="prioritizingArticleOcr"
             :asking-question="askingQuestion"
-            :generating-ai-summary="generatingAiSummary || isPipelineSummaryGenerating"
-            :generating-summary-text="generatingSummaryText || pipelineGeneratingSummaryText"
+            :generating-ai-summary="generatingAiSummary"
+            :pipeline-generating-ai-summary="isPipelineSummaryGenerating"
+            :generating-summary-text="generatingSummaryText"
+            :pipeline-generating-summary-text="pipelineGeneratingSummaryText"
+            :generating-summary-reasoning="generatingSummaryReasoning"
+            :generating-summary-reasoning-expanded="generatingSummaryReasoningExpanded"
+            :pipeline-generating-summary-reasoning="pipelineGeneratingSummaryReasoning"
+            :pipeline-generating-summary-reasoning-truncated="pipelineGeneratingSummaryReasoningTruncated"
+            :pipeline-summary-task-id="pipelineSummaryTaskId"
             :starting-new-chat="startingNewChat"
             :current-qa-enabled="currentQaEnabled"
             :current-qa-hint="currentQaHint"
             :can-generate-ai-summary="canGenerateAiSummary"
             :exporting-markdown="exportingConversationMarkdown"
-            :last-qa-saved="lastQaSaved"
-            :task-status="taskStatus"
-            :has-task-progress="hasTaskProgress"
-            :current-stage-label="currentStageLabel"
-            :result="result"
-            :total-elapsed="totalElapsed"
             :selected-ai-model="assistantAiModel"
             :available-ai-models="availableAiModels"
-            :markdown-sync-label="markdownSyncLabel"
             :render-markdown="renderMarkdown"
-            :status-tag-type="statusTagType"
-            :status-label="statusLabel"
-            :model-label="modelLabel"
-            :format-seconds="formatSeconds"
-            :rounded-progress="roundedProgress"
-            :progress-status="progressStatus"
-            @open-markdown="openMarkdownDialog"
-            @copy-link="copyText($event, '链接已复制')"
             @update:selected-ai-model="assistantAiModel = $event"
+            @update:generating-summary-reasoning-expanded="generatingSummaryReasoningExpanded = $event"
             @new-chat="startNewChat"
             @generate-ai-summary="generateAiSummary"
             @ask-question="askQuestion"
-            @clear-selected-text-context="clearSelectedTextContext"
             @load-more-qa-history="loadMoreContentQaHistory"
             @retry-qa-history="retryContentQaHistory"
             @insert-shortcut="insertQaShortcut"
@@ -539,8 +536,6 @@
         :initial-section="settingsInitialSection"
         v-model:selected-theme="selectedTheme"
         v-model:selected-ai-model="selectedAiModel"
-        v-model:deepseek-api-key="deepseekApiKey"
-        v-model:deepseek-base-url="deepseekBaseUrl"
         v-model:deepseek-pricing="deepseekPricing"
         v-model:deepseek-peak-pricing-multiplier="deepseekPeakPricingMultiplier"
         v-model:embedding-api-key="embeddingApiKey"
@@ -626,7 +621,6 @@
         :runtime-components-loading="loadingRuntimeComponents"
         :deepseek-configured="deepseekConfigured"
         :saving-deepseek-settings="savingDeepSeekSettings"
-        :testing-deepseek-connection="testingDeepSeekConnection"
         :embedding-configured="embeddingConfigured"
         :saving-embedding-settings="savingEmbeddingSettings"
         :testing-embedding-connection="testingEmbeddingConnection"
@@ -672,7 +666,7 @@
         @download-asr-model="downloadAsrModel"
         @delete-asr-model="deleteAsrModel"
         @save-deepseek-settings="saveDeepSeekSettings"
-        @test-deepseek-connection="testDeepSeekConnection"
+        @text-model-options-updated="handleTextModelOptionsUpdated"
         @save-embedding-settings="saveEmbeddingSettings"
         @test-embedding-connection="testEmbeddingConnection"
         @save-paddle-ocr-settings="savePaddleOcrSettings"
@@ -832,26 +826,29 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SvgMaskIcon from './components/SvgMaskIcon.vue'
 import PanelToggleIcon from './components/PanelToggleIcon.vue'
 import StatusBreadcrumb from './components/StatusBreadcrumb.vue'
 import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
+import TelemetryConsentNotice from './components/TelemetryConsentNotice.vue'
+import { createTelemetryNoticeController } from './features/telemetry/telemetryNoticeController.js'
+import { assertTelemetryEnabledState } from './features/telemetry/telemetryNoticeState.js'
+import appIconUrl from '../build/icon.svg?url'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
+const TELEMETRY_NOTICE_STORAGE_KEY = 'knowledgehub:telemetry-notice-version'
 import { formatTokenCount } from './utils/viewFormatters'
 import { API_BASE as API, localApiAuthHeaders, localApiRequestUrl } from './utils/localApiAuth.js'
 import WorkbenchShell from './workbench/WorkbenchShell.vue'
 import WorkspaceTabs from './workbench/WorkspaceTabs.vue'
 import WorkspaceChromeActions from './workbench/WorkspaceChromeActions.vue'
-import EditorHost from './workbench/EditorHost.vue'
 import ProcessLogDock from './workbench/ProcessLogDock.vue'
 import PrimarySidebar from './workbench/PrimarySidebar.vue'
 import { normalizeWorkspacePaneVisibility } from './workbench/paneVisibilityState.js'
 import { isSinglePaneWorkspaceView } from './workbench/workspaceViewLoading.js'
-import { formatReportTaskWindow } from './features/reports/reportGenerationPresentation.js'
 import SecondarySidebar from './features/assistant/SecondarySidebar.vue'
 import { useAppController } from './composables/useAppController'
 import { useCampusAccess } from './composables/useCampusAccess'
@@ -864,9 +861,15 @@ import { useWechatCoverController } from './features/wechat/useWechatCoverContro
 import { useWechatDraftController } from './features/wechat/useWechatDraftController.js'
 import { useWechatPublishingSettingsController } from './features/wechat/useWechatPublishingSettingsController.js'
 import { useWechatReportPromptController } from './features/prompts/useWechatReportPromptController.js'
+import { useWechatReportGenerationController } from './features/reports/useWechatReportGenerationController.js'
 import { usePromptWorkspaceController } from './features/prompts/usePromptWorkspaceController.js'
 import { useWechatAccountController } from './features/wechat/useWechatAccountController.js'
+import { useWechatFilterController } from './features/wechat/useWechatFilterController.js'
+import { useWechatReportGroupController } from './features/wechat/useWechatReportGroupController.js'
 import { useWechatSubscriptionSyncController } from './features/wechat/useWechatSubscriptionSyncController.js'
+import { useWechatSubscriptionManagementController } from './features/wechat/useWechatSubscriptionManagementController.js'
+import { useWechatFeedExportController } from './features/wechat/useWechatFeedExportController.js'
+import { useLibrarySourceGroupController } from './features/library/useLibrarySourceGroupController.js'
 
 const loadWeChatManager = () => import('./features/wechat/WeChatManager.vue')
 const loadCampusManager = () => import('./features/campus/CampusManager.vue')
@@ -877,6 +880,7 @@ const loadKnowledgeWorkspace = () => import('./features/knowledge/KnowledgeWorks
 const loadKnowledgeSidebar = () => import('./features/knowledge/KnowledgeSidebar.vue')
 const loadEvidencePreviewSidebar = () => import('./features/knowledge/EvidencePreviewSidebar.vue')
 const WeChatManager = defineAsyncComponent(loadWeChatManager)
+const EditorHost = defineAsyncComponent(() => import('./workbench/EditorHost.vue'))
 const CampusManager = defineAsyncComponent(loadCampusManager)
 const CreatorWorkspace = defineAsyncComponent(loadCreatorWorkspace)
 const RssWorkspace = defineAsyncComponent(loadRssWorkspace)
@@ -898,31 +902,19 @@ const {
   parsedUrl,
   running,
   taskStatus,
-  selectedModel,
-  selectedAsrBackend,
-  availableAsrBackends,
   miniprogramForumCaptureEnabled,
-  asrModelStrategy,
-  asrShortVideoModel,
-  asrLongVideoModel,
-  asrBeamSize,
-  asrVadFilter,
-  asrFallbackEnabled,
   selectedAiModel,
   assistantAiModel,
   availableAiModels,
-  useCache,
   autoDownloadBilibiliVideo,
   douyinVideoQuality,
   searchQuery,
   librarySearchScope,
-  searchResults,
   retryingContentId,
   libraryFolders,
   libraryFolderHistoryStates,
   libraryFolderRevealIds,
   allContentItems,
-  contentPagesLoading,
   contentPageLoadStatus,
   libraryTrashEntries,
   loadingLibraryTrash,
@@ -961,7 +953,14 @@ const {
   generatingAiSummary,
   isPipelineSummaryGenerating,
   generatingSummaryText,
+  generatingSummaryReasoning,
+  generatingSummaryReasoningExpanded,
   pipelineGeneratingSummaryText,
+  pipelineGeneratingSummaryReasoning,
+  pipelineGeneratingSummaryReasoningTruncated,
+  pipelineSummaryTaskId,
+  currentInsightReasoning,
+  currentInsightReasoningTruncated,
   startingNewChat,
   lastQaSaved,
   clipboardWatching,
@@ -1028,7 +1027,6 @@ const {
   workspaceTabById,
   contentForTab,
   resultForTab,
-  statusForTab,
   mediaUrlForTab,
   originalMediaUrlForTab,
   transcriptForTab,
@@ -1089,7 +1087,6 @@ const {
   loadContentAiCalls,
   loadAiTokenUsageSummary,
   runContentAnalysis,
-  openMarkdownDialog,
   clearLogs,
   addLog,
   saveMarkdownDraft,
@@ -1121,7 +1118,6 @@ const {
   runFullPipeline,
   insertQaShortcut,
   setSelectedTextContext,
-  clearSelectedTextContext,
   prioritizeCurrentArticleOcr,
   askQuestion,
   copyQaExchange,
@@ -1264,13 +1260,10 @@ const {
   savingMediaTools,
   runtimeComponents,
   loadingRuntimeComponents,
-  deepseekApiKey,
-  deepseekBaseUrl,
   deepseekPricing,
   deepseekPeakPricingMultiplier,
   deepseekConfigured,
   savingDeepSeekSettings,
-  testingDeepSeekConnection,
   embeddingApiKey,
   embeddingBaseUrl,
   embeddingModel,
@@ -1287,7 +1280,6 @@ const {
   saveManualCollectionSettings,
   loadDeepSeekSettings,
   saveDeepSeekSettings,
-  testDeepSeekConnection,
   saveEmbeddingSettings,
   testEmbeddingConnection,
   loadPaddleOcrSettings,
@@ -1304,6 +1296,24 @@ const {
   loadAiTokenUsageSummary,
   requestDestructiveConfirmation
 })
+
+function handleTextModelOptionsUpdated(options) {
+  const nextOptions = Array.isArray(options) ? options : []
+  availableAiModels.value = nextOptions
+  const enabledValues = nextOptions
+    .filter((option) => option?.disabled !== true)
+    .map((option) => String(option?.value || option || ''))
+    .filter(Boolean)
+  if (!enabledValues.includes(assistantAiModel.value)) {
+    assistantAiModel.value = enabledValues.includes(selectedAiModel.value)
+      ? selectedAiModel.value
+      : enabledValues[0] || assistantAiModel.value
+  }
+  // Keep the legacy pricing editor in sync when the DeepSeek provider URL is
+  // changed through the provider editor. The request remains local and does
+  // not reveal the Keychain secret.
+  void loadDeepSeekSettings().catch(() => null)
+}
 
 const WORKSPACE_PANE_VISIBILITY_KEY = 'knowledgehub.workspace-pane-visibility.v1'
 
@@ -1586,27 +1596,21 @@ const {
   reportGroups: wechatReportGroups,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
-const librarySourceGroups = ref([])
-const sourceGroupEditor = ref(null)
-const showSourceGroupEditor = ref(false)
-const removingSourceGroupKey = ref('')
-const wechatGeneratingGroupId = ref('')
-const wechatPreparingGroupId = ref('')
-const wechatDeletingGroupId = ref('')
-const wechatSavingScheduleGroupId = ref('')
-const reportGenerationDialog = ref({
-  visible: false,
-  phase: 'checking',
-  requestId: '',
-  reportKey: '',
-  reportLabel: '报告',
-  groupName: '',
-  preflight: null,
+const {
+  librarySourceGroups,
+  sourceGroupEditor,
+  showSourceGroupEditor,
+  removingSourceGroupKey,
+  loadLibrarySourceGroups,
+  openSourceGroupEditor,
+  removeSourceFromGroup,
+} = useLibrarySourceGroupController({
+  apiBase: LIBRARY_SOURCE_GROUPS_API,
+  loadWeChatSubscriptions,
+  loadCampusSources,
+  confirmDestructive: requestDestructiveConfirmation,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
-let reportGenerationRequestSequence = 0
-let reportGenerationConfirmationResolver = null
-let reportPreflightRequest = null
-let wechatPreparingRequestId = ''
 const fixedSystemPrompts = ref([])
 const {
   promptWorkspaceTemplates,
@@ -1669,26 +1673,38 @@ const {
   confirmDestructive: requestDestructiveConfirmation,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
-const savingWeChatFilter = ref(false)
 const wechatSubscriptionInterval = ref(1440)
 const wechatAutoProcess = ref(false)
 const wechatSubscriptionStates = ref({})
-const refreshingWeChatProfileId = ref('')
-const wechatSubscriptionUpdateRevision = new Map()
 const wechatSyncIntervalOptions = [
   { label: '每 6 小时', value: 360 },
   { label: '每 12 小时', value: 720 },
   { label: '每天', value: 1440 }
 ]
-const wechatInitialSyncPollTimers = new Map()
-const wechatInitialSyncImportedCounts = new Map()
 let wechatInitialSyncListPollTimer = null
-let wechatIncrementalLibraryRefreshInFlight = false
-let wechatIncrementalLibraryRefreshQueued = false
 
 function wechatErrorMessage(error, fallback = '微信公众号订阅操作失败') {
   return error?.response?.data?.detail || error?.message || fallback
 }
+
+const {
+  wechatGeneratingGroupId,
+  wechatPreparingGroupId,
+  reportGenerationDialog,
+  generateWeChatReport,
+  confirmReportGenerationDialog,
+  cancelReportGenerationDialog,
+  disposeWechatReportGenerationController,
+} = useWechatReportGenerationController({
+  reportGroups: wechatReportGroups,
+  reportGroupApi: WECHAT_REPORT_GROUP_API,
+  addLog,
+  processLogOpen,
+  refreshContentItems: loadContentItems,
+  refreshLibraryFolders: loadLibraryFolders,
+  refreshAiTokenUsage: loadAiTokenUsageSummary,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
 
 const {
   selectedWeChatAccountId,
@@ -1729,6 +1745,57 @@ const {
   refreshContentItems: loadContentItems,
   enqueueTask: enqueueSourceSyncTask,
   observeTask: observeSourceSyncTask,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const {
+  refreshingWeChatProfileId,
+  subscribeWeChatAccount,
+  updateWeChatSubscription,
+  bulkUpdateWeChatSubscriptions,
+  bulkAddWeChatSubscriptionGroup,
+  refreshWeChatSubscriptionProfile,
+  deleteWeChatSubscription,
+} = useWechatSubscriptionManagementController({
+  selectedAccountId: selectedWeChatAccountId,
+  subscriptions: wechatSubscriptions,
+  reportGroups: wechatReportGroups,
+  subscriptionStates: wechatSubscriptionStates,
+  syncInterval: wechatSubscriptionInterval,
+  autoProcess: wechatAutoProcess,
+  loadSubscriptions: loadWeChatSubscriptions,
+  refreshContentItems: loadContentItems,
+  observeTask: observeSourceSyncTask,
+  apiBase: WECHAT_SUBSCRIPTION_API,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const {
+  savingWeChatFilter,
+  createWeChatFilter,
+  deleteWeChatFilter,
+} = useWechatFilterController({
+  filterApi: WECHAT_FILTER_API,
+  loadSubscriptions: loadWeChatSubscriptions,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const {
+  wechatDeletingGroupId,
+  wechatSavingScheduleGroupId,
+  createWeChatReportGroup,
+  deleteWeChatReportGroup,
+  saveWeChatReportSchedule,
+} = useWechatReportGroupController({
+  reportGroupApi: WECHAT_REPORT_GROUP_API,
+  loadSubscriptions: loadWeChatSubscriptions,
+  loadReportPrompts: loadWechatReportPrompts,
+  selectedReportPromptGroupId: selectedWechatReportPromptGroupId,
+  errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
+})
+
+const { copyWeChatRss, exportWeChatSubscriptions } = useWechatFeedExportController({
+  feedApi: WECHAT_FEED_API,
   errorMessage: (error, fallback) => wechatErrorMessage(error, fallback),
 })
 
@@ -1813,10 +1880,82 @@ function openGeneratedReport(contentItemId) {
   if (item) openContentFromSidebar(item)
 }
 
-async function openSettings() {
-  settingsInitialSection.value = 'appearance'
+async function openSettings(section = 'appearance') {
+  settingsInitialSection.value = section
   showSettings.value = true
   await Promise.all([loadWeChatSubscriptions(), loadWechatPublishingSettings(), loadWechatQwenCoverSettings(), loadMediaTools(), loadRuntimeComponents(), loadDeepSeekSettings(), loadPaddleOcrSettings(), loadManualCollectionSettings(), loadFolderImportWatcherStatus()])
+}
+
+const telemetryNoticeVisible = ref(false)
+const telemetryConsentSaving = ref(false)
+const telemetryNoticeVersion = ref('')
+
+function rememberTelemetryNotice(version) {
+  try {
+    localStorage.setItem(TELEMETRY_NOTICE_STORAGE_KEY, version)
+  } catch {
+    // A restricted profile may refuse localStorage; the notice can safely be
+    // shown again rather than weakening consent or blocking the workspace.
+  }
+}
+
+function seenTelemetryNoticeVersion() {
+  try {
+    return localStorage.getItem(TELEMETRY_NOTICE_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+async function requestTelemetryDisabled() {
+  const response = await axios.put(
+    `${API}/telemetry`,
+    { enabled: false, privacy_notice_version: '' },
+    { timeout: 5000 },
+  )
+  return assertTelemetryEnabledState(response.data || {}, false)
+}
+
+const telemetryNoticeController = createTelemetryNoticeController({
+  fetchStatus: async () => {
+    const response = await axios.get(`${API}/telemetry`, { timeout: 3000 })
+    return response.data || {}
+  },
+  disableTelemetry: requestTelemetryDisabled,
+  readSeenVersion: seenTelemetryNoticeVersion,
+  rememberVersion: rememberTelemetryNotice,
+  updateNotice: ({ version, visible }) => {
+    telemetryNoticeVersion.value = version
+    telemetryNoticeVisible.value = visible
+  },
+})
+
+function acknowledgeTelemetryNotice() {
+  telemetryNoticeController.stop()
+  const version = telemetryNoticeVersion.value
+  if (version) rememberTelemetryNotice(version)
+  telemetryNoticeVisible.value = false
+}
+
+async function disableTelemetryFromNotice() {
+  const version = telemetryNoticeVersion.value
+  telemetryConsentSaving.value = true
+  try {
+    await requestTelemetryDisabled()
+    telemetryNoticeController.stop()
+    if (version) rememberTelemetryNotice(version)
+    telemetryNoticeVisible.value = false
+    ElMessage.success('已关闭诊断并清除本机待发送数据')
+  } catch {
+    ElMessage.error('无法关闭使用诊断，请在设置中重试')
+  } finally {
+    telemetryConsentSaving.value = false
+  }
+}
+
+function openPrivacySettings() {
+  acknowledgeTelemetryNotice()
+  void openSettings('privacy')
 }
 
 async function chooseObsidianFolder() {
@@ -1888,63 +2027,6 @@ async function loadWeChatSubscriptions({ silent = false } = {}) {
   }
 }
 
-async function loadLibrarySourceGroups() {
-  try {
-    const response = await axios.get(LIBRARY_SOURCE_GROUPS_API, { timeout: 10000 })
-    librarySourceGroups.value = Array.isArray(response.data) ? response.data : []
-  } catch {
-    // Source groups are an additional library view and must not block core content loading.
-  }
-}
-
-async function openSourceGroupEditor(group) {
-  if (!group?.id) return
-  await loadLibrarySourceGroups()
-  sourceGroupEditor.value = librarySourceGroups.value.find((item) => String(item.id) === String(group.id)) || {
-    ...group,
-    sources: [],
-  }
-  showSourceGroupEditor.value = true
-}
-
-async function removeSourceFromGroup(source) {
-  const group = sourceGroupEditor.value
-  const sourceId = String(source?.source_id || '').trim()
-  const sourceKind = String(source?.kind || '').trim()
-  if (!group?.id || !sourceId || !sourceKind || removingSourceGroupKey.value) return
-
-  const sourceLabel = source.label || '这个来源'
-  const confirmed = await requestDestructiveConfirmation({
-    title: '移出分组',
-    message: `将“${sourceLabel}”移出“${group.name}”？原来源与已收集内容会保留。`,
-    confirmLabel: '移出分组',
-    cancelLabel: '保留',
-  })
-  if (!confirmed) return
-
-  const removalKey = `${sourceKind}:${sourceId}`
-  removingSourceGroupKey.value = removalKey
-  try {
-    await axios.delete(
-      `${LIBRARY_SOURCE_GROUPS_API}/${encodeURIComponent(group.id)}/sources/${encodeURIComponent(sourceKind)}/${encodeURIComponent(sourceId)}`,
-      { timeout: 10000 },
-    )
-    await Promise.all([loadLibrarySourceGroups(), loadWeChatSubscriptions(), loadCampusSources({ silent: true })])
-    const refreshedGroup = librarySourceGroups.value.find((item) => String(item.id) === String(group.id)) || null
-    if (refreshedGroup) {
-      sourceGroupEditor.value = refreshedGroup
-    } else {
-      showSourceGroupEditor.value = false
-      sourceGroupEditor.value = null
-    }
-    ElMessage.success(`已将“${sourceLabel}”移出“${group.name}”`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '移出分组失败'))
-  } finally {
-    if (removingSourceGroupKey.value === removalKey) removingSourceGroupKey.value = ''
-  }
-}
-
 async function importLocalMarkdown({ file, files, libraryFolderId = null } = {}) {
   const importFiles = Array.isArray(files) ? files : [file]
   const validFiles = importFiles.filter((candidate) => candidate instanceof File)
@@ -2012,599 +2094,6 @@ async function openOriginalFile(path) {
   }
 }
 
-function setWeChatSubscriptionState(accountId, fakeid, state = '') {
-  const normalizedAccountId = String(accountId || '')
-  const normalizedFakeid = String(fakeid || '')
-  if (!normalizedAccountId || !normalizedFakeid) return
-  const key = `${normalizedAccountId}:${normalizedFakeid}`
-  const next = { ...wechatSubscriptionStates.value }
-  if (state) next[key] = state
-  else delete next[key]
-  wechatSubscriptionStates.value = next
-}
-
-function upsertWeChatSubscription(subscription) {
-  if (!subscription?.id) return
-  const index = wechatSubscriptions.value.findIndex((item) => item.id === subscription.id)
-  if (index < 0) {
-    wechatSubscriptions.value = [subscription, ...wechatSubscriptions.value]
-    return
-  }
-  wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-    item.id === subscription.id ? { ...item, ...subscription } : item
-  ))
-}
-
-function stopWeChatInitialSyncPolling(subscriptionId) {
-  const timer = wechatInitialSyncPollTimers.get(subscriptionId)
-  if (timer) clearTimeout(timer)
-  wechatInitialSyncPollTimers.delete(subscriptionId)
-}
-
-async function refreshLibraryForWeChatIncrement() {
-  if (wechatIncrementalLibraryRefreshInFlight) {
-    wechatIncrementalLibraryRefreshQueued = true
-    return
-  }
-  wechatIncrementalLibraryRefreshInFlight = true
-  try {
-    // loadContentItems also refreshes folder metadata, so the new document,
-    // its source folder, unread state, and file tree arrive together.
-    await loadContentItems()
-  } finally {
-    wechatIncrementalLibraryRefreshInFlight = false
-    if (wechatIncrementalLibraryRefreshQueued) {
-      wechatIncrementalLibraryRefreshQueued = false
-      void refreshLibraryForWeChatIncrement()
-    }
-  }
-}
-
-function pollWeChatInitialSync(subscription, accountId, fakeid, attempt = 0) {
-  stopWeChatInitialSyncPolling(subscription.id)
-  const timer = setTimeout(async () => {
-    try {
-      const response = await axios.get(
-        `${WECHAT_SUBSCRIPTION_API}/${subscription.id}/initial-sync`,
-        { timeout: 10000 }
-      )
-      const status = response.data?.status || 'idle'
-      if (status === 'queued' || status === 'running') {
-        const importedCount = Number(response.data?.imported_count || 0)
-        const previousImportedCount = Number(wechatInitialSyncImportedCounts.get(subscription.id) || 0)
-        if (importedCount > previousImportedCount) {
-          wechatInitialSyncImportedCounts.set(subscription.id, importedCount)
-          void refreshLibraryForWeChatIncrement()
-        }
-        setWeChatSubscriptionState(accountId, fakeid, 'checking')
-        pollWeChatInitialSync(subscription, accountId, fakeid, attempt + 1)
-        return
-      }
-      const subscriptionResponse = await axios.get(
-        `${WECHAT_SUBSCRIPTION_API}/${subscription.id}`,
-        { timeout: 10000 }
-      )
-      upsertWeChatSubscription(subscriptionResponse.data)
-      await refreshLibraryForWeChatIncrement()
-      setWeChatSubscriptionState(accountId, fakeid)
-      stopWeChatInitialSyncPolling(subscription.id)
-      wechatInitialSyncImportedCounts.delete(subscription.id)
-      if (status === 'failed') ElMessage.warning(`${subscription.mp_name || '公众号'}已订阅，但首次检查失败，可稍后手动检查`)
-    } catch (error) {
-      if (attempt < 120) {
-        pollWeChatInitialSync(subscription, accountId, fakeid, attempt + 1)
-        return
-      }
-      setWeChatSubscriptionState(accountId, fakeid)
-      stopWeChatInitialSyncPolling(subscription.id)
-      wechatInitialSyncImportedCounts.delete(subscription.id)
-      ElMessage.warning(`${subscription.mp_name || '公众号'}已订阅，首次检查仍在后台进行`)
-    }
-  }, attempt ? 1500 : 500)
-  wechatInitialSyncPollTimers.set(subscription.id, timer)
-}
-
-async function subscribeWeChatAccount(item) {
-  if (!selectedWeChatAccountId.value) return
-  const accountId = String(selectedWeChatAccountId.value)
-  const fakeid = String(item.fakeid || '')
-  const stateKey = `${accountId}:${fakeid}`
-  if (!fakeid || wechatSubscriptionStates.value[stateKey]) return
-  if (wechatSubscriptions.value.some((subscription) => (
-    String(subscription.account_id) === accountId && String(subscription.fakeid) === fakeid
-  ))) return
-  setWeChatSubscriptionState(accountId, fakeid, 'subscribing')
-  try {
-    const response = await axios.post(WECHAT_SUBSCRIPTION_API, {
-      account_id: accountId,
-      fakeid: item.fakeid,
-      mp_name: item.name,
-      biz: item.biz || '',
-      avatar_url: item.avatar_url || '',
-      description: item.description || '',
-      sync_interval_minutes: wechatSubscriptionInterval.value,
-      auto_process: wechatAutoProcess.value,
-      initial_sync: true,
-      initial_limit: 10
-    }, { timeout: 15000 })
-    const subscription = response.data?.subscription
-    if (!subscription?.id) throw new Error('订阅接口未返回公众号信息')
-    upsertWeChatSubscription(subscription)
-    await loadContentItems()
-    const sync = response.data?.sync
-    if (sync?.task_id) {
-      setWeChatSubscriptionState(accountId, fakeid, 'checking')
-      observeSourceSyncTask(sync.task_id, {
-        onSucceeded: async () => {
-          await Promise.all([loadWeChatSubscriptions(), refreshLibraryForWeChatIncrement()])
-          setWeChatSubscriptionState(accountId, fakeid)
-        },
-        onFailed: (message) => {
-          setWeChatSubscriptionState(accountId, fakeid)
-          ElMessage.warning(message || `${subscription.mp_name || '公众号'}已订阅，首次检查失败，可稍后手动检查`)
-        },
-      })
-      ElMessage.success('公众号已订阅，正在后台检查最近文章')
-    } else {
-      setWeChatSubscriptionState(accountId, fakeid)
-      ElMessage.success('公众号已订阅')
-    }
-  } catch (error) {
-    setWeChatSubscriptionState(accountId, fakeid)
-    ElMessage.error(wechatErrorMessage(error, '创建公众号订阅失败'))
-  }
-}
-
-async function updateWeChatSubscription(subscription, payload, { silent = false } = {}) {
-  const index = wechatSubscriptions.value.findIndex((item) => item.id === subscription.id)
-  if (index < 0) return false
-  const previous = wechatSubscriptions.value[index]
-  const revision = (wechatSubscriptionUpdateRevision.get(subscription.id) || 0) + 1
-  wechatSubscriptionUpdateRevision.set(subscription.id, revision)
-  wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-    item.id === subscription.id ? { ...item, ...payload } : item
-  ))
-  try {
-    const response = await axios.patch(`${WECHAT_SUBSCRIPTION_API}/${subscription.id}`, payload, { timeout: 10000 })
-    if (wechatSubscriptionUpdateRevision.get(subscription.id) === revision && response.data) {
-      wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-        item.id === subscription.id ? { ...item, ...response.data } : item
-      ))
-    }
-    return true
-  } catch (error) {
-    if (wechatSubscriptionUpdateRevision.get(subscription.id) === revision) {
-      wechatSubscriptions.value = wechatSubscriptions.value.map((item) => (
-        item.id === subscription.id ? previous : item
-      ))
-    }
-    if (!silent) ElMessage.error(wechatErrorMessage(error, '更新公众号订阅失败'))
-    return false
-  }
-}
-
-async function updateWeChatSubscriptionsInParallel(subscriptions, payloadForSubscription) {
-  let cursor = 0
-  let succeeded = 0
-  let failed = 0
-  const worker = async () => {
-    while (cursor < subscriptions.length) {
-      const subscription = subscriptions[cursor]
-      cursor += 1
-      const ok = await updateWeChatSubscription(subscription, payloadForSubscription(subscription), { silent: true })
-      if (ok) succeeded += 1
-      else failed += 1
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(5, subscriptions.length) }, worker))
-  return { succeeded, failed }
-}
-
-async function bulkUpdateWeChatSubscriptions({ subscriptionIds = [], payload = {}, label = '设置' } = {}) {
-  const selectedIds = new Set(subscriptionIds.map(String))
-  const selectedSubscriptions = wechatSubscriptions.value.filter((item) => selectedIds.has(String(item.id)))
-  const allowedKeys = new Set(['sync_interval_minutes', 'auto_process', 'notify_on_new', 'enabled'])
-  const safePayload = Object.fromEntries(Object.entries(payload).filter(([key]) => allowedKeys.has(key)))
-  if (!selectedSubscriptions.length || !Object.keys(safePayload).length) {
-    ElMessage.warning('请选择公众号和要更新的设置')
-    return
-  }
-
-  const { succeeded, failed } = await updateWeChatSubscriptionsInParallel(selectedSubscriptions, () => safePayload)
-
-  if (failed) {
-    ElMessage.warning(`已更新 ${succeeded} 个公众号的${label}，${failed} 个更新失败`)
-    return
-  }
-  ElMessage.success(`已更新 ${succeeded} 个公众号的${label}`)
-}
-
-async function bulkAddWeChatSubscriptionGroup({ subscriptionIds = [], groupId } = {}) {
-  const selectedIds = new Set(subscriptionIds.map(String))
-  const group = wechatReportGroups.value.find((item) => String(item.id) === String(groupId))
-  const selectedSubscriptions = wechatSubscriptions.value.filter((item) => selectedIds.has(String(item.id)))
-  if (!group || !selectedSubscriptions.length) {
-    ElMessage.warning('请选择公众号和要添加的分组')
-    return
-  }
-
-  const eligible = selectedSubscriptions.filter((subscription) => {
-    const groupIds = subscription.group_ids || []
-    return groupIds.length < 3 && !groupIds.some((id) => String(id) === String(groupId))
-  })
-  const skipped = selectedSubscriptions.length - eligible.length
-  if (!eligible.length) {
-    ElMessage.warning('所选公众号已包含该分组，或均已达到三个分组上限')
-    return
-  }
-
-  const { succeeded, failed } = await updateWeChatSubscriptionsInParallel(eligible, (subscription) => ({
-    group_ids: [...(subscription.group_ids || []), groupId]
-  }))
-
-  const details = [`已将“${group.name}”添加到 ${succeeded} 个公众号`]
-  if (skipped) details.push(`${skipped} 个已存在该分组或已达到上限`)
-  if (failed) details.push(`${failed} 个更新失败`)
-  ElMessage[failed ? 'warning' : 'success'](details.join('；'))
-}
-
-async function refreshWeChatSubscriptionProfile(subscriptionId) {
-  refreshingWeChatProfileId.value = subscriptionId
-  try {
-    await axios.post(`${WECHAT_SUBSCRIPTION_API}/${subscriptionId}/profile`, {}, { timeout: 30000 })
-    await loadWeChatSubscriptions()
-    ElMessage.success('公众号资料已更新')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '更新公众号资料失败'))
-  } finally {
-    refreshingWeChatProfileId.value = ''
-  }
-}
-
-async function deleteWeChatSubscription(subscriptionId) {
-  try {
-    await axios.delete(`${WECHAT_SUBSCRIPTION_API}/${subscriptionId}`, { timeout: 10000 })
-    ElMessage.success('已取消公众号订阅')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '取消公众号订阅失败'))
-  }
-}
-
-async function createWeChatFilter(payload, done) {
-  savingWeChatFilter.value = true
-  try {
-    await axios.post(WECHAT_FILTER_API, payload, { timeout: 10000 })
-    done?.()
-    ElMessage.success('正文清洗规则已添加')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '添加正文清洗规则失败'))
-  } finally {
-    savingWeChatFilter.value = false
-  }
-}
-
-async function deleteWeChatFilter(ruleId) {
-  try {
-    await axios.delete(`${WECHAT_FILTER_API}/${ruleId}`, { timeout: 10000 })
-    ElMessage.success('正文清洗规则已删除')
-    await loadWeChatSubscriptions()
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '删除正文清洗规则失败'))
-  }
-}
-
-async function createWeChatReportGroup(payload, done) {
-  try {
-    const response = await axios.post(WECHAT_REPORT_GROUP_API, payload, { timeout: 10000 })
-    done?.()
-    await loadWeChatSubscriptions()
-    selectedWechatReportPromptGroupId.value = response.data?.id || selectedWechatReportPromptGroupId.value
-    await loadWechatReportPrompts()
-    ElMessage.success('报告分组已添加；可前往“提示词 → 分组报告”完善区间报告写法')
-  } catch (error) { ElMessage.error(wechatErrorMessage(error, '添加公众号分组失败')) }
-}
-
-async function deleteWeChatReportGroup(group) {
-  if (!group?.id || wechatDeletingGroupId.value) return
-  wechatDeletingGroupId.value = group.id
-  try {
-    const response = await axios.delete(`${WECHAT_REPORT_GROUP_API}/${group.id}`, { timeout: 10000 })
-    await loadWeChatSubscriptions()
-    await loadWechatReportPrompts()
-    const affected = Number(response.data?.affected_subscription_count || 0)
-    ElMessage.success(`分组“${group.name}”已删除${affected ? `，已从 ${affected} 个公众号移除标签` : ''}`)
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '删除公众号分组失败'))
-  } finally {
-    if (wechatDeletingGroupId.value === group.id) wechatDeletingGroupId.value = ''
-  }
-}
-
-async function saveWeChatReportSchedule(groupId, payload, done) {
-  if (!groupId || wechatSavingScheduleGroupId.value) return
-  wechatSavingScheduleGroupId.value = groupId
-  try {
-    await axios.put(
-      `${WECHAT_REPORT_GROUP_API}/${encodeURIComponent(groupId)}/schedule`,
-      payload,
-      { timeout: 10000 },
-    )
-    await loadWeChatSubscriptions()
-    done?.()
-    ElMessage.success(payload.enabled ? '已开启定时生成' : '已关闭定时生成')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '保存定时生成计划失败'))
-  } finally {
-    if (wechatSavingScheduleGroupId.value === groupId) wechatSavingScheduleGroupId.value = ''
-  }
-}
-
-function openReportGenerationDialog({ requestId, reportKey, reportLabel, groupName }) {
-  reportGenerationConfirmationResolver?.(false)
-  reportGenerationDialog.value = {
-    visible: true,
-    phase: 'checking',
-    requestId,
-    reportKey,
-    reportLabel,
-    groupName,
-    preflight: null,
-  }
-  return new Promise((resolve) => {
-    reportGenerationConfirmationResolver = resolve
-  })
-}
-
-function confirmReportGenerationDialog() {
-  if (!reportGenerationDialog.value.visible || reportGenerationDialog.value.phase !== 'ready') return
-  reportGenerationDialog.value = { ...reportGenerationDialog.value, phase: 'submitting' }
-  const resolve = reportGenerationConfirmationResolver
-  reportGenerationConfirmationResolver = null
-  resolve?.(true)
-}
-
-function cancelReportGenerationDialog() {
-  const state = reportGenerationDialog.value
-  if (!state.visible || state.phase === 'submitting') return
-  if (reportPreflightRequest?.requestId === state.requestId) reportPreflightRequest.controller.abort()
-  const resolve = reportGenerationConfirmationResolver
-  reportGenerationConfirmationResolver = null
-  resolve?.(false)
-  reportGenerationDialog.value = { ...state, visible: false }
-  if (wechatPreparingRequestId === state.requestId) {
-    wechatPreparingRequestId = ''
-    wechatPreparingGroupId.value = ''
-  }
-}
-
-function dismissReportGenerationDialog(requestId) {
-  if (reportGenerationDialog.value.requestId !== requestId) return
-  const resolve = reportGenerationConfirmationResolver
-  reportGenerationConfirmationResolver = null
-  resolve?.(false)
-  reportGenerationDialog.value = { ...reportGenerationDialog.value, visible: false }
-}
-
-function closeReportGenerationDialog(requestId) {
-  if (reportGenerationDialog.value.requestId !== requestId) return
-  reportGenerationDialog.value = { ...reportGenerationDialog.value, visible: false }
-}
-
-async function generateWeChatReport(groupId, reportType, options = {}) {
-  if (wechatGeneratingGroupId.value || wechatPreparingGroupId.value) return
-  const reportKey = `${groupId}:${reportType}`
-  const reportLabel = { daily: '日报', weekly: '周报', range: '区间报告' }[reportType] || '汇总'
-  const groupName = wechatReportGroups.value.find((group) => group.id === groupId)?.name || '校园生活'
-  const requestId = `report-confirm-${++reportGenerationRequestSequence}`
-  const requestPayload = { report_type: reportType }
-  if (options?.windowStart && options?.windowEnd) {
-    requestPayload.window_start = options.windowStart
-    requestPayload.window_end = options.windowEnd
-    requestPayload.include_history_context = options.includeHistoryContext !== false
-  }
-  requestPayload.include_external_imports = options.includeExternalImports === true
-  if (options?.fileName) requestPayload.file_name = options.fileName
-  const preflightController = new AbortController()
-  reportPreflightRequest = { requestId, controller: preflightController }
-  wechatPreparingRequestId = requestId
-  wechatPreparingGroupId.value = reportKey
-  const confirmation = openReportGenerationDialog({
-    requestId,
-    reportKey,
-    reportLabel,
-    groupName,
-  })
-  let preflight
-  try {
-    const response = await axios.post(
-      `${WECHAT_REPORT_GROUP_API}/${groupId}/preflight`,
-      requestPayload,
-      { timeout: 30000, signal: preflightController.signal }
-    )
-    preflight = response.data || {}
-    if (reportGenerationDialog.value.requestId !== requestId) return
-    reportGenerationDialog.value = {
-      ...reportGenerationDialog.value,
-      phase: 'ready',
-      groupName: preflight.group_name || groupName,
-      preflight,
-    }
-    const confirmed = await confirmation
-    if (!confirmed) return
-  } catch (error) {
-    dismissReportGenerationDialog(requestId)
-    const canceled = axios.isCancel(error) || error?.code === 'ERR_CANCELED'
-    if (!canceled) ElMessage.error(wechatErrorMessage(error, '报告预检失败'))
-    return
-  } finally {
-    if (reportPreflightRequest?.requestId === requestId) reportPreflightRequest = null
-    if (wechatPreparingRequestId === requestId) {
-      wechatPreparingRequestId = ''
-      wechatPreparingGroupId.value = ''
-    }
-  }
-  const taskId = `report:${reportType}:${Date.now()}`
-  const windowLabel = formatReportTaskWindow(options.windowStart, options.windowEnd)
-  const taskName = `${groupName} · ${windowLabel ? `${windowLabel} ${reportLabel}` : reportLabel}`
-  wechatGeneratingGroupId.value = reportKey
-  processLogOpen.value = true
-  addLog(`开始生成${reportLabel}`, 'info', 'report_prepare', null, {
-    task_id: taskId,
-    task_name: taskName,
-    task_status: 'running',
-    task_progress: 0
-  })
-  try {
-    let receivedProgress = false
-    const result = await consumeWeChatReportStream(groupId, reportType, options, (event) => {
-      if (!receivedProgress) {
-        receivedProgress = true
-        closeReportGenerationDialog(requestId)
-      }
-      addLog(
-        event.message || '报告生成中',
-        event.level || 'info',
-        event.stage || 'report_prepare',
-        event.elapsed_seconds ?? null,
-        {
-          task_id: taskId,
-          task_name: taskName,
-          task_status: event.level === 'error' ? 'failed' : 'running',
-          task_progress: Number(event.progress || 0),
-          model: event.model || null,
-          call_count: Number(event.call_count || 0),
-          prompt_tokens: event.prompt_tokens ?? null,
-          completion_tokens: event.completion_tokens ?? null,
-          total_tokens: event.total_tokens ?? null,
-          input_chars: event.input_chars ?? null,
-          output_chars: event.output_chars ?? null,
-          estimated_cost: event.estimated_cost ?? null
-        }
-      )
-    })
-    closeReportGenerationDialog(requestId)
-    const modeLabel = result?.generation_mode === 'campus_clustered' ? '，已完成事件聚类与引用审校' : ''
-    addLog(`生成完成，共汇总 ${result?.source_count || 0} 篇文章${modeLabel}`, 'success', 'report_save', null, {
-      task_id: taskId,
-      task_name: taskName,
-      task_status: 'succeeded',
-      task_progress: 100,
-      call_count: Number(result?.ai_token_usage?.call_count || 0),
-      prompt_tokens: result?.ai_token_usage?.prompt_tokens ?? null,
-      completion_tokens: result?.ai_token_usage?.completion_tokens ?? null,
-      total_tokens: result?.ai_token_usage?.total_tokens ?? null,
-      estimated_cost: result?.ai_token_usage?.estimated_cost ?? null
-    })
-    ElMessage.success(`已生成${reportLabel}，共汇总 ${result?.source_count || 0} 篇文章${modeLabel}`)
-    await loadContentItems()
-    await loadLibraryFolders()
-  } catch (error) {
-    closeReportGenerationDialog(requestId)
-    const message = wechatErrorMessage(error, '生成报告失败')
-    addLog(message, 'error', 'report_prepare', null, {
-      task_id: taskId,
-      task_name: taskName,
-      task_status: 'failed',
-      task_progress: 100
-    })
-    ElMessage.error(message)
-  } finally {
-    closeReportGenerationDialog(requestId)
-    if (wechatGeneratingGroupId.value === reportKey) wechatGeneratingGroupId.value = ''
-    void loadAiTokenUsageSummary()
-  }
-}
-
-async function consumeWeChatReportStream(groupId, reportType, options, onProgress) {
-  const payload = { report_type: reportType }
-  if (options?.windowStart && options?.windowEnd) {
-    payload.window_start = options.windowStart
-    payload.window_end = options.windowEnd
-    payload.include_history_context = options.includeHistoryContext !== false
-  }
-  payload.include_external_imports = options.includeExternalImports === true
-  if (options?.fileName) payload.file_name = options.fileName
-  return consumeReportEventStream(`${WECHAT_REPORT_GROUP_API}/${groupId}/generate-stream`, payload, onProgress)
-}
-
-async function consumeReportEventStream(url, payload, onProgress) {
-  const response = await fetch(localApiRequestUrl(url), {
-    method: 'POST',
-    headers: await localApiAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(payload)
-  })
-  if (!response.ok || !response.body) {
-    let detail = `报告生成服务返回 ${response.status}`
-    try {
-      const payload = await response.json()
-      detail = payload?.detail || detail
-    } catch {
-      // Keep the status-based message when the response is not JSON.
-    }
-    throw new Error(detail)
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder('utf-8')
-  let buffer = ''
-  let result = null
-  let streamError = ''
-
-  const handleBlock = (block) => {
-    const data = block.split(/\r?\n/)
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).trimStart())
-      .join('\n')
-    if (!data) return
-    const event = JSON.parse(data)
-    if (event.event === 'progress') onProgress?.(event)
-    if (event.event === 'complete') result = event.result || {}
-    if (event.event === 'error') streamError = event.message || '报告生成失败'
-  }
-
-  while (true) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-    const blocks = buffer.split(/\r?\n\r?\n/)
-    buffer = blocks.pop() || ''
-    for (const block of blocks) handleBlock(block)
-    if (done) break
-  }
-  if (buffer.trim()) handleBlock(buffer)
-  if (streamError) throw new Error(streamError)
-  if (!result) throw new Error('报告生成连接已结束，但没有收到完成结果')
-  return result
-}
-
-async function copyWeChatRss(subscriptionId = '') {
-  const suffix = subscriptionId ? `/rss/${subscriptionId}.xml` : '/rss.xml'
-  const url = `${WECHAT_FEED_API}${suffix}`
-  try {
-    await navigator.clipboard.writeText(url)
-    ElMessage.success(subscriptionId ? '单公众号 RSS 地址已复制' : '聚合 RSS 地址已复制')
-  } catch {
-    ElMessage.error('无法复制 RSS 地址，请检查系统剪贴板权限')
-  }
-}
-
-async function exportWeChatSubscriptions() {
-  try {
-    const response = await axios.get(`${WECHAT_FEED_API}/subscriptions.json`, { timeout: 10000 })
-    const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'knowledgehub-wechat-subscriptions.json'
-    anchor.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('订阅配置已导出，不包含登录凭据')
-  } catch (error) {
-    ElMessage.error(wechatErrorMessage(error, '导出订阅配置失败'))
-  }
-}
-
 function statusbarDirectoryName(value) {
   const path = String(value || '').trim().replace(/[\\/]+$/u, '')
   if (!path) return '资料库'
@@ -2659,7 +2148,6 @@ function handleStatusBreadcrumbSelect(item) {
   if (!item?.actionable) return
   activeView.value = 'library'
   searchQuery.value = ''
-  searchResults.value = []
   if (item.folderId) libraryFolderRevealIds.value = [item.folderId]
 }
 
@@ -3181,15 +2669,17 @@ watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
   localStorage.setItem(WORKSPACE_PANE_VISIBILITY_KEY, JSON.stringify({ primary, context }))
 })
 
+onMounted(() => {
+  void telemetryNoticeController.start()
+})
+
 onBeforeUnmount(() => {
-  reportPreflightRequest?.controller.abort()
-  reportGenerationConfirmationResolver?.(false)
-  reportGenerationConfirmationResolver = null
+  telemetryNoticeController.stop()
+  disposeWechatReportGenerationController()
   disposeWechatAccountController()
   disposeWechatCoverController()
   disposeWechatDraftController()
   stopWeChatInitialSyncListPolling()
-  for (const subscriptionId of wechatInitialSyncPollTimers.keys()) stopWeChatInitialSyncPolling(subscriptionId)
 })
 
 </script>

@@ -10,7 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ENTRY = ROOT / "backend" / "desktop_server.py"
 DESKTOP_DIR = ROOT / "desktop"
@@ -88,6 +87,8 @@ def build_backend(target: str) -> None:
             str(build_root / "spec"),
             "--paths",
             str(ROOT / "backend"),
+            "--hidden-import",
+            "mcp_server",
             # The Apple Silicon MLX path never imports mlx_whisper's legacy
             # PyTorch compatibility implementation. Exclude it so PyInstaller
             # does not turn an optional upstream module into a 400 MB runtime

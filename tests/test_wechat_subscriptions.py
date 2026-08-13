@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import time
 import unittest
-import json
 from datetime import date, datetime
 from pathlib import Path
 from threading import Lock
 from types import SimpleNamespace
 from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -27,14 +26,14 @@ from services.database import (
 from services.repository import ContentRepository, new_id
 from services.wechat_subscription import (
     SessionCredentials,
-    WeChatAdminClient,
     WeChatAccountCandidate,
+    WeChatAdminClient,
     WeChatArticleCandidate,
     WeChatAuthorizationError,
     WeChatBulkSyncQueue,
+    WeChatInitialSyncQueue,
     WeChatQrAuthService,
     WeChatRateLimitError,
-    WeChatInitialSyncQueue,
     WeChatSubscriptionService,
     canonical_article_id,
 )
@@ -163,7 +162,12 @@ class WeChatSubscriptionServiceTests(unittest.TestCase):
         settings.data_dir = Path(self.temp_dir.name)
         self.store = MemorySessionStore()
         self.client = FakeWeChatAdminClient()
-        self.service = WeChatSubscriptionService(session_store=self.store, admin_client=self.client)
+        self.prepared_content_ids: list[str] = []
+        self.service = WeChatSubscriptionService(
+            session_store=self.store,
+            admin_client=self.client,
+            enqueue_preparation=lambda content_item_id: (self.prepared_content_ids.append(content_item_id) or True),
+        )
 
     def tearDown(self) -> None:
         settings.data_dir = self.original_data_dir
@@ -595,6 +599,7 @@ class WeChatSubscriptionServiceTests(unittest.TestCase):
         result = self.service.sync_subscription(subscription["id"], mode="catch_up", max_items=1, force=True)
 
         self.assertEqual(result["imported_count"], 2)
+        self.assertEqual(len(self.prepared_content_ids), 2)
 
     def test_date_range_backfill_filters_candidates_before_importing(self):
         self.client.articles.append(

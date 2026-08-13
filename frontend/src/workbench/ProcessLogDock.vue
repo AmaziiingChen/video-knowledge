@@ -227,6 +227,14 @@ import {
   preferredProcessLogTaskId,
   visibleProcessLogTasks,
 } from './processLogTaskState.js'
+import {
+  formatLogMetrics,
+  logOutcomeLabel as presentationLogOutcomeLabel,
+  taskHeaderStatus as presentationTaskHeaderStatus,
+  taskProgressLabel,
+  taskStageLabel as presentationTaskStageLabel,
+  usageForTask,
+} from './processLogPresentation.js'
 
 const props = defineProps({
   collapsed: { type: Boolean, default: false },
@@ -309,129 +317,17 @@ const copyableLogText = computed(() => selectedTaskLogs.value.map((item) => {
   if (item.step) parts.push(`[${props.stepLabel(item.step)}]`)
   if (item.msg) parts.push(item.msg)
   if (item.task_name) parts.push(`(${item.task_name})`)
-  const metrics = formatLogMetrics(item)
+  const metrics = formatLogMetrics(item, props.formatTokenCount)
   if (metrics) parts.push(metrics)
   return parts.join(' ')
 }).filter(Boolean).join('\n'))
 const selectedTaskUsage = computed(() => {
-  const taskCalls = Array.isArray(selectedTask.value?.ai_calls) ? selectedTask.value.ai_calls : []
-  const reportedCalls = taskCalls.filter((call) => (
-    finiteMetric(call?.prompt_tokens) !== null || finiteMetric(call?.completion_tokens) !== null
-  ))
-  if (taskCalls.length) {
-    return summarizeUsage({
-      callCount: taskCalls.length,
-      promptTokens: reportedCalls.reduce((sum, call) => sum + (finiteMetric(call.prompt_tokens) || 0), 0),
-      completionTokens: reportedCalls.reduce((sum, call) => sum + (finiteMetric(call.completion_tokens) || 0), 0),
-      estimatedCost: taskCalls.reduce((sum, call) => sum + (finiteMetric(call.estimated_cost) || 0), 0),
-      unreportedCount: taskCalls.length - reportedCalls.length,
-    })
-  }
-
-  const metricLogs = selectedTaskLogs.value.filter((item) => (
-    finiteMetric(item.call_count) !== null
-    || finiteMetric(item.prompt_tokens) !== null
-    || finiteMetric(item.completion_tokens) !== null
-  ))
-  if (!metricLogs.length) return null
-  const latest = metricLogs.at(-1)
-  const costLog = [...metricLogs].reverse().find((item) => finiteMetric(item.estimated_cost) !== null)
-  return summarizeUsage({
-    callCount: finiteMetric(latest.call_count) || 0,
-    promptTokens: finiteMetric(latest.prompt_tokens) || 0,
-    completionTokens: finiteMetric(latest.completion_tokens) || 0,
-    estimatedCost: finiteMetric(costLog?.estimated_cost),
-  })
+  return usageForTask(selectedTask.value, selectedTaskLogs.value, props.formatTokenCount)
 })
 
-function formatLogMetrics(item, includeModel = true) {
-  const parts = []
-  if (includeModel && item.model) parts.push(item.model)
-  const callCount = finiteMetric(item.call_count)
-  if (callCount !== null && callCount > 0) {
-    const prefix = String(item.task_id || '').startsWith('report:') ? '累计 ' : ''
-    parts.push(`${prefix}${callCount} 次调用`)
-  }
-  const reportedTotal = finiteMetric(item.total_tokens)
-  const promptTokens = finiteMetric(item.prompt_tokens)
-  const completionTokens = finiteMetric(item.completion_tokens)
-  const derivedTotal = promptTokens !== null && completionTokens !== null
-    ? promptTokens + completionTokens
-    : null
-  const totalTokens = reportedTotal ?? derivedTotal
-  if (promptTokens !== null || completionTokens !== null) {
-    const input = promptTokens !== null ? props.formatTokenCount(promptTokens) : '—'
-    const output = completionTokens !== null ? props.formatTokenCount(completionTokens) : '—'
-    parts.push(`输入 ${input} · 输出 ${output}`)
-  } else if (totalTokens !== null && totalTokens > 0) {
-    parts.push(`${props.formatTokenCount(totalTokens)} token`)
-  }
-  // 复制文本保留原始指标，界面则把累计指标收敛到任务标题栏。
-  if (!includeModel && !parts.length && item.model) return item.model
-  return parts.join(' · ')
-}
-
-function summarizeUsage({ callCount, promptTokens, completionTokens, estimatedCost, unreportedCount = 0 }) {
-  if (!callCount && !promptTokens && !completionTokens) return null
-  const labelParts = []
-  if (callCount) labelParts.push(`AI ${callCount} 次`)
-  if (promptTokens || completionTokens) {
-    labelParts.push(`输入 ${props.formatTokenCount(promptTokens || 0)}`)
-    labelParts.push(`输出 ${props.formatTokenCount(completionTokens || 0)}`)
-  }
-  if (estimatedCost !== null && estimatedCost !== undefined) labelParts.push(`¥${formatLogCost(estimatedCost)}`)
-  const detailParts = [
-    callCount ? `${callCount} 次 AI 调用` : '',
-    `输入 ${props.formatTokenCount(promptTokens || 0)}`,
-    `输出 ${props.formatTokenCount(completionTokens || 0)}`,
-  ].filter(Boolean)
-  if (estimatedCost !== null && estimatedCost !== undefined) detailParts.push(`本机估算 ¥${formatLogCost(estimatedCost)}`)
-  if (unreportedCount) detailParts.push(`${unreportedCount} 次未返回用量`)
-  return { label: labelParts.join(' · '), detail: detailParts.join(' · ') }
-}
-
-function formatLogCost(value) {
-  const cost = finiteMetric(value)
-  if (cost === null || cost <= 0) return '0.0000'
-  return cost < 0.0001 ? '<0.0001' : cost.toFixed(4)
-}
-
-function logOutcomeLabel(item, index) {
-  if (item.type === 'error') return '失败'
-  if (item.type === 'warn') return /重试|retry/i.test(String(item.msg || '')) ? '重试' : '警告'
-  if (index === selectedTaskLogs.value.length - 1 && selectedTask.value?.status === 'succeeded') return '完成'
-  return ''
-}
-
-function taskHeaderStatus(task) {
-  const status = props.statusLabel(task?.status)
-  const progress = taskProgressLabel(task)
-  return status === progress ? status : `${status} · ${progress}`
-}
-
-function finiteMetric(value) {
-  if (value === null || value === undefined || value === '') return null
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-function taskProgressLabel(task) {
-  if (task?.persistence_error) return '本地保存失败'
-  if (task?.status === 'succeeded') return '已完成'
-  if (task?.status === 'failed') return '失败'
-  if (task?.status === 'cancelled') return '已取消'
-  if (task?.status === 'paused') return '已暂停'
-  if (task?.status === 'queued') return '等待中'
-  const percent = taskProgressPercent(task)
-  if (percent !== null) return `${percent}%`
-  return '处理中'
-}
-
-function taskStageLabel(task) {
-  if (task?.status === 'succeeded' && (!task.step || task.step === 'queued')) return '完成'
-  if (task?.status === 'failed' && (!task.step || task.step === 'queued')) return '失败'
-  return props.stepLabel(task?.step || 'queued')
-}
+const logOutcomeLabel = (item, index) => presentationLogOutcomeLabel(item, index, selectedTaskLogs.value, selectedTask.value)
+const taskHeaderStatus = (task) => presentationTaskHeaderStatus(task, props.statusLabel)
+const taskStageLabel = (task) => presentationTaskStageLabel(task, props.stepLabel)
 
 function selectTask(taskId) {
   if (!taskId || selectedTaskId.value === taskId) return

@@ -1,5 +1,9 @@
 <template>
-  <span class="process-log-toggle-icon" :class="{ 'is-collapsed': collapsed }" aria-hidden="true">
+  <span
+    class="process-log-toggle-icon"
+    :class="{ 'is-collapsed': collapsed }"
+    aria-hidden="true"
+  >
     <svg class="process-log-toggle-icon-art" viewBox="0 0 20 20" fill="none">
       <rect x="1.5" y="2.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.5" />
       <path class="process-log-toggle-icon-fill" d="M3 11h14v5H3z" fill="currentColor" />
@@ -26,7 +30,9 @@ defineProps({
   color: currentColor;
 }
 
-.process-log-toggle-icon-art { overflow: visible; }
+.process-log-toggle-icon-art {
+  overflow: visible;
+}
 
 .process-log-toggle-icon-fill {
   transform-box: fill-box;

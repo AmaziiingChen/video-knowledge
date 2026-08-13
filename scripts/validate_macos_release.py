@@ -15,9 +15,9 @@ import time
 import urllib.request
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_JSON = ROOT / "frontend" / "package.json"
+SOURCE_ICON = ROOT / "frontend" / "build" / "icon.icns"
 EXPECTED_BUNDLE_ID = "com.knowledgehub.desktop"
 MAX_DMG_BYTES = 1_200 * 1024 * 1024
 MAX_BACKEND_BYTES = 650 * 1024 * 1024
@@ -77,8 +77,7 @@ def validate_no_developer_id(app: Path) -> str:
     result = subprocess.run(
         ["codesign", "-dv", "--verbose=4", str(app)],
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
     details = f"{result.stdout}\n{result.stderr}"
@@ -162,6 +161,13 @@ def smoke_test_backend(executable: Path) -> dict[str, object]:
                     process.wait(timeout=5)
 
 
+def smoke_test_mcp_entry(executable: Path) -> dict[str, object]:
+    """Exercise the frozen stdio entry and its scoped backend capability end to end."""
+    from smoke_macos_mcp import run_smoke
+
+    return run_smoke(command=str(executable), prefix_args=[], cwd=executable.parent)
+
+
 def validate_app(volume: Path, expected_version: str) -> dict[str, object]:
     app = volume / "KnowledgeHub.app"
     if not app.is_dir():
@@ -179,12 +185,23 @@ def validate_app(volume: Path, expected_version: str) -> dict[str, object]:
         )
 
     app_executable = contents / "MacOS" / str(info.get("CFBundleExecutable") or "KnowledgeHub")
+    icon_name = str(info.get("CFBundleIconFile") or "icon.icns")
+    if not Path(icon_name).suffix:
+        icon_name = f"{icon_name}.icns"
+    packaged_icon = contents / "Resources" / icon_name
     backend = contents / "Resources" / "backend" / "knowledgehub-backend"
     backend_executable = backend / "knowledgehub-backend"
-    required = [app_executable, contents / "Resources" / "app.asar", backend_executable]
+    required = [
+        app_executable,
+        contents / "Resources" / "app.asar",
+        packaged_icon,
+        backend_executable,
+    ]
     missing = [str(path.relative_to(app)) for path in required if not path.exists()]
     if missing:
         raise RuntimeError(f"release is missing required files: {', '.join(missing)}")
+    if not SOURCE_ICON.is_file() or sha256(packaged_icon) != sha256(SOURCE_ICON):
+        raise RuntimeError("release does not contain the approved KnowledgeHub application icon")
 
     for executable in (app_executable, backend_executable):
         architectures = executable_architectures(executable)
@@ -223,9 +240,11 @@ def validate_app(volume: Path, expected_version: str) -> dict[str, object]:
         "bundle_id": info["CFBundleIdentifier"],
         "version": expected_version,
         "architecture": "arm64",
+        "icon": icon_name,
         "developer_id": validate_no_developer_id(app),
         "backend_mib": round(backend_bytes / 1024 / 1024, 1),
         "backend_smoke": smoke_test_backend(backend_executable),
+        "mcp_entry_smoke": smoke_test_mcp_entry(backend_executable),
     }
 
 

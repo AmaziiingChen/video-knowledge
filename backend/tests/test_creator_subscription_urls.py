@@ -156,54 +156,27 @@ def test_xiaohongshu_fav_profile_link_uses_the_same_personal_source_contract():
 
 
 def test_xiaohongshu_preview_uses_the_creator_contract(monkeypatch):
-    from services import xiaohongshu_client
     from services.creator_sync import preview_creator_source
+    from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
 
-    monkeypatch.setattr(
-        xiaohongshu_client,
-        "fetch_my_favorites_preview",
-        lambda *, limit, profile_user_id=None: (
-            [
-                xiaohongshu_client.XiaohongshuNote(
-                    note_id="note-1", source_url="https://www.xiaohongshu.com/explore/note-1",
-                    title="收藏笔记", author="作者", author_url="", avatar_url="", description="正文",
-                    image_urls=("https://example.test/cover.jpg",), published_at="2026-08-01T00:00:00+00:00",
-                    tags=("标签",), stats={"liked": 10}, ip_location="",
-                )
-            ],
-            {"user_id": "self-id", "collection_user_id": profile_user_id or "self-id", "nickname": "我的收藏", "avatar_url": ""},
-        ),
-    )
-
-    preview = preview_creator_source(
-        source_url="https://www.xiaohongshu.com/user/profile/self-id?tab=collect",
-        limit=50,
-        allow_personal_sources=True,
-    )
-
-    assert preview.provider == "xiaohongshu"
-    assert preview.creator_key == "self-id"
-    assert preview.videos[0].canonical_id == "note-1"
+    with pytest.raises(XiaohongshuCollectorUnavailable, match="主动导入单篇图文"):
+        preview_creator_source(
+            source_url="https://www.xiaohongshu.com/user/profile/self-id?tab=collect",
+            limit=50,
+            allow_personal_sources=True,
+        )
 
 
 def test_xiaohongshu_preview_accepts_a_profile_link_alias(monkeypatch):
-    from services import xiaohongshu_client
     from services.creator_sync import preview_creator_source
+    from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
 
-    monkeypatch.setattr(
-        xiaohongshu_client,
-        "fetch_my_favorites_preview",
-        lambda *, limit, profile_user_id=None: ([], {"user_id": "current-api-id", "collection_user_id": profile_user_id or "current-api-id", "nickname": "我的收藏", "avatar_url": ""}),
-    )
-
-    preview = preview_creator_source(
-        source_url="https://www.xiaohongshu.com/user/profile/profile-page-alias?tab=fav&subTab=note",
-        limit=50,
-        allow_personal_sources=True,
-    )
-
-    assert preview.creator_key == "profile-page-alias"
-    assert preview.source_url.endswith("/profile-page-alias?tab=collect")
+    with pytest.raises(XiaohongshuCollectorUnavailable, match="创作者同步暂未开放"):
+        preview_creator_source(
+            source_url="https://www.xiaohongshu.com/user/profile/profile-page-alias?tab=fav&subTab=note",
+            limit=50,
+            allow_personal_sources=True,
+        )
 
 
 def test_invalid_creator_date_window_is_rejected_before_browser_capture():

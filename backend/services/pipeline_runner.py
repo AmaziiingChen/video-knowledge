@@ -6,18 +6,11 @@ from pathlib import Path
 import time
 import uuid
 from collections.abc import Callable
-from threading import BoundedSemaphore
-from types import SimpleNamespace
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field
 
 from config import settings
 from services.cache import (
     cache_dir_for_url,
-    ensure_preview_thumbnails,
     find_cached_video,
-    read_cached_transcript_segments,
     read_cache_meta,
     media_duration_seconds,
     read_cached_subtitle_transcript,
@@ -25,326 +18,71 @@ from services.cache import (
     write_cached_transcript_segments,
     write_cache_meta,
     write_cached_subtitle_transcript,
-    write_cached_transcript,
 )
-from services.ai_call_logger import AICallRecord
 from services.article_fetcher import fetch_article
 from services.article_preview import ARTICLE_NORMALIZER_VERSION, normalize_article_html
 from services.bilibili_context import fetch_bilibili_source_context
 from services.published_at import PUBLISHED_AT_PARSER_VERSION
-from services.paddle_ocr import is_paddle_ocr_configured
+from services.pipeline_asr_policy import (
+    ASR_MODEL_STRATEGIES, WHISPER_MODELS,  # noqa: F401 - public compatibility re-exports
+    duration_from_info as _duration_from_info,
+    normalize_asr_options as _normalize_asr_options,
+    resolve_asr_model as _resolve_asr_model,
+    validate_asr_configuration,
+)
+from services.pipeline_cached_text import PipelineCachedTextRestorer
+from services.pipeline_contracts import (
+    AICallInfo,
+    DownloadTransferInfo,
+    PipelineCancelled,
+    PipelineErrorInfo,  # noqa: F401 - public compatibility re-export
+    PipelineLog,
+    PipelineRequest,  # noqa: F401 - public compatibility re-export
+    PipelineResponse,
+    TextSourceInfo,
+    classify_pipeline_error,
+)
+from services.pipeline_progress_rules import (
+    elapsed as _elapsed,
+)
+from services.pipeline_content_updates import (
+    prepare_preview_thumbnails as _ensure_preview_thumbnails,
+    set_content_status as _set_content_status,
+    set_content_title as _set_content_title,
+)
+from services.pipeline_local_inputs import LocalInputError, prepare_local_media, prepare_local_subtitle
+from services.pipeline_local_media_policy import is_managed_local_media as _is_managed_local_media
+from services.pipeline_local_media_policy import is_under_data_dir as _is_under_data_dir
+from services.pipeline_media_download import download_media_with_live_logs
+from services.pipeline_run_reporter import PipelineRunReporter
+from services.pipeline_source_context import refresh_pipeline_source_context
+from services.pipeline_stored_article import (
+    StoredArticlePreparationError,
+    prepare_stored_article,
+    run_prepared_stored_article,
+)
+from services.pipeline_transcription import PipelineTranscriptionError, transcribe_pipeline_media
 from services.content_index import ensure_content_item_for_media, ensure_manual_collection_target_folder
-from services.knowledge_library import attachments_root
-from services.content_source_text import load_content_source_text
+from services.content_source_text import (
+    _wechat_article_needs_ocr_refresh as _content_source_text_needs_ocr_refresh,
+    load_content_source_text,
+)
 from services.database import connect, initialize_database
 from services.repository import ContentRepository
 from services.downloader import DownloadProgress, download_video, get_video_info
 from services.douyin_context import fetch_douyin_source_context
 from services.markdown_sync import replace_content_summary_and_sync, save_markdown_draft_and_sync
+from services.llm_settings import text_model_configured
 from services.search_index import upsert_search_document
-from services.source_context import source_context_is_fresh
 from services.source_context_store import save_source_context
-from services.summarizer import generate_article_markdown, generate_markdown, summarize, summarize_stream
-from services.subtitles import SUBTITLE_EXTENSIONS, fetch_bilibili_subtitle, parse_subtitle_text
+from services.summarizer import generate_article_markdown, generate_markdown, summarize_stream
+from services.subtitles import fetch_bilibili_subtitle, parse_subtitle_text
 from services.transcriber import ASR_BACKENDS, extract_audio_with_details, transcribe_with_details
 from services.url_parser import parse_share_text, redact_sensitive_url
 from services.video_download_settings import should_auto_download_bilibili_video
 
-
-WHISPER_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
-LOCAL_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".opus"}
-ASR_MODEL_STRATEGIES = {"smart", "manual"}
-SMART_SHORT_VIDEO_SECONDS = 180
-PROGRESS_STAGES = ["parse", "info", "download", "extract_audio", "transcribe", "summarize", "save"]
-PROGRESS_WEIGHTS = {
-    "parse": 4,
-    "info": 4,
-    "download": 22,
-    "extract_audio": 10,
-    "transcribe": 36,
-    "summarize": 20,
-    "save": 4,
-}
-# A desktop can keep one network transfer moving while the previous file is
-# transcribed, but competing yt-dlp/browser downloads make both less reliable
-# and saturate the local network. Every pipeline path shares this one slot.
-_media_download_semaphore = BoundedSemaphore(1)
-# One opened assistant panel is cheap enough to repaint at roughly 40 fps.
-# This is a transport coalescing limit, not a typewriter effect: every
-# snapshot still contains exactly the text the model has returned so far.
-SUMMARY_PUBLISH_INTERVAL_SECONDS = 0.025
-
-
-class PipelineRequest(BaseModel):
-    content_item_id: str | None = None
-    share_text: str | None = None
-    local_video_path: str | None = None
-    local_subtitle_path: str | None = None
-    # Non-media local documents use the same durable task queue for OCR. They
-    # are intentionally explicit rather than overloading a video path.
-    local_document_path: str | None = None
-    local_document_kind: str | None = None
-    source_title: str | None = None
-    source_url: str | None = None
-    whisper_model: str | None = None
-    asr_backend: str | None = None
-    asr_model_strategy: str | None = None
-    asr_short_video_model: str | None = None
-    asr_long_video_model: str | None = None
-    asr_beam_size: int | None = None
-    asr_vad_filter: bool | None = None
-    asr_fallback_enabled: bool | None = None
-    ai_model: str | None = None
-    use_cache: bool = True
-    processing_mode: str = "full"
-    # A user who explicitly asks to restore a Bilibili preview still expects
-    # the short subtitle-first path.  This flag requests the optional preview
-    # download alongside that path without turning the request into the old
-    # download-only shortcut.
-    download_video_preview: bool = False
-    # Explicit user action for an existing Bilibili item. It must never fall
-    # back to a media download or ASR when the player exposes no trusted track.
-    subtitle_only: bool = False
-    manual_collection: bool = False
-    cover_title: str | None = None
-    cover_digest: str | None = None
-    cover_visual_brief: dict[str, Any] | None = None
-    priority: int = 100
-    # Foreground means an explicit user action; background is work spawned by
-    # a scheduler, watcher, or an automatic analysis policy.
-    execution_mode: Literal["foreground", "background"] = "foreground"
-    # Source discovery uses the same durable task record as media processing,
-    # but its provider-specific request stays opaque to the pipeline itself.
-    source_sync_request: dict[str, Any] | None = None
-
-
-class PipelineLog(BaseModel):
-    step: str
-    message: str
-    level: str = "info"
-    elapsed_seconds: float | None = None
-    created_at: str | None = None
-
-
-class TextSourceInfo(BaseModel):
-    kind: str
-    source: str
-    cached: bool = False
-    detail: str | None = None
-    fallback_reason: str | None = None
-
-
-class AICallInfo(BaseModel):
-    call_type: str
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    total_tokens: int | None = None
-    prompt_cache_hit_tokens: int | None = None
-    prompt_cache_miss_tokens: int | None = None
-    estimated_cost: float | None = None
-    elapsed_seconds: float | None = None
-
-
-class PipelineErrorInfo(BaseModel):
-    stage: str
-    category: str
-    retryable: bool = True
-    retry_scope: str = "full"
-    message: str
-
-
-class DownloadTransferInfo(BaseModel):
-    """Live media-transfer telemetry, distinct from weighted pipeline progress."""
-
-    phase: str
-    detail: str
-    received_bytes: int | None = None
-    total_bytes: int | None = None
-    bytes_per_second: float | None = None
-    percent: float | None = None
-
-
-class PipelineResponse(BaseModel):
-    success: bool
-    task_id: str | None = None
-    content_item_id: str | None = None
-    url: str | None = None
-    platform: str | None = None
-    display_title: str | None = None
-    video_path: str | None = None
-    transcript: str | None = None
-    summary: str | None = None
-    obsidian_path: str | None = None
-    markdown_draft_path: str | None = None
-    whisper_model: str | None = None
-    asr_backend: str | None = None
-    text_source: TextSourceInfo | None = None
-    ai_calls: list[AICallInfo] = Field(default_factory=list)
-    cache_hits: list[str] = Field(default_factory=list)
-    logs: list[PipelineLog] = Field(default_factory=list)
-    timings: dict[str, float] = Field(default_factory=dict)
-    progress: dict[str, float] = Field(default_factory=dict)
-    overall_progress: float = 0.0
-    download_transfer: DownloadTransferInfo | None = None
-    source_sync_result: dict[str, Any] | None = None
-    error: str | None = None
-    error_info: PipelineErrorInfo | None = None
-    step: str | None = None
-
-
-class PipelineCancelled(Exception):
-    pass
-
-
 ProgressCallback = Callable[[PipelineResponse], None]
 CancelCheck = Callable[[], bool]
-
-
-def _elapsed(start: float) -> float:
-    return round(time.perf_counter() - start, 2)
-
-
-def _clamp_percent(value: float) -> float:
-    return max(0.0, min(100.0, round(float(value), 1)))
-
-
-def _is_under_data_dir(path: Path) -> bool:
-    try:
-        path.relative_to(settings.data_dir.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-def _is_managed_local_media(path: Path, *, content_item_id: str | None = None) -> bool:
-    """Allow cache/data media and only the original attachment of this item."""
-    if _is_under_data_dir(path):
-        return True
-    try:
-        path.relative_to(attachments_root().resolve())
-        return True
-    except ValueError:
-        pass
-    if not content_item_id:
-        return False
-    try:
-        initialize_database()
-        with connect() as connection:
-            row = connection.execute(
-                """SELECT 1 FROM media_assets
-                   WHERE content_item_id=? AND asset_type='original_file' AND path=? LIMIT 1""",
-                (content_item_id, str(path)),
-            ).fetchone()
-        return row is not None
-    except Exception:
-        return False
-
-
-def _valid_whisper_model(model_name: str | None) -> bool:
-    return bool(model_name and model_name in WHISPER_MODELS)
-
-
-def _duration_from_info(video_info: dict | None) -> float | None:
-    if not video_info:
-        return None
-    value = video_info.get("duration") or video_info.get("duration_seconds")
-    try:
-        duration = float(value)
-    except (TypeError, ValueError):
-        return None
-    return duration if duration > 0 else None
-
-
-def _resolve_asr_model(
-    *,
-    whisper_model: str | None,
-    strategy: str,
-    short_model: str,
-    long_model: str,
-    duration_seconds: float | None,
-) -> str:
-    if strategy == "manual":
-        return whisper_model or settings.whisper_model
-    if duration_seconds is not None and duration_seconds <= SMART_SHORT_VIDEO_SECONDS:
-        return short_model
-    return long_model
-
-
-def _normalize_asr_options(
-    *,
-    whisper_model: str | None,
-    asr_backend: str | None,
-    asr_model_strategy: str | None,
-    asr_short_video_model: str | None,
-    asr_long_video_model: str | None,
-    asr_beam_size: int | None,
-    asr_vad_filter: bool | None,
-    asr_fallback_enabled: bool | None,
-) -> dict:
-    backend = (asr_backend or settings.asr_backend or "auto").strip()
-    if asr_model_strategy:
-        strategy = asr_model_strategy.strip()
-    elif whisper_model and not (asr_short_video_model or asr_long_video_model):
-        strategy = "manual"
-    else:
-        strategy = (settings.asr_model_strategy or "smart").strip()
-    short_model = asr_short_video_model or settings.asr_short_video_model or "base"
-    long_model = asr_long_video_model or settings.asr_long_video_model or "small"
-    beam_size = max(1, min(8, int(asr_beam_size or settings.asr_beam_size or 1)))
-    return {
-        "backend": backend,
-        "strategy": strategy,
-        "short_model": short_model,
-        "long_model": long_model,
-        "beam_size": beam_size,
-        "vad_filter": settings.asr_vad_filter if asr_vad_filter is None else bool(asr_vad_filter),
-        "fallback_enabled": settings.asr_fallback_enabled if asr_fallback_enabled is None else bool(asr_fallback_enabled),
-        "initial_model": whisper_model or settings.whisper_model,
-    }
-
-
-def _level_from_message(message: str) -> str:
-    if any(token in message for token in ["失败", "错误", "异常", "ERROR"]):
-        return "error"
-    if any(token in message for token in ["警告", "注意", "WARNING"]):
-        return "warn"
-    if any(token in message for token in ["完成", "成功"]):
-        return "success"
-    return "info"
-
-
-def classify_pipeline_error(step: str, error: str) -> PipelineErrorInfo:
-    if step == "config":
-        return PipelineErrorInfo(
-            stage=step,
-            category="configuration",
-            retryable=False,
-            retry_scope="none",
-            message=error,
-        )
-    if step == "parse":
-        return PipelineErrorInfo(
-            stage=step,
-            category="input",
-            retryable=False,
-            retry_scope="none",
-            message=error,
-        )
-    if step == "download":
-        return PipelineErrorInfo(stage=step, category="network_or_download", retryable=True, retry_scope="download", message=error)
-    if step == "extract_audio":
-        return PipelineErrorInfo(stage=step, category="media_processing", retryable=True, retry_scope="audio", message=error)
-    if step == "transcribe":
-        return PipelineErrorInfo(stage=step, category="asr", retryable=True, retry_scope="transcribe", message=error)
-    if step == "summarize":
-        return PipelineErrorInfo(stage=step, category="llm", retryable=True, retry_scope="summarize", message=error)
-    if step == "save":
-        return PipelineErrorInfo(stage=step, category="filesystem", retryable=True, retry_scope="save", message=error)
-    if step == "cancelled":
-        return PipelineErrorInfo(stage=step, category="cancelled", retryable=True, retry_scope="full", message=error)
-    if step == "executor":
-        return PipelineErrorInfo(stage=step, category="queue_executor", retryable=True, retry_scope="full", message=error)
-    return PipelineErrorInfo(stage=step, category="unknown", retryable=True, retry_scope="full", message=error)
 
 
 def run_pipeline_sync(
@@ -400,111 +138,18 @@ def run_pipeline_sync(
     preview_download_future: Future | None = None
     preview_download_started_at: float | None = None
     source_context: dict[str, object] = {}
-    last_summary_publish_at = 0.0
-
-    def publish() -> None:
-        if on_update:
-            on_update(response.model_copy(deep=True))
-
-    def update_overall_progress() -> None:
-        total = 0.0
-        for step, weight in PROGRESS_WEIGHTS.items():
-            total += (response.progress.get(step, 0.0) / 100.0) * weight
-        response.overall_progress = _clamp_percent(total)
-
-    def set_progress(step: str, percent: float, publish_update: bool = True) -> None:
-        if step not in PROGRESS_WEIGHTS:
-            return
-        current = response.progress.get(step, 0.0)
-        response.progress[step] = max(current, _clamp_percent(percent))
-        response.step = step
-        update_overall_progress()
-        if publish_update:
-            publish()
-
-    def set_download_transfer(progress: DownloadProgress) -> None:
-        """Publish only provider-reported media telemetry to the UI.
-
-        The existing weighted ``overall_progress`` remains useful for task
-        scheduling/history, but it must never be presented as a byte-level
-        download percentage.
-        """
-        response.step = "download"
-        response.download_transfer = DownloadTransferInfo(
-            phase=progress.phase,
-            detail=progress.detail,
-            received_bytes=progress.received_bytes,
-            total_bytes=progress.total_bytes,
-            bytes_per_second=progress.bytes_per_second,
-            percent=progress.percent,
-        )
-        if progress.percent is not None:
-            current = response.progress.get("download", 0.0)
-            response.progress["download"] = max(current, _clamp_percent(progress.percent))
-            update_overall_progress()
-        publish()
-
-    def complete_stage(step: str) -> None:
-        set_progress(step, 100.0, publish_update=False)
-
-    def add_log(
-        step: str,
-        message: str,
-        level: str = "info",
-        elapsed_seconds: float | None = None,
-    ) -> None:
-        response.step = step
-        if step in PROGRESS_WEIGHTS and response.progress.get(step, 0.0) == 0:
-            set_progress(step, 5.0, publish_update=False)
-        response.logs.append(
-            PipelineLog(
-                step=step,
-                message=message,
-                level=level,
-                elapsed_seconds=elapsed_seconds,
-                created_at=datetime.now().astimezone().isoformat(),
-            )
-        )
-        publish()
-
-    def download_with_live_logs(url: str, platform: str, output_dir: Path):
-        """Run a media provider while forwarding provider milestones promptly.
-
-        Download adapters still return their complete log for durable task
-        history.  Keeping a count of lines already published avoids showing
-        the same milestone twice when the adapter returns.
-        """
-        published_counts: dict[str, int] = {}
-        waiting_for_download_slot = False
-
-        while not _media_download_semaphore.acquire(timeout=0.12):
-            check_cancel()
-            if not waiting_for_download_slot:
-                waiting_for_download_slot = True
-                add_log("download", "等待上一条视频下载完成…")
-
-        def publish_download_log(message: str) -> None:
-            published_counts[message] = published_counts.get(message, 0) + 1
-            add_log("download", message, _level_from_message(message))
-
-        try:
-            download_result = download_video(
-                url,
-                platform,
-                output_dir,
-                progress_callback=set_download_transfer,
-                cancel_check=cancel_check,
-                log_callback=publish_download_log,
-            )
-        finally:
-            _media_download_semaphore.release()
-        for line in download_result.logs:
-            remaining = published_counts.get(line, 0)
-            if remaining:
-                published_counts[line] = remaining - 1
-                continue
-            add_log("download", line, _level_from_message(line))
-        return download_result
+    cache_dir: Path | None = None
+    reporter = PipelineRunReporter(response, on_update)
+    publish = reporter.publish
+    update_overall_progress = reporter.update_overall_progress
+    set_progress = reporter.set_progress
+    set_download_transfer = reporter.set_download_transfer
+    complete_stage = reporter.complete_stage
+    add_log = reporter.add_log
+    mark_stage = reporter.mark_stage
+    set_many_complete = reporter.set_many_complete
+    remember_ai_call = reporter.remember_ai_call
+    publish_summary_delta = reporter.publish_summary_delta
 
     def check_cancel() -> None:
         if cancel_check and cancel_check():
@@ -551,10 +196,15 @@ def run_pipeline_sync(
         preview_download_started_at = time.perf_counter()
         preview_download_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bilibili-preview")
         preview_download_future = preview_download_executor.submit(
-            download_with_live_logs,
+            download_media_with_live_logs,
             parsed.url,
             parsed.platform,
             output_dir,
+            add_log=add_log,
+            set_download_transfer=set_download_transfer,
+            check_cancel=check_cancel,
+            provider_cancel_check=cancel_check,
+            downloader=download_video,
         )
 
     def finish_parallel_bilibili_preview_download() -> None:
@@ -603,68 +253,21 @@ def run_pipeline_sync(
         response.error = error
         response.error_info = classify_pipeline_error(step, error)
         response.timings["total"] = _elapsed(total_start)
-        active_cache_dir = locals().get("cache_dir")
-        if active_cache_dir:
-            write_cache_meta(active_cache_dir, {"pipeline_status": "failed", "pipeline_error": error})
+        if cache_dir:
+            write_cache_meta(cache_dir, {"pipeline_status": "failed", "pipeline_error": error})
         if response.content_item_id:
             _set_content_status(response.content_item_id, "failed")
         update_overall_progress()
         publish()
         return response
 
-    def mark_stage(step: str, message: str, start: float, level: str = "success") -> None:
-        elapsed_seconds = _elapsed(start)
-        response.timings[step] = elapsed_seconds
-        complete_stage(step)
-        add_log(step, message, level, elapsed_seconds)
-
-    def set_many_complete(steps: list[str]) -> None:
-        for step in steps:
-            complete_stage(step)
-
-    def remember_ai_call(fallback_call_type: str) -> Callable[[AICallRecord], None]:
-        def append_call(record: AICallRecord) -> None:
-            call_type = record.call_type or fallback_call_type
-            response.ai_calls.append(
-                AICallInfo(
-                    call_type=call_type,
-                    prompt_tokens=record.prompt_tokens,
-                    completion_tokens=record.completion_tokens,
-                    total_tokens=record.total_tokens,
-                    prompt_cache_hit_tokens=record.prompt_cache_hit_tokens,
-                    prompt_cache_miss_tokens=record.prompt_cache_miss_tokens,
-                    estimated_cost=record.estimated_cost,
-                    elapsed_seconds=record.elapsed_seconds,
-                )
-            )
-            if call_type == "article_summary_prepare":
-                count = sum(item.call_type == "article_summary_prepare" for item in response.ai_calls)
-                add_log("summarize", f"超长文章材料压缩完成（第 {count} 次）", "success", record.elapsed_seconds)
-
-        return append_call
-
-    def publish_summary_delta(title: str, partial_summary: str) -> None:
-        """Persist streamed summary text without turning every token into I/O."""
-        nonlocal last_summary_publish_at
-        response.display_title = title or response.display_title
-        response.summary = partial_summary
-        now = time.perf_counter()
-        if now - last_summary_publish_at < SUMMARY_PUBLISH_INTERVAL_SECONDS:
-            return
-        last_summary_publish_at = now
-        publish()
-
     try:
-        if asr_options["backend"] not in ASR_BACKENDS:
-            add_log("config", f"不支持的语音识别后端: {asr_options['backend']}", "error")
-            return fail("config", f"不支持的语音识别后端: {asr_options['backend']}")
-        if asr_options["strategy"] not in ASR_MODEL_STRATEGIES:
-            add_log("config", f"不支持的模型策略: {asr_options['strategy']}", "error")
-            return fail("config", f"不支持的模型策略: {asr_options['strategy']}")
-        for model in {asr_options["initial_model"], asr_options["short_model"], asr_options["long_model"], selected_model}:
-            if model and not _valid_whisper_model(model):
-                add_log("config", f"不支持的 Whisper 模型: {model}", "error")
-                return fail("config", f"不支持的 Whisper 模型: {model}")
+        asr_config_error = validate_asr_configuration(
+            asr_options, selected_model=selected_model, supported_backends=ASR_BACKENDS
+        )
+        if asr_config_error:
+            add_log("config", asr_config_error, "error")
+            return fail("config", asr_config_error)
 
         # Clipboard and integrations may create a generic task directly,
         # without first creating an inbox item. XHS image notes require an
@@ -682,117 +285,31 @@ def run_pipeline_sync(
                 content_item_id = captured.item.id
                 response.content_item_id = content_item_id
 
-        # Campus and RSS entries are already persisted by their own stable
-        # ingestion pipelines, so they must not be sent through URL parsing
-        # (which only understands share links).  This task path reads the
-        # stored article source, optionally summarizes it, and retains the
-        # existing source folder.
-        if content_item_id:
-            with connect() as connection:
-                try:
-                    existing_item = ContentRepository(connection).get_content_item(content_item_id)
-                except LookupError:
-                    existing_item = None
-                # Early XHS versions stored image notes as videos.  Repair
-                # the durable type at the processing boundary too, so a
-                # retry of an existing sidebar row enters the image-note
-                # collector instead of the media downloader.
-                if (
-                    existing_item
-                    and existing_item.source_provider == "xiaohongshu"
-                    and existing_item.content_type != "article"
-                ):
-                    existing_item = ContentRepository(connection).update_content_type(existing_item.id, "article")
-                    connection.commit()
-                    add_log("parse", "已修复旧小红书图文类型，正在按图文采集…")
-            if existing_item and existing_item.content_type == "article" and existing_item.source_provider == "xiaohongshu":
-                add_log("parse", "正在读取小红书图文与图片…")
-                try:
-                    from services.xiaohongshu_ingest import capture_xiaohongshu_note
+        # Persisted campus/RSS/XHS articles have their own preparation path;
+        # they never enter link parsing, media download or ASR.
+        try:
+            stored_article = prepare_stored_article(
+                content_item_id,
+                add_log=add_log,
+                load_source=load_content_source_text,
+                persist_source_context=save_source_context,
+            )
+        except StoredArticlePreparationError as exc:
+            return fail(exc.step, str(exc))
+        if stored_article:
+            return run_prepared_stored_article(
+                stored_article,
+                response=response, reporter=reporter, fail=fail,
+                processing_mode=processing_mode, api_key_configured=text_model_configured(ai_model),
+                ai_model=ai_model, total_started_at=total_start,
+                summarize_article=summarize_stream,
+                set_content_status=_set_content_status,
+                set_content_title=_set_content_title,
+                replace_summary=replace_content_summary_and_sync,
+                update_search=upsert_search_document,
+                cancel_check=check_cancel,
+            )
 
-                    captured_article_info = capture_xiaohongshu_note(existing_item.id)
-                    source_context = dict(captured_article_info.get("source_context") or {})
-                except Exception as exc:
-                    return fail("info", f"小红书图文采集失败：{exc}")
-                if source_context:
-                    try:
-                        save_source_context(existing_item, source_context)
-                    except Exception as exc:
-                        add_log("info", f"互动数据持久化失败，继续使用图文正文：{exc}", "warn")
-                with connect() as connection:
-                    existing_item = ContentRepository(connection).get_content_item(existing_item.id)
-                add_log("info", "图文素材已缓存，正在整理图片文字", "success")
-            if existing_item and existing_item.content_type == "article" and existing_item.source_provider in {"campus", "rss", "xiaohongshu"}:
-                response.url = existing_item.source_url
-                response.platform = existing_item.source_provider
-                provider_label = {"campus": "校园官网", "rss": "RSS", "xiaohongshu": "小红书"}[existing_item.source_provider]
-                add_log("parse", f"读取已入库的{provider_label}文章", "success")
-                try:
-                    source = load_content_source_text(existing_item.id)
-                except Exception as exc:
-                    return fail("info", f"读取文章正文失败：{exc}")
-                transcript = source.text.strip()
-                if not transcript:
-                    return fail("info", "文章正文为空")
-                response.transcript = transcript
-                response.text_source = TextSourceInfo(kind="article", source=existing_item.source_provider, detail="已入库文章正文")
-                set_many_complete(["parse", "info", "download", "extract_audio", "transcribe"])
-                add_log("info", f"正文已就绪（{len(transcript)} 字）", "success")
-                if processing_mode == "transcript":
-                    set_many_complete(["summarize", "save"])
-                    _set_content_status(existing_item.id, "to_read")
-                    response.display_title = existing_item.title
-                    response.success = True
-                    response.timings["total"] = _elapsed(total_start)
-                    add_log("save", "正文已保存，未调用 AI 总结", "success")
-                    response.step = None
-                    publish()
-                    return response
-                if not settings.deepseek_api_key:
-                    return fail("summarize", "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）")
-                summarize_start = time.perf_counter()
-                add_log("summarize", "调用 DeepSeek 生成文章总结...")
-                try:
-                    ai_title, summary = summarize(
-                        transcript,
-                        existing_item.title,
-                        model=ai_model,
-                        task_type="article_summary",
-                        task_id=response.task_id,
-                        content_item_id=existing_item.id,
-                        ai_call_callback=remember_ai_call("summary"),
-                        source_context=source_context,
-                    )
-                except Exception as exc:
-                    return fail("summarize", str(exc))
-                if not summary:
-                    return fail("summarize", "总结生成失败")
-                response.summary = summary
-                response.display_title = ai_title or existing_item.title
-                complete_stage("summarize")
-                _set_content_title(existing_item.id, response.display_title)
-                replace_content_summary_and_sync(existing_item.id, summary)
-                _set_content_status(existing_item.id, "to_read")
-                try:
-                    upsert_search_document(
-                        content_key=existing_item.id,
-                        title=response.display_title,
-                        summary=summary,
-                        transcript=transcript,
-                        source_context=source_context,
-                    )
-                except Exception as exc:
-                    add_log("save", f"搜索索引更新失败：{exc}", "warn")
-                complete_stage("save")
-                response.timings["summarize"] = _elapsed(summarize_start)
-                response.timings["total"] = _elapsed(total_start)
-                response.success = True
-                add_log("save", "文章总结已保存", "success")
-                response.step = None
-                publish()
-                return response
-
-        cache_dir = None
         cached_video = None
         cached_subtitle_transcript = None
         cached_transcript = None
@@ -803,46 +320,31 @@ def run_pipeline_sync(
 
         if local_subtitle_path:
             check_cancel()
-            local_path = Path(local_subtitle_path).expanduser().resolve()
-            if not _is_managed_local_media(local_path, content_item_id=content_item_id):
-                add_log("parse", "本地字幕必须位于 data 目录下", "error")
-                return fail("parse", "本地字幕必须位于 data 目录下")
-            if not local_path.exists() or not local_path.is_file():
-                add_log("parse", "本地字幕文件不存在", "error")
-                return fail("parse", "本地字幕文件不存在")
-            if local_path.suffix.lower() not in SUBTITLE_EXTENSIONS:
-                add_log("parse", f"不支持的字幕格式: {local_path.suffix}", "error")
-                return fail("parse", f"不支持的字幕格式: {local_path.suffix}")
-
-            transcript = parse_subtitle_text(
-                local_path.read_text(encoding="utf-8", errors="replace"),
-                local_path.suffix,
-            )
-            if not transcript:
-                add_log("transcribe", "字幕文件为空或无法解析", "error")
-                return fail("transcribe", "字幕文件为空或无法解析")
-
-            parsed = SimpleNamespace(
-                url=source_url or f"local://{local_path.name}",
-                platform="subtitle",
-            )
-            cache_dir = cache_dir_for_url(parsed.url)
-            write_cached_subtitle_transcript(cache_dir, transcript)
-            video_info = {
-                "title": source_title or local_path.stem,
-                "platform": "subtitle",
-                "duration": 0,
-            }
+            try:
+                prepared_subtitle = prepare_local_subtitle(
+                    local_subtitle_path,
+                    source_url=source_url,
+                    source_title=source_title,
+                    content_item_id=content_item_id,
+                    authorize=_is_managed_local_media,
+                    parse_subtitle=parse_subtitle_text,
+                    resolve_cache_dir=cache_dir_for_url,
+                    cache_subtitle=write_cached_subtitle_transcript,
+                )
+            except LocalInputError as exc:
+                add_log(exc.step, str(exc), "error")
+                return fail(exc.step, str(exc))
+            local_path = prepared_subtitle.path
+            parsed = prepared_subtitle.source
+            cache_dir = prepared_subtitle.cache_dir
+            transcript = prepared_subtitle.transcript
+            video_info = prepared_subtitle.video_info
             use_cache = False
             text_ready = True
             response.url = parsed.url
             response.platform = parsed.platform
             response.transcript = transcript
-            response.text_source = TextSourceInfo(
-                kind="subtitle",
-                source="manual",
-                detail=local_path.name,
-            )
+            response.text_source = prepared_subtitle.text_source
             response.timings["parse"] = 0.0
             response.timings["info"] = 0.0
             response.timings["download"] = 0.0
@@ -858,36 +360,33 @@ def run_pipeline_sync(
             add_log("transcribe", f"字幕解析完成（{len(transcript)} 字）", "success", 0.0)
         elif local_video_path:
             check_cancel()
-            local_path = Path(local_video_path).expanduser().resolve()
             # Imported originals may be deliberately retained beside the
             # external Markdown library (for example an Obsidian vault), not
             # below the private data directory.  Accept only application
             # managed attachments or the exact original registered for this
             # content item; never open an arbitrary local path from a task.
-            if not _is_managed_local_media(local_path, content_item_id=content_item_id):
-                message = "本地媒体不在应用管理的 data 或附件目录中"
-                add_log("parse", message, "error")
-                return fail("parse", message)
-            if not local_path.exists() or not local_path.is_file():
-                add_log("parse", "本地视频文件不存在", "error")
-                return fail("parse", "本地视频文件不存在")
-            local_media_is_audio = local_path.suffix.lower() in LOCAL_AUDIO_EXTENSIONS
-
-            parsed = SimpleNamespace(
-                url=source_url or f"local://{local_path.name}",
-                platform="local",
-            )
+            try:
+                prepared_media = prepare_local_media(
+                    local_video_path,
+                    source_url=source_url,
+                    source_title=source_title,
+                    content_item_id=content_item_id,
+                    authorize=_is_managed_local_media,
+                    resolve_cache_dir=cache_dir_for_url,
+                    read_duration=media_duration_seconds,
+                )
+            except LocalInputError as exc:
+                add_log(exc.step, str(exc), "error")
+                return fail(exc.step, str(exc))
+            local_path = prepared_media.path
+            local_media_is_audio = prepared_media.is_audio
+            parsed = prepared_media.source
             # A retranscription deliberately skips media reuse, but its new
             # transcript must still be written beside the retained source
             # video.  Without this, cache_dir remains None and the cache
             # writer fails after ASR has already completed.
-            cache_dir = cache_dir_for_url(parsed.url)
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            video_info = {
-                "title": source_title or local_path.stem,
-                "platform": "local",
-                "duration": media_duration_seconds(local_path) or 0,
-            }
+            cache_dir = prepared_media.cache_dir
+            video_info = prepared_media.video_info
             use_cache = False
             cached_video = local_path
             response.url = parsed.url
@@ -1078,57 +577,14 @@ def run_pipeline_sync(
             or cache_meta.get("subtitle_trust") == "browser_player_binding_v1"
         )
 
-        def reuse_cached_subtitle() -> None:
-            nonlocal transcript, transcript_segments
-            transcript = cached_subtitle_transcript
-            transcript_segments = read_cached_transcript_segments(cache_dir, preferred_model="subtitle")
-            response.transcript = transcript
-            response.text_source = TextSourceInfo(
-                kind="subtitle",
-                source="cache",
-                cached=True,
-                detail="已缓存字幕文本",
-            )
-            response.cache_hits.append("subtitle")
-            if cached_video:
-                response.video_path = str(cached_video)
-                publish_video_artifact()
-                _ensure_preview_thumbnails(cache_dir, cached_video, add_log)
-            response.timings["download"] = 0.0
-            response.timings["extract_audio"] = 0.0
-            response.timings["transcribe"] = 0.0
-            response.timings["whisper_model_load"] = 0.0
-            response.timings["whisper_decode"] = 0.0
-            set_many_complete(["download", "extract_audio", "transcribe"])
-            add_log("download", "复用字幕缓存，跳过下载", "success", 0.0)
-            add_log("extract_audio", "复用字幕缓存，跳过音频提取", "success", 0.0)
-            add_log("transcribe", f"复用字幕文本（{len(transcript)} 字）", "success", 0.0)
-
-        def reuse_cached_asr_transcript() -> None:
-            nonlocal transcript, transcript_segments
-            transcript = cached_transcript
-            transcript_segments = read_cached_transcript_segments(cache_dir, preferred_model=selected_model)
-            response.transcript = transcript
-            response.text_source = TextSourceInfo(
-                kind="asr",
-                source="cache",
-                cached=True,
-                detail=f"Whisper {selected_model} 转写缓存",
-            )
-            response.cache_hits.append("transcript")
-            if cached_video:
-                response.video_path = str(cached_video)
-                publish_video_artifact()
-                _ensure_preview_thumbnails(cache_dir, cached_video, add_log)
-            response.timings["download"] = 0.0
-            response.timings["extract_audio"] = 0.0
-            response.timings["transcribe"] = 0.0
-            response.timings["whisper_model_load"] = 0.0
-            response.timings["whisper_decode"] = 0.0
-            set_many_complete(["download", "extract_audio", "transcribe"])
-            add_log("download", "复用转写缓存，跳过下载", "success", 0.0)
-            add_log("extract_audio", "复用转写缓存，跳过音频提取", "success", 0.0)
-            add_log("transcribe", f"复用转写缓存（模型: {selected_model}，{len(transcript)} 字）", "success", 0.0)
+        cached_text_restorer = PipelineCachedTextRestorer(
+            response=response,
+            cache_dir=cache_dir,
+            cached_video=cached_video,
+            publish_video_artifact=publish_video_artifact,
+            set_many_complete=set_many_complete,
+            add_log=add_log,
+        )
 
         # An explicit subtitle retry is deliberately fresh: an old source
         # snapshot may be an ASR transcript and must not make the command look
@@ -1136,9 +592,9 @@ def run_pipeline_sync(
         if text_ready and not subtitle_only:
             pass
         elif not force_video_download and cached_subtitle_transcript and not refresh_bilibili_subtitle:
-            reuse_cached_subtitle()
+            transcript, transcript_segments = cached_text_restorer.restore_subtitle(cached_subtitle_transcript)
         elif not force_video_download and cached_transcript and not refresh_bilibili_subtitle:
-            reuse_cached_asr_transcript()
+            transcript, transcript_segments = cached_text_restorer.restore_asr(cached_transcript, selected_model)
         else:
             check_cancel()
             subtitle_used = False
@@ -1213,7 +669,7 @@ def run_pipeline_sync(
 
             subtitle_cache_used = False
             if not force_video_download and not subtitle_used and cached_subtitle_transcript and trusted_bilibili_subtitle_cache:
-                reuse_cached_subtitle()
+                transcript, transcript_segments = cached_text_restorer.restore_subtitle(cached_subtitle_transcript)
                 subtitle_cache_used = True
 
             if subtitle_only and not subtitle_used and not subtitle_cache_used:
@@ -1221,7 +677,7 @@ def run_pipeline_sync(
 
             asr_cache_used = False
             if not force_video_download and not subtitle_used and not subtitle_cache_used and cached_transcript:
-                reuse_cached_asr_transcript()
+                transcript, transcript_segments = cached_text_restorer.restore_asr(cached_transcript, selected_model)
                 asr_cache_used = True
 
             if subtitle_used or subtitle_cache_used or asr_cache_used:
@@ -1241,7 +697,16 @@ def run_pipeline_sync(
                 else:
                     download_start = time.perf_counter()
                     add_log("download", "开始下载视频...")
-                    dl_result = download_with_live_logs(parsed.url, parsed.platform, output_dir)
+                    dl_result = download_media_with_live_logs(
+                        parsed.url,
+                        parsed.platform,
+                        output_dir,
+                        add_log=add_log,
+                        set_download_transfer=set_download_transfer,
+                        check_cancel=check_cancel,
+                        provider_cancel_check=cancel_check,
+                        downloader=download_video,
+                    )
 
                     response.timings["download"] = _elapsed(download_start)
                     if not dl_result.success or not dl_result.video_path:
@@ -1300,75 +765,23 @@ def run_pipeline_sync(
                     publish()
                     return response
 
-                check_cancel()
-                if local_media_is_audio:
-                    # Never run ffmpeg with a WAV source and identical output:
-                    # that can overwrite the user-retained original. The ASR
-                    # backend accepts the uploaded audio file directly.
-                    audio_path = video_path
-                    response.timings["extract_audio"] = 0.0
-                    complete_stage("extract_audio")
-                    add_log("extract_audio", "本地音频已就绪，跳过音频提取", "success", 0.0)
-                else:
-                    audio_path = video_path.with_suffix(".wav")
-                    extract_start = time.perf_counter()
-                    add_log("extract_audio", "提取音频...")
-                    set_progress("extract_audio", 30)
-                    audio_result = extract_audio_with_details(
+                try:
+                    transcript, transcript_segments = transcribe_pipeline_media(
                         video_path,
-                        audio_path,
-                        progress_callback=lambda percent: set_progress("extract_audio", 30 + percent * 0.7),
-                        cancel_check=cancel_check,
+                        local_media_is_audio=local_media_is_audio,
+                        selected_model=selected_model,
+                        asr_options=asr_options,
+                        subtitle_fallback_reason=subtitle_fallback_reason,
+                        cache_dir=cache_dir,
+                        response=response,
+                        reporter=reporter,
+                        check_cancel=check_cancel,
+                        provider_cancel_check=cancel_check,
+                        extract_audio=extract_audio_with_details,
+                        transcribe=transcribe_with_details,
                     )
-                    response.timings["extract_audio"] = round(audio_result.elapsed_seconds or _elapsed(extract_start), 2)
-                    if getattr(audio_result, "cancelled", False) or (cancel_check and cancel_check()):
-                        raise PipelineCancelled()
-                    if not audio_result.success:
-                        error = audio_result.error or "音频提取失败"
-                        add_log("extract_audio", error, "error", response.timings["extract_audio"])
-                        return fail("extract_audio", error)
-                    complete_stage("extract_audio")
-                    add_log("extract_audio", "音频提取完成", "success", response.timings["extract_audio"])
-
-                check_cancel()
-                transcribe_start = time.perf_counter()
-                add_log("transcribe", f"开始语音识别（后端: {asr_options['backend']}，模型: {selected_model}，可能需要几分钟）...")
-                transcribe_result = transcribe_with_details(
-                    audio_path,
-                    selected_model,
-                    progress_callback=lambda percent: set_progress("transcribe", percent),
-                    backend=asr_options["backend"],
-                    beam_size=asr_options["beam_size"],
-                    vad_filter=asr_options["vad_filter"],
-                    fallback_enabled=asr_options["fallback_enabled"],
-                )
-                if not local_media_is_audio:
-                    audio_path.unlink(missing_ok=True)
-                response.timings["transcribe"] = _elapsed(transcribe_start)
-                for key, value in transcribe_result.timings.items():
-                    response.timings[key] = round(value, 2)
-
-                if not transcribe_result.success:
-                    error = transcribe_result.error or "转写失败"
-                    add_log("transcribe", error, "error", response.timings["transcribe"])
-                    return fail("transcribe", error)
-
-                transcript = transcribe_result.transcript
-                transcript_segments = getattr(transcribe_result, "segments", [])
-                actual_backend = getattr(transcribe_result, "backend", "")
-                response.asr_backend = actual_backend or response.asr_backend
-                text_source_backend = "faster-whisper" if actual_backend in {"", "faster_whisper"} else actual_backend
-                response.text_source = TextSourceInfo(
-                    kind="asr",
-                    source=text_source_backend,
-                    detail=f"Whisper {selected_model}",
-                    fallback_reason=subtitle_fallback_reason,
-                )
-                # Keep the compact text source even when large media caching
-                # is disabled; the content document is saved immediately
-                # afterwards and loads this transcript by content identity.
-                write_cached_transcript(cache_dir, selected_model, transcript)
-                write_cached_transcript_segments(cache_dir, selected_model, transcript_segments)
+                except PipelineTranscriptionError as exc:
+                    return fail(exc.step, str(exc))
 
         response.transcript = transcript
         complete_stage("transcribe")
@@ -1436,46 +849,27 @@ def run_pipeline_sync(
 
         if isinstance((video_info or {}).get("source_context"), dict):
             source_context = dict(video_info["source_context"])
-        if parsed.platform == "bilibili" and not source_context_is_fresh(source_context):
-            check_cancel()
-            try:
-                source_context = fetch_bilibili_source_context(parsed.url)
-                if use_cache and cache_dir:
-                    write_cache_meta(cache_dir, {"source_context": source_context})
-                sample_count = int(source_context.get("comment_sample_count") or 0)
-                add_log("info", f"已采集互动指标与 {sample_count} 条评论样本", "success")
-            except Exception as exc:
-                add_log("info", f"互动与评论采集失败，继续使用正文总结：{exc}", "warn")
-            check_cancel()
-        elif parsed.platform == "douyin" and not source_context_is_fresh(source_context):
-            check_cancel()
-            try:
-                source_context = fetch_douyin_source_context(parsed.url)
-                if use_cache and cache_dir:
-                    write_cache_meta(cache_dir, {"source_context": source_context})
-                sample_count = int(source_context.get("comment_sample_count") or 0)
-                add_log("info", f"已采集互动指标与 {sample_count} 条评论样本", "success")
-            except Exception as exc:
-                add_log("info", f"互动与评论采集失败，继续使用正文总结：{exc}", "warn")
-            check_cancel()
-        elif source_context and use_cache and cache_dir:
-            write_cache_meta(cache_dir, {"source_context": source_context})
-        if source_context and content_item_id:
-            try:
-                with connect() as connection:
-                    context_item = ContentRepository(connection).get_content_item(content_item_id)
-                save_source_context(context_item, source_context)
-            except Exception as exc:
-                add_log("info", f"互动数据持久化失败，继续生成总结：{exc}", "warn")
+        source_context = refresh_pipeline_source_context(
+            platform=parsed.platform,
+            url=parsed.url,
+            source_context=source_context,
+            use_cache=use_cache,
+            cache_dir=cache_dir,
+            content_item_id=content_item_id,
+            add_log=add_log,
+            check_cancel=check_cancel,
+            fetch_bilibili=fetch_bilibili_source_context,
+            fetch_douyin=fetch_douyin_source_context,
+        )
 
         check_cancel()
-        if not settings.deepseek_api_key:
-            error = "未配置 DeepSeek API Key（请在设置 → 处理与 AI 中填写）"
+        if not text_model_configured(ai_model):
+            error = "未配置所选文本模型 API Key（请在设置 → AI 服务中填写）"
             add_log("summarize", error, "error")
             return fail("summarize", error)
 
         summarize_start = time.perf_counter()
-        add_log("summarize", "调用 DeepSeek 生成总结...")
+        add_log("summarize", "调用所选文本模型生成总结...")
         set_progress("summarize", 30)
         content_title = (
             str((article_info or {}).get("title") or "").strip()
@@ -1493,8 +887,11 @@ def run_pipeline_sync(
                 ai_call_callback=remember_ai_call("summary"),
                 transcript_segments=transcript_segments if not is_article else None,
                 source_context=source_context,
-                on_delta=publish_summary_delta,
+                on_delta=publish_summary_delta, on_reasoning_delta=reporter.publish_reasoning_delta,
+                cancel_check=check_cancel,
             )
+        except PipelineCancelled:
+            raise
         except Exception as exc:
             response.timings["summarize"] = _elapsed(summarize_start)
             add_log("summarize", str(exc), "error", response.timings["summarize"])
@@ -1599,67 +996,4 @@ def run_pipeline_sync(
 
 
 def _wechat_article_needs_ocr_refresh(article_info: object) -> bool:
-    if not is_paddle_ocr_configured() or not isinstance(article_info, dict):
-        return False
-    images = article_info.get("images")
-    if not isinstance(images, list) or not images:
-        return False
-    image_ocr = article_info.get("image_ocr")
-    if not isinstance(image_ocr, dict) or not bool(image_ocr.get("attempted")):
-        return True
-    if int(image_ocr.get("pending_count") or 0) > 0:
-        return True
-    local_filter_counts = image_ocr.get("local_filter_counts")
-    if isinstance(local_filter_counts, dict):
-        try:
-            if int(local_filter_counts.get("text_below_threshold") or 0) > 0:
-                return True
-        except (TypeError, ValueError):
-            pass
-    return (
-        int(image_ocr.get("recognized_count") or 0) == 0
-        and int(image_ocr.get("failed_count") or 0) > 0
-        and not str(image_ocr.get("attempted_at") or "").strip()
-    )
-
-
-def _set_content_status(content_item_id: str, status: str) -> None:
-    try:
-        initialize_database()
-        with connect() as connection:
-            connection.execute(
-                "UPDATE content_items SET status = ?, updated_at = ? WHERE id = ?",
-                (status, datetime.now().isoformat(), content_item_id),
-            )
-            connection.commit()
-    except Exception:
-        return
-
-
-def _set_content_title(content_item_id: str, title: str) -> None:
-    safe_title = (title or "").strip()
-    if not safe_title:
-        return
-    try:
-        initialize_database()
-        with connect() as connection:
-            connection.execute(
-                "UPDATE content_items SET title = ?, updated_at = ? WHERE id = ?",
-                (safe_title, datetime.now().isoformat(), content_item_id),
-            )
-            connection.commit()
-    except Exception:
-        return
-
-
-def _ensure_preview_thumbnails(
-    cache_dir: Path | None,
-    video_path: Path | None,
-    add_log: Callable[[str, str, str, float | None], None],
-) -> None:
-    if not cache_dir or not video_path:
-        return
-    add_log("download", "正在准备播放器预览缩略图…", "info", None)
-    preview_path = ensure_preview_thumbnails(cache_dir, video_path)
-    if preview_path:
-        add_log("download", "播放器预览缩略图已生成", "success", None)
+    return isinstance(article_info, dict) and _content_source_text_needs_ocr_refresh(article_info)

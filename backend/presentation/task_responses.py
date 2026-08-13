@@ -33,6 +33,9 @@ class TaskResponse(BaseModel):
     transcript: str | None = None
     summary: str | None = None
     summary_length: int = 0
+    reasoning_content: str = ""
+    reasoning_length: int = 0
+    reasoning_truncated: bool = False
     obsidian_path: str | None = None
     markdown_draft_path: str | None = None
     whisper_model: str | None = None
@@ -82,6 +85,9 @@ def to_task_response(
         transcript=result.transcript if result and include_heavy_payload else None,
         summary=result.summary if result and include_heavy_payload else None,
         summary_length=len(result.summary or "") if result else 0,
+        reasoning_content=result.reasoning_content if result and include_heavy_payload else "",
+        reasoning_length=len(result.reasoning_content or "") if result else 0,
+        reasoning_truncated=bool(result and result.reasoning_truncated),
         obsidian_path=result.obsidian_path if result else None,
         markdown_draft_path=result.markdown_draft_path if result else None,
         whisper_model=result.whisper_model if result else record.whisper_model,

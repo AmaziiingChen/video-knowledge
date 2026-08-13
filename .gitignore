@@ -25,6 +25,7 @@ frontend/dist/
 frontend/dist-public-report/
 frontend/coverage/
 frontend/release/
+frontend/public/generated/sf-symbols/
 frontend/.pytest_cache/
 frontend/*.local
 

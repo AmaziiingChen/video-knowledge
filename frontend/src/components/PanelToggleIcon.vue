@@ -12,7 +12,7 @@
 </template>
 
 <script setup>
-const props = defineProps({
+defineProps({
   side: {
     type: String,
     required: true,
@@ -23,7 +23,6 @@ const props = defineProps({
     default: false
   }
 })
-
 </script>
 
 <style scoped>
@@ -36,7 +35,9 @@ const props = defineProps({
   color: currentColor;
 }
 
-.panel-toggle-icon-art { overflow: visible; }
+.panel-toggle-icon-art {
+  overflow: visible;
+}
 
 .panel-toggle-icon-fill {
   transform-box: fill-box;

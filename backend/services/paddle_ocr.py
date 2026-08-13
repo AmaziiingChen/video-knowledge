@@ -6,7 +6,6 @@ import hashlib
 import json
 import mimetypes
 import re
-import tempfile
 import time
 from time import perf_counter
 from typing import Any

@@ -77,7 +77,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh } from '../components/macosSymbolComponents.js'
 import { promptTaskContracts, promptTemplateDisplayName } from '../config/promptInterface'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 

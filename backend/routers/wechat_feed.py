@@ -9,7 +9,7 @@ from xml.etree import ElementTree
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from services.content_source_text import ContentSourceText, load_content_source_text
 from services.database import connect, initialize_database

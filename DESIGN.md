@@ -89,7 +89,7 @@ Element Plus 的 primary、success、warning、danger、文字、表面、边界
 ### 字族
 
 - 界面与正文：`-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif`
-- 品牌字标：`"Iowan Old Style", "Palatino Linotype", Georgia, serif`
+- 品牌字标：`ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, monospace`，使用正常字形与中等字重，保持圆润、紧凑的 macOS 等宽观感
 - 日志、路径、时间码：`ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`
 
 ### 字号基线

@@ -47,10 +47,7 @@ defineProps({
   height: 10px;
   overflow: hidden;
   border-radius: 3px;
-  /* Keep the stream visible on plain white readers without turning it into
-     a decorative loading effect.  Using the text token also keeps the
-     contrast consistent across every place that reuses this component. */
-  background: color-mix(in srgb, var(--vk-text) 16%, var(--vk-bg-panel));
+  background: var(--vk-ai-stream-track);
 }
 
 .ai-skeleton-stream-line::after {
@@ -60,7 +57,7 @@ defineProps({
   background: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in srgb, var(--vk-text) 24%, transparent) 48%,
+    var(--vk-ai-stream-highlight) 48%,
     transparent 100%
   );
   transform: translateX(-110%);

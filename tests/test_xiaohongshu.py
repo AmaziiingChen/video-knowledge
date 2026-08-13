@@ -4,27 +4,45 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from services.providers.xiaohongshu import XiaohongshuProvider
-from services.url_parser import parse_share_text
-from services.xiaohongshu_client import XiaohongshuNote, normalize_note_url, note_id_from_url, xiaohongshu_cookie_status
+from config import settings
 from services import xiaohongshu_ingest
 from services.article_preview import normalize_article_html
 from services.cache import cache_dir_for_url, read_cache_meta, write_cache_meta
 from services.clipboard_watcher import extract_supported_links
 from services.content_source_text import ContentSourceText
-from services.database import connect, initialize_database
+from services.database import (
+    _migration_092_repair_placeholder_content_items,
+    connect,
+    initialize_database,
+)
 from services.inbox import capture_link_to_inbox
 from services.pipeline_runner import run_pipeline_sync
+from services.providers.xiaohongshu import XiaohongshuProvider
 from services.telegram_watcher import TelegramWatcher
+from services.url_parser import parse_share_text
+from services.xiaohongshu_browser_collector import parse_note_info_payload
 from services.xiaohongshu_cache import xiaohongshu_cache_dir
-from services.xiaohongshu_links import XiaohongshuShareLinkError, resolve_xiaohongshu_share_url
-from config import settings
-from services import xiaohongshu_client
-from services.database import _migration_092_repair_placeholder_content_items
+from services.xiaohongshu_client import (
+    normalize_note_url,
+    note_id_from_url,
+    xiaohongshu_cookie_status,
+)
+from services.xiaohongshu_links import (
+    XiaohongshuShareLinkError,
+    resolve_xiaohongshu_share_url,
+)
+
+
+@pytest.fixture(autouse=True)
+def available_xiaohongshu_collector(tmp_path, monkeypatch):
+    del tmp_path
+    monkeypatch.setattr("services.runtime_components.browser_executable", lambda: "/fake/chromium")
+    monkeypatch.setattr("services.xiaohongshu_browser_collector.browser_executable", lambda: "/fake/chromium")
 
 
 def test_xiaohongshu_share_link_enters_the_manual_ingest_contract():
@@ -99,15 +117,13 @@ def test_xiaohongshu_provider_uses_note_id_for_deduplication_without_network():
 
 
 def test_xiaohongshu_note_without_a_title_uses_its_description_before_a_generic_placeholder():
-    note = xiaohongshu_client._note_from_raw(
-        {
+    note = parse_note_info_payload(
+        {"data": {"item": {"note_card": {
             "id": "note-id-123456",
-            "note_card": {
-                "title": "   ",
-                "desc": "  这是一条没有标题、但有正文的小红书笔记。  ",
-            },
-        },
-        source_url="https://www.xiaohongshu.com/explore/note-id-123456?xsec_token=token",
+            "title": "   ",
+            "desc": "  这是一条没有标题、但有正文的小红书笔记。  ",
+        }}}},
+        expected_note_id="note-id-123456",
     )
 
     assert note.title == "这是一条没有标题、但有正文的小红书笔记。"
@@ -170,59 +186,30 @@ def test_xiaohongshu_description_renders_only_safe_topic_badges():
     assert "C# 不应成为标签" in normalized
 
 
-def test_xiaohongshu_favorites_are_incremental_and_queue_background_analysis(tmp_path, monkeypatch):
+def test_xiaohongshu_favorites_remain_disabled_without_creating_a_source(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", Path(tmp_path))
-    note = XiaohongshuNote(
-        note_id="note-1",
-        source_url="https://www.xiaohongshu.com/explore/note-1?xsec_token=token",
-        title="一篇图文", author="作者", author_url="", avatar_url="", description="正文",
-        image_urls=("https://example.com/cover.jpg",), published_at="", tags=(), stats={}, ip_location="",
-    )
-    monkeypatch.setattr("services.xiaohongshu_client.fetch_my_favorites", lambda *, limit: [note])
-    requests = []
-    monkeypatch.setattr(
-        xiaohongshu_ingest.task_manager,
-        "create",
-        lambda request: requests.append(request) or SimpleNamespace(task_id=f"task-{len(requests)}"),
-    )
+    from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
 
-    first = xiaohongshu_ingest.sync_xiaohongshu_favorites(auto_analyze=True)
-    second = xiaohongshu_ingest.sync_xiaohongshu_favorites(source_id=first["source_id"])
-    source = xiaohongshu_ingest.get_xiaohongshu_favorite_source()
-
-    assert first["created_count"] == 1
-    assert first["task_ids"] == ["task-1"]
-    assert second["created_count"] == 0
-    assert source and source["next_sync_at"] and source["enabled"] is True
+    with pytest.raises(XiaohongshuCollectorUnavailable, match="主动导入单篇图文"):
+        xiaohongshu_ingest.sync_xiaohongshu_favorites(auto_analyze=True)
+    assert xiaohongshu_ingest.get_xiaohongshu_favorite_source() is None
 
 
-def test_xiaohongshu_favorites_refresh_an_existing_note_access_token(tmp_path, monkeypatch):
+def test_xiaohongshu_favorites_do_not_call_the_legacy_fetcher(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", Path(tmp_path))
-    tokens = iter(("old-token", "new-token"))
+    from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
+
+    called = False
 
     def favorites(*, limit):
-        token = next(tokens)
-        return [
-            XiaohongshuNote(
-                note_id="note-1",
-                source_url=f"https://www.xiaohongshu.com/explore/note-1?xsec_token={token}",
-                title="一篇图文", author="作者", author_url="", avatar_url="", description="正文",
-                image_urls=(), published_at="", tags=(), stats={}, ip_location="",
-            )
-        ]
+        nonlocal called
+        called = True
+        return []
 
     monkeypatch.setattr("services.xiaohongshu_client.fetch_my_favorites", favorites)
-
-    first = xiaohongshu_ingest.sync_xiaohongshu_favorites(auto_analyze=False)
-    second = xiaohongshu_ingest.sync_xiaohongshu_favorites(source_id=first["source_id"])
-
-    with connect() as connection:
-        source_url = connection.execute(
-            "SELECT source_url FROM content_items WHERE id=?",
-            (first["content_item_ids"][0],),
-        ).fetchone()["source_url"]
-    assert second["created_count"] == 0
-    assert "xsec_token=new-token" in source_url
+    with pytest.raises(XiaohongshuCollectorUnavailable):
+        xiaohongshu_ingest.sync_xiaohongshu_favorites(auto_analyze=False)
+    assert called is False
 
 
 def test_xiaohongshu_cookie_status_is_safe_when_missing(tmp_path, monkeypatch):

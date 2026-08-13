@@ -9,6 +9,15 @@ RUN_DIR="$(pwd)/data/run"
 BACKEND_PID_FILE="$RUN_DIR/backend.pid"
 FRONTEND_PID_FILE="$RUN_DIR/frontend.pid"
 BACKEND_TOKEN_FILE="$RUN_DIR/backend-instance-token"
+MCP_HEARTBEAT_PID_FILE="$RUN_DIR/mcp-bridge-heartbeat.pid"
+
+if [ -z "${PYTHON_BIN:-}" ]; then
+    if command -v python >/dev/null 2>&1; then
+        PYTHON_BIN="python"
+    else
+        PYTHON_BIN="python3"
+    fi
+fi
 
 terminate_tree() {
     local pid="$1"
@@ -68,6 +77,10 @@ stop_pid_file() {
     rm -f "$file"
 }
 
+stop_pid_file "MCP bridge 心跳" "$MCP_HEARTBEAT_PID_FILE"
+if ! "$PYTHON_BIN" scripts/manage_mcp_bridge_session.py cleanup --run-dir "$RUN_DIR"; then
+    echo "MCP bridge 文件状态异常；后端仍将停止，请手工检查 $RUN_DIR"
+fi
 stop_pid_file "前端" "$FRONTEND_PID_FILE"
 stop_pid_file "后端" "$BACKEND_PID_FILE"
 rm -f "$BACKEND_TOKEN_FILE"

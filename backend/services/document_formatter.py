@@ -9,11 +9,11 @@ import re
 from threading import Lock
 from time import perf_counter
 
-from config import settings
 from services.ai_call_logger import record_ai_call
 from services.cache import cache_dir_for_url, read_cache_meta, write_cache_meta
 from services.database import connect, initialize_database
 from services.llm_provider import LLMMessage, LLMProvider, default_llm_provider
+from services.llm_settings import text_model_configured
 from services.prompt_templates import PromptTemplateRecord, PromptTemplateRepository
 from services.repository import ContentRepository
 
@@ -58,8 +58,8 @@ def request_document_formatting(content_item_id: str, source_url: str, document_
         if status in {"queued", "running", "failed"}:
             return {"status": status, "detail": str(state.get("detail") or "")}
 
-    if not settings.deepseek_api_key:
-        return {"status": "unavailable", "detail": "未配置 DeepSeek，正在展示 OCR 原稿"}
+    if not text_model_configured(DOCUMENT_FORMATTING_MODEL):
+        return {"status": "unavailable", "detail": "未配置默认文本模型，正在展示 OCR 原稿"}
 
     key = (content_item_id, source_hash, template_key)
     with _pending_lock:

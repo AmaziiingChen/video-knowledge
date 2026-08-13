@@ -146,7 +146,9 @@ Phase 2:
 - Extract components from `App.vue`:
   - `WorkspaceShell`
   - `ActivityBar`
-  - `PrimarySidebar`
+  - `PrimarySidebar` (view routing)
+  - `LibrarySidebar`
+  - `PromptFileTree`
   - `EditorTabs`
   - `ContentEditor`
   - `ContextSidebar`

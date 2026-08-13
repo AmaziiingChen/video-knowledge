@@ -22,6 +22,7 @@ from services.xiaohongshu_ingest import (
     sync_xiaohongshu_favorites,
     update_xiaohongshu_favorite_source,
 )
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
 
 
 router = APIRouter()
@@ -80,6 +81,8 @@ async def add_bilibili_favorite_endpoint(req: BilibiliFavoriteRequest):
 async def sync_xiaohongshu_favorite_endpoint(req: XiaohongshuFavoriteRequest):
     try:
         return await asyncio.to_thread(sync_xiaohongshu_favorites, auto_analyze=req.auto_analyze)
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

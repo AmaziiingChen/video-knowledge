@@ -4,6 +4,14 @@ import { ElMessage } from 'element-plus'
 
 import { API_BASE as API } from '../../utils/localApiAuth.js'
 
+export function searchResultCountBucket(count) {
+  if (count <= 0) return '0'
+  if (count <= 5) return '1_5'
+  if (count <= 20) return '6_20'
+  if (count <= 100) return '21_100'
+  return '101_plus'
+}
+
 export function useLibrarySearchController({
   apiBase = API,
   request = axios,
@@ -16,14 +24,12 @@ export function useLibrarySearchController({
 } = {}) {
   const searchQuery = ref('')
   const librarySearchScope = ref('all')
-  const searchResults = ref([])
   const searchResultContentItems = ref([])
   const searchingContent = ref(false)
   let searchTimer = null
   let searchRequestVersion = 0
 
   function clearSearchState() {
-    searchResults.value = []
     searchResultContentItems.value = []
     searchingContent.value = false
   }
@@ -49,13 +55,11 @@ export function useLibrarySearchController({
         : { data: [] }
       if (requestVersion !== searchRequestVersion) return
       const itemsById = new Map((resolved.data || []).map((item) => [String(item.id), item]))
-      searchResults.value = results
       searchResultContentItems.value = contentItemIds
         .map((id) => itemsById.get(String(id)))
         .filter(Boolean)
       const count = searchResultContentItems.value.length
-      const bucket = count === 0 ? '0' : (count <= 5 ? '1_5' : (count <= 20 ? '6_20' : '20_plus'))
-      void recordTelemetry('search_completed', { result_count_bucket: bucket })
+      void recordTelemetry('search_completed', { result_count_bucket: searchResultCountBucket(count) })
     } catch (error) {
       if (requestVersion !== searchRequestVersion) return
       searchResultContentItems.value = []
@@ -92,7 +96,6 @@ export function useLibrarySearchController({
   return {
     searchQuery,
     librarySearchScope,
-    searchResults,
     searchResultContentItems,
     searchingContent,
     searchContent,

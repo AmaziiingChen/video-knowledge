@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-import logging
 from threading import Lock
 
+from services.cache import cache_dir_for_url, read_cache_meta
 from services.content_source_text import (
     load_content_source_text,
     should_prepare_article_in_background,
 )
-from services.cache import cache_dir_for_url, read_cache_meta
 from services.database import connect, initialize_database
 from services.paddle_ocr import is_paddle_ocr_configured
 from services.repository import ContentRepository
 from services.wechat_browser import next_wechat_public_request_in_seconds
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +26,19 @@ logger = logging.getLogger(__name__)
 _WEB_CAPTURE_WORKERS = 8
 _WECHAT_CAPTURE_WORKERS = 1
 _OCR_WORKERS = 4
-_web_capture_executor = ThreadPoolExecutor(max_workers=_WEB_CAPTURE_WORKERS, thread_name_prefix="article-web-capture")
-_wechat_capture_executor = ThreadPoolExecutor(max_workers=_WECHAT_CAPTURE_WORKERS, thread_name_prefix="article-wechat-capture")
-_ocr_executor = ThreadPoolExecutor(max_workers=_OCR_WORKERS, thread_name_prefix="article-ocr-enrich")
+
+
+def _new_executors() -> tuple[ThreadPoolExecutor, ThreadPoolExecutor, ThreadPoolExecutor]:
+    return (
+        ThreadPoolExecutor(max_workers=_WEB_CAPTURE_WORKERS, thread_name_prefix="article-web-capture"),
+        ThreadPoolExecutor(max_workers=_WECHAT_CAPTURE_WORKERS, thread_name_prefix="article-wechat-capture"),
+        ThreadPoolExecutor(max_workers=_OCR_WORKERS, thread_name_prefix="article-ocr-enrich"),
+    )
+
+
+_web_capture_executor, _wechat_capture_executor, _ocr_executor = _new_executors()
+_executor_lock = Lock()
+_accepting_work = True
 
 _pending_ids: set[str] = set()
 _web_capture_queued_ids: deque[str] = deque()
@@ -48,9 +57,15 @@ def enqueue_article_source_preparation(content_item_id: str) -> bool:
     """Queue a fast local body capture followed by optional image OCR."""
     if not content_item_id:
         return False
+    with _executor_lock:
+        if not _accepting_work:
+            return False
     is_wechat = _is_wechat_article(content_item_id)
     queue = _wechat_capture_queued_ids if is_wechat else _web_capture_queued_ids
-    executor = _wechat_capture_executor if is_wechat else _web_capture_executor
+    with _executor_lock:
+        if not _accepting_work:
+            return False
+        executor = _wechat_capture_executor if is_wechat else _web_capture_executor
     with _pending_lock:
         if content_item_id in _pending_ids:
             return False
@@ -62,6 +77,10 @@ def enqueue_article_source_preparation(content_item_id: str) -> bool:
         with _pending_lock:
             _pending_ids.discard(content_item_id)
             _discard(queue, content_item_id)
+        with _executor_lock:
+            stopping = not _accepting_work
+        if stopping:
+            return False
         raise
     return True
 
@@ -89,18 +108,51 @@ def _capture(content_item_id: str, *, is_wechat: bool) -> None:
         with _pending_lock:
             active.discard(content_item_id)
 
+    with _executor_lock:
+        if not _accepting_work:
+            _finish(content_item_id, succeeded=True)
+            return
+        executor = _ocr_executor
     with _pending_lock:
         if content_item_id in _priority_ocr_ids:
             _ocr_queued_ids.appendleft(content_item_id)
         else:
             _ocr_queued_ids.append(content_item_id)
     try:
-        _ocr_executor.submit(_enrich_ocr, content_item_id)
+        executor.submit(_enrich_ocr, content_item_id)
     except Exception:
         with _pending_lock:
             _discard(_ocr_queued_ids, content_item_id)
         _finish(content_item_id, succeeded=False)
         logger.info("Article OCR enrichment could not be scheduled for %s", content_item_id, exc_info=True)
+
+
+def start_article_source_preparation() -> None:
+    """Accept background preparation work for the current app lifecycle."""
+    global _web_capture_executor, _wechat_capture_executor, _ocr_executor, _accepting_work
+    with _executor_lock:
+        if _accepting_work:
+            return
+        _web_capture_executor, _wechat_capture_executor, _ocr_executor = _new_executors()
+        _accepting_work = True
+
+
+def shutdown_article_source_preparation(*, wait: bool = True) -> None:
+    """Stop accepting work and close every preparation executor idempotently."""
+    global _accepting_work
+    with _executor_lock:
+        if not _accepting_work:
+            return
+        _accepting_work = False
+        executors = (_web_capture_executor, _wechat_capture_executor, _ocr_executor)
+    with _pending_lock:
+        _pending_ids.clear()
+        _web_capture_queued_ids.clear()
+        _wechat_capture_queued_ids.clear()
+        _ocr_queued_ids.clear()
+        _priority_ocr_ids.clear()
+    for executor in executors:
+        executor.shutdown(wait=wait, cancel_futures=True)
 
 
 def _enrich_ocr(content_item_id: str) -> None:

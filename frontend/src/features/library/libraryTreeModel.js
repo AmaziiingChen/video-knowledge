@@ -16,6 +16,57 @@ export function displayLibraryContentName(item) {
   return '未命名内容'
 }
 
+export function unreadFolderCounts({
+  libraryFolders = [],
+  libraryContentItems = [],
+  isUnreadContent = () => false,
+}) {
+  const foldersById = new Map(libraryFolders.map((folder) => [String(folder.id), folder]))
+  const counts = new Map(libraryFolders.map((folder) => [String(folder.id), 0]))
+  for (const item of libraryContentItems) {
+    if (!isUnreadContent(item)) continue
+    let folderId = item?.library_folder_id ? String(item.library_folder_id) : ''
+    const visited = new Set()
+    while (folderId && foldersById.has(folderId) && !visited.has(folderId)) {
+      visited.add(folderId)
+      counts.set(folderId, (counts.get(folderId) || 0) + 1)
+      folderId = foldersById.get(folderId)?.parent_folder_id
+        ? String(foldersById.get(folderId).parent_folder_id)
+        : ''
+    }
+  }
+  return counts
+}
+
+export function libraryFolderPaths(libraryFolders = []) {
+  const folders = new Map(libraryFolders.map((folder) => [folder.id, folder]))
+  const paths = new Map()
+  const resolve = (folderId, visiting = new Set()) => {
+    if (!folderId || visiting.has(folderId)) return ''
+    if (paths.has(folderId)) return paths.get(folderId)
+    const folder = folders.get(folderId)
+    if (!folder) return ''
+    visiting.add(folderId)
+    const parentPath = resolve(folder.parent_folder_id || null, visiting)
+    visiting.delete(folderId)
+    const path = parentPath ? `${parentPath} / ${folder.name}` : folder.name
+    paths.set(folderId, path)
+    return path
+  }
+  for (const folderId of folders.keys()) resolve(folderId)
+  return paths
+}
+
+export function libraryTreeNodeTitle(node, folderPaths = new Map()) {
+  if (!node) return ''
+  if (node.type === 'unread-content') {
+    const source = folderPaths.get(node.raw?.library_folder_id) || node.raw?.source_name || '资料库'
+    return `${node.name}\n${source}`
+  }
+  const source = [node.raw?.source_name, node.raw?.source_section].filter(Boolean).join(' · ')
+  return source ? `${node.name}\n${source}` : node.name || ''
+}
+
 export function sortLibraryNodes(nodes) {
   return [...nodes].sort((left, right) => {
     if (isContentItem(left) || isContentItem(right)) {

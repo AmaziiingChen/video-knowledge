@@ -26,7 +26,7 @@ from services.database import connect, ensure_database_initialized, initialize_d
 from services.repository import ContentItemRecord, ContentRepository, new_id
 from services.cache import find_cached_video, read_cached_subtitle_transcript, read_cached_transcript
 from services.article_image_storage import compact_cached_article_images
-from services.obsidian_settings import content_library_root, default_content_library_root
+from services.obsidian_settings import content_library_root
 from services.source_context import render_source_context_markdown
 from services.xiaohongshu_cache import xiaohongshu_cache_dir
 
@@ -825,7 +825,6 @@ def archive_qa_conversation_in_source_document(content_item_id: str) -> Path:
 
 
 def _split_qa_section(markdown: str) -> tuple[str, str]:
-    section = "## 追问记录"
     match = re.search(r"^## 追问记录\s*$", markdown, re.MULTILINE)
     if match is None:
         return markdown.rstrip(), ""
@@ -843,7 +842,7 @@ def _ensure_active_qa_conversation(section_body: str) -> tuple[str, int]:
     matches = list(re.finditer(r"^### 对话 (\d+)（(当前|已归档)）\s*$", body, re.MULTILINE))
     if not matches:
         legacy_entries = re.sub(r"^### (?=\d{4}-\d{2}-\d{2} )", "#### ", body, flags=re.MULTILINE)
-        return f"### 对话 1（当前）" + (f"\n\n{legacy_entries}" if legacy_entries else ""), 1
+        return "### 对话 1（当前）" + (f"\n\n{legacy_entries}" if legacy_entries else ""), 1
 
     current_matches = [match for match in matches if match.group(2) == "当前"]
     if current_matches:

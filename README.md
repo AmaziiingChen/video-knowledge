@@ -6,7 +6,7 @@
 
 在提交 issue、发布 fork 或打包前，请先阅读 [隐私与数据处理](PRIVACY.md)、[安全策略](SECURITY.md)、[第三方声明](THIRD_PARTY_NOTICES.md) 和 [贡献指南](CONTRIBUTING.md)。本项目采用 [MIT License](LICENSE)。
 
-`v0.1.0` 是项目的首个公开版本基线；此前开发没有伪造为历史发行版。当前已停止新增产品功能，进入兼容性优先的架构治理阶段，规则与退出条件见 [架构治理计划](docs/architecture-hardening.md)，后续版本记录见 [CHANGELOG](CHANGELOG.md)。
+`v0.1.0` 是项目的首个公开版本基线；此前开发没有伪造为历史发行版。当前已停止新增产品功能，并从大规模架构收缩转入兼容性优先的稳定发布阶段；规则与退出条件见 [稳定化计划](docs/architecture-hardening.md)，后续版本记录见 [CHANGELOG](CHANGELOG.md)。
 
 ## 能做什么
 
@@ -65,6 +65,20 @@ cd frontend
 npm ci
 cd ..
 ```
+
+开发或运行本地质量检查时，再安装固定版本的验证工具：
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+只有在本机生成桌面安装包时，才安装打包工具：
+
+```bash
+python -m pip install -r requirements-build.txt
+```
+
+运行时与验证工具依赖策略见 [Python dependency policy](docs/python-dependencies.md)。
 
 校园报告默认使用确定性的词法匹配。只有需要本地语义向量排序时，才安装可选依赖：
 
@@ -136,6 +150,7 @@ macOS 也可直接双击：
 
 - `Video Knowledge.command`：启动前后端并打开浏览器。
 - `Video Knowledge Desktop.command`：以当前源码启动 Electron 桌面外壳；后端修改在下次启动时直接生效。正式发布包再执行对应的 `desktop:package:*` 命令。
+- `KnowledgeHub Desktop Preview.command`：先重建前端，再以临时 Electron 配置和仓库 `data/` 启动真实桌面端，用于在打包前检查图标与界面；它不会读取已安装版的 Application Support 数据，若 8000 端口被占用会停止并给出提示。
 - `Stop Video Knowledge.command`：停止由启动器管理的服务。
 
 日志位于 `data/logs/backend.log` 与 `data/logs/frontend.log`；停止服务可运行：
@@ -152,7 +167,7 @@ macOS 也可直接双击：
 
 ### 补采平台互动与评论
 
-B站和抖音内容会在常规处理时保存可用的作者、发布时间、互动指标、话题与评论样本。对已有内容，可在内容页右上角的“内容操作”中选择“补采互动与评论”，任务会进入现有的本机持久化队列。公开版暂不携带小红书采集组件，因为其原始第三方副本缺少可验证的授权文件；已保存的小红书资料仍可阅读。
+B站和抖音内容会在常规处理时保存可用的作者、发布时间、互动指标、话题与评论样本。对已有内容，可在内容页右上角的“内容操作”中选择“补采互动与评论”，任务会进入现有的本机持久化队列。公开版不携带缺少可验证授权文件的第三方 `Spider_XHS` 副本；KnowledgeHub 自有的 clean-room 浏览器读取器仅观察小红书页面自身发出的响应，支持用户主动导入单篇图文。个人收藏、创作者同步与评论采集仍未开放；已保存的小红书资料、图片和 OCR 结果继续可读。
 
 补采默认最多读取 3 页、保存 60 条评论，单条内容的硬上限为 120 条；平台提前结束时会记录完整性，否则明确标记为样本。总结、追问和自定义分析最多选取 24 条有代表性的评论，避免评论体量挤占正文。评论属于未经验证的辅助材料，不能覆盖视频正文或被当作模型指令。
 
@@ -193,7 +208,7 @@ B站和抖音内容会在常规处理时保存可用的作者、发布时间、�
 - `GET /api/wechat-feed/subscriptions.json`：导出订阅配置（不含微信 Cookie、token 等凭据）。
 - `GET /api/wechat-feed/rss.xml`：所有已发现文章的聚合 RSS；`GET /api/wechat-feed/rss/{subscription_id}.xml`：单公众号 RSS。
 
-本项目的 MCP 服务也提供公众号搜索、订阅、列出订阅、读取最新文章和导出单篇文章 Markdown 工具；它们只使用本机 API，微信凭据仍保存在 macOS Keychain。
+本项目的 MCP 服务也提供公众号搜索、订阅、列出订阅、读取最新文章和导出单篇文章 Markdown 工具；它们只使用本机 API，微信凭据仍保存在 macOS Keychain。MCP 需要按 [OpenClaw 接入说明](docs/openclaw-ingest.md#local-mcp-bridge-configuration) 完成一次不含令牌的本机命令配置，并仅在 KnowledgeHub 正在运行、短期 bridge lease 有效时可用。
 
 #### 正文清洗规则
 
@@ -285,6 +300,9 @@ npm run build
 ```bash
 python scripts/check_public_release_tree.py
 ```
+
+候选版本的分层门禁、unsigned DMG 冒烟与待机资源证据格式见
+[发布候选验证](docs/release-candidate-verification.md)。
 
 ## 常见问题
 

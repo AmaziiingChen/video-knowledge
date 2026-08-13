@@ -123,6 +123,53 @@ OpenClaw private-message isolation as `session.dmScope: per-channel-peer`.
 This prevents different contacts from sharing the same conversation key and
 therefore the same KnowledgeHub task context.
 
+## Local MCP bridge configuration
+
+KnowledgeHub does not modify `~/.openclaw/openclaw.json` automatically. Add or
+update only the `mcp.servers.knowledgehub` entry after reviewing the paths. The
+configuration contains a capability **file path**, never the capability value;
+the file is created with mode `0600`, rotates on every KnowledgeHub launch and
+is invalidated by a short parent-process lease.
+
+For the installed DMG, use the packaged backend entry and replace `<HOME>` with
+the current account's absolute home-directory path (OpenClaw does not expand the
+placeholder):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "knowledgehub": {
+        "command": "/Applications/KnowledgeHub.app/Contents/Resources/backend/knowledgehub-backend/knowledgehub-backend",
+        "args": ["--mcp-stdio"],
+        "env": {
+          "KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE": "<HOME>/Library/Application Support/KnowledgeHub/run/mcp-bridge-token"
+        }
+      }
+    }
+  }
+}
+```
+
+For source development, point `command` to the absolute Python executable,
+place the absolute repository `backend/desktop_server.py` before
+`--mcp-stdio` in `args`, and use the repository's absolute
+`data/run/mcp-bridge-token` path. Start with `./start.sh`; `./stop.sh` stops the
+lease heartbeat and removes the bridge files before stopping the backend.
+
+Do not paste the capability value into JSON, a URL, command argument or log.
+The MCP capability is separate from the renderer's instance token and can call
+only the method/path pairs used by the documented MCP tools. The API endpoint is
+issued inside the same protected session lease, so an OpenClaw configuration
+cannot redirect the capability to another local port. If KnowledgeHub is not
+running, the lease expires or the configuration points to another command, the
+status remains unavailable rather than reporting a config key as ready.
+The `0700` directory and `0600` files prevent access by other local accounts;
+they are not a security boundary against another malicious process already
+running as the same macOS account. The short lease, per-launch rotation and
+server-side route allowlist limit the effect of accidental exposure in that
+local-account trust model.
+
 ## Local health checks
 
 The app's “连接 → 微信链接自动处理” status checks the whole local chain instead
@@ -132,5 +179,5 @@ The normal status view is cached briefly so opening the desktop app does not
 continuously launch OpenClaw diagnostics; use “诊断” when a fresh check is needed.
 
 If the backend is not running, the MCP bridge deliberately returns a clear
-“请先启动 KnowledgeHub” error. Start the app with `./start.sh`, then resend the
-link or retry the OpenClaw task.
+“请先启动 KnowledgeHub” error. Start the installed app or run `./start.sh`, then
+resend the link or retry the OpenClaw task.

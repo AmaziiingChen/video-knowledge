@@ -42,6 +42,10 @@ def refresh_source_context(
     with connect() as connection:
         item = ContentRepository(connection).get_content_item(content_item_id)
     _validate_item(item)
+    if item.source_provider == "xiaohongshu":
+        from services.xiaohongshu_capability import require_xiaohongshu_feature
+
+        require_xiaohongshu_feature("comments_refresh")
     _check_cancel(cancel_check)
     mark_source_context_running(item)
     _report(on_progress, "source_context", 20, "正在读取互动指标")
@@ -97,7 +101,14 @@ def backfill_source_contexts(
 ) -> dict[str, Any]:
     bounded_limit = max(1, min(int(limit), 200))
     ensure_database_initialized()
+    from services.xiaohongshu_capability import xiaohongshu_capabilities
+
     where_ready = "" if include_ready else "AND (context.status IS NULL OR context.status != 'ready')"
+    provider_clause = (
+        "('bilibili', 'douyin', 'xiaohongshu')"
+        if xiaohongshu_capabilities()["comments_refresh"]["available"]
+        else "('bilibili', 'douyin')"
+    )
     with connect() as connection:
         rows = connection.execute(
             f"""
@@ -107,7 +118,7 @@ def backfill_source_contexts(
               ON context.content_item_id = content.id
             WHERE content.deleted_at IS NULL
               AND content.source_url IS NOT NULL
-              AND content.source_provider IN ('bilibili', 'douyin', 'xiaohongshu')
+              AND content.source_provider IN {provider_clause}
               {where_ready}
             ORDER BY content.updated_at DESC, content.id
             LIMIT ?

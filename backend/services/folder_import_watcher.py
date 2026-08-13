@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Lock, Thread
 
-from services.folder_import_settings import load_folder_import_watcher_settings
 from services.local_file_imports import import_kind_for_filename
 
 

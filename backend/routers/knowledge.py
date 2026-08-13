@@ -2,15 +2,26 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from services.knowledge_conversations import (
+    conversation_detail,
+    finish_exchange,
+    list_conversations,
+    start_exchange,
+)
+from services.knowledge_v2 import (
+    answer_from_evidence,
+    evidence_preview,
+    list_source_set_documents,
+    list_source_sets,
+    rewrite_query,
+    stream_answer_from_evidence,
+    validate_source_document_ids,
+)
+from services.knowledge_v2 import retrieve as retrieve_v2
 from starlette.responses import StreamingResponse
-
-from services.knowledge_conversations import conversation_detail, finish_exchange, list_conversations, start_exchange
-from services.knowledge_v2 import answer_from_evidence, evidence_preview, list_source_set_documents, list_source_sets, retrieve as retrieve_v2, rewrite_query, stream_answer_from_evidence, validate_source_document_ids
-
 
 router = APIRouter()
 
@@ -28,7 +39,12 @@ class V2QueryRequest(BaseModel):
     document_ids: list[str] | None = Field(default=None, max_length=500)
     excluded_document_ids: list[str] | None = Field(default=None, max_length=500)
     conversation_id: str | None = Field(default=None, max_length=100)
-    answer_model: Literal['deepseek-v4-flash', 'deepseek-v4-pro'] = 'deepseek-v4-pro'
+    answer_model: str = Field(
+        default="deepseek-v4-pro",
+        min_length=1,
+        max_length=220,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._/:-]*$",
+    )
 
 
 @router.get('/knowledge/v2/source-sets')
@@ -120,7 +136,13 @@ def v2_query(req: V2QueryRequest):
             task_id=str(exchange['id']),
             model=req.answer_model,
         )
-        completed = finish_exchange(str(exchange['id']), answer=answer.answer, citations=answer.citations)
+        completed = finish_exchange(
+            str(exchange['id']),
+            answer=answer.answer,
+            citations=answer.citations,
+            reasoning_content=answer.reasoning_content,
+            suggested_questions=answer.suggested_questions,
+        )
         return {
             'conversation_id': exchange['id'],
             'answer': answer.answer,
@@ -128,6 +150,8 @@ def v2_query(req: V2QueryRequest):
             'insufficient_evidence': answer.insufficient_evidence,
             'search_query': search_query,
             'usage': completed.get('usage', {}),
+            'reasoning_content': answer.reasoning_content,
+            'suggested_questions': answer.suggested_questions or [],
         }
     except ValueError as exc:
         finish_exchange(str(exchange['id']), answer='', citations=[], error=str(exc))
@@ -193,11 +217,19 @@ def v2_query_stream(req: V2QueryRequest):
             ):
                 if event == 'delta':
                     yield _sse('delta', {'text': payload})
+                elif event == 'reasoning_delta':
+                    yield _sse('reasoning_delta', {'text': payload})
                 elif event == 'replace':
                     yield _sse('replace', {'text': payload})
                 elif event == 'done':
                     answer = payload
-                    completed = finish_exchange(str(exchange['id']), answer=answer.answer, citations=answer.citations)
+                    completed = finish_exchange(
+                        str(exchange['id']),
+                        answer=answer.answer,
+                        citations=answer.citations,
+                        reasoning_content=answer.reasoning_content,
+                        suggested_questions=answer.suggested_questions,
+                    )
                     yield _sse('done', {
                         'conversation_id': exchange['id'],
                         'answer': answer.answer,
@@ -205,6 +237,8 @@ def v2_query_stream(req: V2QueryRequest):
                         'insufficient_evidence': answer.insufficient_evidence,
                         'search_query': search_query,
                         'usage': completed.get('usage', {}),
+                        'reasoning_content': answer.reasoning_content,
+                        'suggested_questions': answer.suggested_questions or [],
                     })
         except Exception as exc:
             finish_exchange(str(exchange['id']), answer='', citations=[], error=str(exc))

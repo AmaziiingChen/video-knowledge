@@ -2,62 +2,65 @@ import subprocess
 import json
 import re
 import time
-import shutil
 import threading
 import httpx
 from pathlib import Path
-from queue import Empty, Queue
-from urllib.parse import urlparse
-from collections.abc import Callable
 from typing import Optional
-from dataclasses import dataclass, field
 from config import settings
 from services.media_tools import resolve_tool
 from services.ffmpeg_runner import FfmpegProgress, probe_media_duration, run_ffmpeg
-from services.bilibili_auth import bilibili_yt_dlp_cookie_args
-from services.bilibili_native import resolve_progressive_media
 from services.http_media_download import download_browser_context_media, download_http_media
 from services.network_policy import direct_browser_launch_options, direct_network_environment
 from services.runtime_components import browser_executable
 from services.source_context import (
     build_source_context,
     douyin_comments_from_payload,
-    find_douyin_aweme,
     source_context_from_douyin_aweme,
 )
+from services.douyin_media_rules import (
+    browser_media_headers as _browser_media_headers,
+    find_aweme as _find_douyin_aweme,
+    is_comment_payload_url as _is_douyin_comment_payload_url,
+    is_media_host as _is_douyin_media_host,  # noqa: F401 - compatibility alias
+    is_preferred_bitrate as _is_preferred_douyin_bitrate,
+    is_work_payload_url as _is_douyin_work_payload_url,
+    looks_like_audio_url as _looks_like_douyin_audio_url,
+    looks_like_video_url as _looks_like_douyin_video_url,
+    lowest_video_variant as _lowest_douyin_video_variant,  # noqa: F401 - compatibility alias
+    needs_media_refresh as _needs_douyin_media_refresh,
+    quality_label as _douyin_quality_label,
+    select_video_variant as _select_douyin_video_variant,
+    video_variants as _douyin_video_variants,  # noqa: F401 - compatibility alias
+)
+from services.download_contracts import (
+    CancelCheck,
+    DownloadLogCallback,
+    DownloadProgress,
+    DownloadResult,
+    ProgressCallback,
+    activity_timeout_error as _activity_timeout_error,
+    append_download_log as _append_download_log,
+    media_transfer_error as _media_transfer_error,
+    report_phase as _report_phase,
+    report_progress as _report,
+    report_transfer as _report_transfer,
+    report_transfer_percent as _report_transfer_percent,  # noqa: F401 - compatibility alias
+    yt_dlp_bytes_per_second as _yt_dlp_bytes_per_second,  # noqa: F401 - compatibility alias
+)
+from services.download_media_processing import (
+    compress_video_for_storage as _compress_video_for_storage,
+    ensure_browser_playable_mp4 as _ensure_browser_playable_mp4,  # noqa: F401 - compatibility alias
+    is_valid_video_file as _is_valid_video_file,
+    probe_video_codec as _probe_video_codec,  # noqa: F401 - compatibility alias
+)
+from services.bilibili_download import (
+    BILIBILI_1080P_FORMAT,  # noqa: F401 - compatibility alias
+    YTDLP_ACTIVITY_TIMEOUT_SECONDS,  # noqa: F401 - compatibility alias
+    download_bilibili as _download_bilibili,
+    download_bilibili_progressive as _download_bilibili_progressive,  # noqa: F401 - compatibility alias
+    download_bilibili_with_cookie_args as _download_bilibili_with_cookie_args,  # noqa: F401 - compatibility alias
+)
 from services.video_download_settings import douyin_video_quality as _load_douyin_video_quality
-
-@dataclass
-class DownloadResult:
-    success: bool
-    video_path: Optional[Path] = None
-    video_info: dict = field(default_factory=dict)
-    logs: list[str] = field(default_factory=list)
-    error: str = ""
-
-
-@dataclass(frozen=True)
-class DownloadProgress:
-    """A truthful, transport-level update for the media download UI.
-
-    ``percent`` exists only when the provider has a real denominator.  It is
-    deliberately absent for parsing, DASH merging, validation and compression:
-    those operations have no reliable completion ratio.
-    """
-
-    phase: str
-    detail: str
-    received_bytes: int | None = None
-    total_bytes: int | None = None
-    bytes_per_second: float | None = None
-    percent: float | None = None
-
-
-ProgressCallback = Callable[[DownloadProgress], None]
-CancelCheck = Callable[[], bool]
-DownloadLogCallback = Callable[[str], None]
-BILIBILI_1080P_FORMAT = "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]"
-YTDLP_ACTIVITY_TIMEOUT_SECONDS = 300
 # A Douyin work page commonly renders the player after the document commit.
 # Six seconds was shorter than normal delayed page hydration on constrained
 # networks and caused a false "no media request" result.
@@ -88,336 +91,6 @@ def download_video(
         return _download_douyin(url, output_dir, progress_callback, cancel_check, log_callback)
     
     return DownloadResult(success=False, error=f"不支持的平台: {platform}")
-
-def _report(progress_callback: ProgressCallback | None, progress: DownloadProgress) -> None:
-    if progress_callback:
-        progress_callback(progress)
-
-
-def _append_download_log(logs: list[str], message: str, log_callback: DownloadLogCallback | None = None) -> None:
-    """Persist a provider log and immediately expose it to an active task."""
-    logs.append(message)
-    if log_callback:
-        try:
-            log_callback(message)
-        except Exception:
-            # A UI/database progress notification must not interrupt a media
-            # transfer that can still be completed and recovered locally.
-            pass
-
-
-def _report_phase(progress_callback: ProgressCallback | None, phase: str, detail: str) -> None:
-    _report(progress_callback, DownloadProgress(phase=phase, detail=detail))
-
-
-def _report_transfer(
-    progress_callback: ProgressCallback | None,
-    received_bytes: int,
-    total_bytes: int | None,
-    *,
-    started_at: float,
-    detail: str,
-) -> None:
-    percent = (received_bytes / total_bytes) * 100 if total_bytes else None
-    elapsed = max(time.monotonic() - started_at, 0.001)
-    _report(
-        progress_callback,
-        DownloadProgress(
-            phase="transfer",
-            detail=detail,
-            received_bytes=received_bytes,
-            total_bytes=total_bytes,
-            bytes_per_second=received_bytes / elapsed,
-            percent=max(0.0, min(100.0, percent)) if percent is not None else None,
-        ),
-    )
-
-
-def _report_transfer_percent(
-    progress_callback: ProgressCallback | None,
-    percent: float,
-    detail: str,
-    *,
-    bytes_per_second: float | None = None,
-) -> None:
-    """yt-dlp supplies a stream percentage and usually its instantaneous rate."""
-    _report(
-        progress_callback,
-        DownloadProgress(
-            phase="transfer",
-            detail=detail,
-            bytes_per_second=bytes_per_second,
-            percent=max(0.0, min(100.0, percent)),
-        ),
-    )
-
-
-def _media_transfer_error(transfer) -> str:
-    """Keep a CDN HTTP status visible to retry and cookie-health policy."""
-    detail = str(getattr(transfer, "error", "") or "媒体传输失败")
-    status_code = getattr(transfer, "status_code", None)
-    return f"HTTP {status_code}: {detail}" if status_code else detail
-
-
-def _yt_dlp_bytes_per_second(line: str) -> float | None:
-    match = re.search(r"\bat\s+~?\s*([\d.]+)\s*([KMGT]?i?B)/s\b", line, re.IGNORECASE)
-    if not match:
-        return None
-    try:
-        amount = float(match.group(1))
-    except ValueError:
-        return None
-    unit = match.group(2).lower()
-    multipliers = {
-        "b": 1,
-        "kb": 1000,
-        "mb": 1000**2,
-        "gb": 1000**3,
-        "tb": 1000**4,
-        "kib": 1024,
-        "mib": 1024**2,
-        "gib": 1024**3,
-        "tib": 1024**4,
-    }
-    return amount * multipliers[unit] if unit in multipliers else None
-
-
-def _activity_timeout_error(
-    *,
-    now: float,
-    last_activity_at: float,
-    stall_seconds: float,
-    operation: str,
-) -> str | None:
-    if now - last_activity_at <= stall_seconds:
-        return None
-    if stall_seconds >= 60 and stall_seconds % 60 == 0:
-        window = f"{int(stall_seconds // 60)} 分钟"
-    else:
-        window = f"{int(stall_seconds)} 秒"
-    separator = " " if operation and operation[-1].isascii() else ""
-    return f"{operation}{separator}连续 {window}没有新的进度或输出"
-
-
-def _stop_process(process: subprocess.Popen) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        process.terminate()
-        process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=3)
-    except OSError:
-        # The process may have exited between poll() and terminate().
-        return
-
-
-def _download_bilibili(
-    url: str,
-    output_dir: Path,
-    progress_callback: ProgressCallback | None = None,
-    cancel_check: CancelCheck | None = None,
-) -> DownloadResult:
-    try:
-        with bilibili_yt_dlp_cookie_args() as cookie_args:
-            compatibility_result = _download_bilibili_with_cookie_args(
-                url,
-                output_dir,
-                progress_callback,
-                cookie_args,
-                cancel_check,
-            )
-    except Exception as e:
-        compatibility_result = DownloadResult(success=False, error=f"yt-dlp 异常: {str(e)}")
-    if compatibility_result.success:
-        return compatibility_result
-    if compatibility_result.error == "下载已取消":
-        return compatibility_result
-
-    native_result = _download_bilibili_progressive(url, output_dir, progress_callback, cancel_check)
-    if native_result.success:
-        native_result.logs = [*compatibility_result.logs, "[B站] 兼容下载器不可用，已切换项目内直链下载", *native_result.logs]
-        return native_result
-    return compatibility_result
-
-
-def _download_bilibili_progressive(
-    url: str,
-    output_dir: Path,
-    progress_callback: ProgressCallback | None,
-    cancel_check: CancelCheck | None = None,
-) -> DownloadResult:
-    logs: list[str] = ["[B站] 尝试项目内直链下载..."]
-    try:
-        media = resolve_progressive_media(url)
-        target = output_dir / f"{media.bvid}.native.part"
-        transfer_started = time.monotonic()
-        _report_phase(progress_callback, "transfer", "正在传输视频")
-        transfer = download_http_media(
-            media.url,
-            target,
-            headers=media.headers,
-            progress_callback=lambda received, total: _report_transfer(
-                progress_callback,
-                received,
-                total,
-                started_at=transfer_started,
-                detail="正在传输视频",
-            ),
-            cancel_check=cancel_check,
-        )
-        if not transfer.success:
-            return DownloadResult(success=False, logs=logs, error=f"B站直链下载失败: {transfer.error}")
-        _report_phase(progress_callback, "validating", "正在校验媒体文件")
-        if not _is_valid_video_file(target):
-            return DownloadResult(success=False, logs=logs, error="B站直链媒体校验失败")
-        final_path = output_dir / f"{media.bvid}.mp4"
-        target.replace(final_path)
-        _report_phase(progress_callback, "finalizing", "正在整理视频文件")
-        logs.append(f"[B站] 项目内直链下载完成: {final_path.name}")
-        return DownloadResult(
-            success=True,
-            video_path=final_path,
-            video_info={
-                "id": media.bvid,
-                "title": media.title,
-                "platform": "bilibili",
-                "cid": media.cid,
-                "page_number": media.page_number,
-            },
-            logs=logs,
-        )
-    except Exception as exc:
-        return DownloadResult(success=False, logs=logs, error=f"B站直链解析失败: {exc}")
-
-
-def _download_bilibili_with_cookie_args(
-    url: str,
-    output_dir: Path,
-    progress_callback: ProgressCallback | None,
-    cookie_args: list[str],
-    cancel_check: CancelCheck | None = None,
-) -> DownloadResult:
-    output_template = str(output_dir / "%(id)s.%(ext)s")
-    video_format = BILIBILI_1080P_FORMAT
-    _report_phase(progress_callback, "resolving", "正在解析视频地址")
-    cmd = [
-        resolve_tool("yt-dlp") or "yt-dlp",
-        "--newline",
-        "--no-playlist",
-        "-f",
-        video_format,
-        "--merge-output-format",
-        "mp4",
-        "-o",
-        output_template,
-        "--write-info-json",
-        *cookie_args,
-        url,
-    ]
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        env=direct_network_environment(),
-    )
-    logs: list[str] = []
-    last_activity_at = time.monotonic()
-    output_lines: Queue[str] = Queue()
-
-    def output_signature() -> tuple[tuple[str, int, int], ...]:
-        signature: list[tuple[str, int, int]] = []
-        try:
-            candidates = output_dir.iterdir()
-            for candidate in candidates:
-                try:
-                    stat = candidate.stat()
-                except OSError:
-                    continue
-                if candidate.is_file():
-                    signature.append((candidate.name, stat.st_size, stat.st_mtime_ns))
-        except OSError:
-            return ()
-        return tuple(sorted(signature))
-
-    last_output_signature = output_signature()
-
-    def read_output() -> None:
-        if not process.stdout:
-            return
-        for line in process.stdout:
-            output_lines.put(line)
-
-    output_reader = threading.Thread(target=read_output, daemon=True)
-    output_reader.start()
-
-    def record_output(line: str) -> None:
-        nonlocal last_activity_at
-        clean = line.strip()
-        if clean:
-            logs.append(clean)
-            last_activity_at = time.monotonic()
-        match = re.search(r"\[download\]\s+(\d+(?:\.\d+)?)%", clean)
-        if match:
-            _report_transfer_percent(
-                progress_callback,
-                float(match.group(1)),
-                "正在传输媒体流",
-                bytes_per_second=_yt_dlp_bytes_per_second(clean),
-            )
-
-    while process.poll() is None:
-        if cancel_check and cancel_check():
-            _stop_process(process)
-            output_reader.join(timeout=1)
-            return DownloadResult(success=False, logs=logs, error="下载已取消")
-
-        try:
-            record_output(output_lines.get(timeout=0.5))
-            while True:
-                record_output(output_lines.get_nowait())
-        except Empty:
-            pass
-
-        if process.poll() is not None:
-            break
-        current_output_signature = output_signature()
-        if current_output_signature != last_output_signature:
-            last_activity_at = time.monotonic()
-            last_output_signature = current_output_signature
-        timeout_error = _activity_timeout_error(
-            now=time.monotonic(),
-            last_activity_at=last_activity_at,
-            stall_seconds=YTDLP_ACTIVITY_TIMEOUT_SECONDS,
-            operation="yt-dlp",
-        )
-        if timeout_error:
-            _stop_process(process)
-            output_reader.join(timeout=1)
-            return DownloadResult(success=False, logs=logs, error=timeout_error)
-
-    output_reader.join(timeout=1)
-    while True:
-        try:
-            record_output(output_lines.get_nowait())
-        except Empty:
-            break
-
-    return_code = process.wait()
-
-    if return_code == 0:
-        _report_phase(progress_callback, "finalizing", "正在合并媒体轨道")
-        for f in output_dir.iterdir():
-            if f.suffix in ['.mp4', '.mkv', '.webm', '.flv']:
-                info = _load_info_json(output_dir, f.stem)
-                return DownloadResult(success=True, video_path=f, video_info=info, logs=logs)
-        return DownloadResult(success=False, logs=logs, error="下载完成但未找到视频文件")
-
-    error_msg = logs[-1] if logs else f"yt-dlp 退出码: {return_code}"
-    return DownloadResult(success=False, logs=logs, error=error_msg)
 
 def _download_douyin(
     url: str,
@@ -459,135 +132,6 @@ def _download_douyin(
         result.video_info = {**result.video_info, "id": video_id, "platform": "douyin"}
     return result
 
-
-def _ensure_browser_playable_mp4(
-    video_path: Path,
-    logs: list[str],
-    *,
-    cancel_check: CancelCheck | None = None,
-) -> Path:
-    codec = _probe_video_codec(video_path)
-    if codec in {"h264", "avc1"}:
-        return video_path
-
-    temp_path = video_path.with_name(f"{video_path.stem}_h264_tmp.mp4")
-    temp_path.unlink(missing_ok=True)
-
-    logs.append(f"[兼容] 当前视频编码为 {codec or '未知'}，转换为 H.264 以支持内嵌播放器...")
-    cmd = [
-        resolve_tool("ffmpeg") or "ffmpeg",
-        "-y",
-        "-i",
-        str(video_path),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a?",
-        "-c:v",
-        "libx264",
-        "-vf",
-        "scale=-2:min(1080\\,ih)",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
-        str(temp_path),
-    ]
-    try:
-        result = run_ffmpeg(
-            cmd,
-            output_path=temp_path,
-            duration_seconds=probe_media_duration(video_path),
-            cancel_check=cancel_check,
-        )
-    except Exception as exc:
-        temp_path.unlink(missing_ok=True)
-        logs.append(f"[兼容] 转码异常，保留原视频: {exc}")
-        return video_path
-
-    if result.cancelled:
-        temp_path.unlink(missing_ok=True)
-        logs.append("[兼容] 转码已取消，保留原视频")
-        return video_path
-    if result.stalled:
-        temp_path.unlink(missing_ok=True)
-        logs.append("[兼容] 转码连续 5 分钟没有进度，保留原视频")
-        return video_path
-    if not result.success or not temp_path.exists() or temp_path.stat().st_size <= 10000:
-        temp_path.unlink(missing_ok=True)
-        logs.append(f"[兼容] 转码失败，保留原视频: {result.stderr[-200:]}")
-        return video_path
-
-    temp_path.replace(video_path)
-    logs.append("[兼容] 已生成 H.264 播放版本")
-    return video_path
-
-
-def _probe_video_codec(video_path: Path) -> str | None:
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=codec_name",
-                "-of",
-                "default=nw=1:nk=1",
-                str(video_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:
-        return None
-    if result.returncode != 0:
-        return None
-    return (result.stdout or "").strip().lower() or None
-
-
-def _is_valid_video_file(video_path: Path) -> bool:
-    codec = _probe_video_codec(video_path)
-    if not codec:
-        return False
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=format_name,duration",
-                "-of",
-                "json",
-                str(video_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:
-        return False
-    if result.returncode != 0:
-        return False
-    try:
-        payload = json.loads(result.stdout or "{}")
-        format_name = str(payload.get("format", {}).get("format_name") or "")
-        duration = float(payload.get("format", {}).get("duration") or 0)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return False
-    return duration > 0 and not format_name.startswith("jpeg_pipe")
 
 def _extract_douyin_video_id(url: str) -> Optional[str]:
     import httpx
@@ -671,156 +215,6 @@ def _extract_douyin_video_id_via_browser(url: str) -> Optional[str]:
             except Exception:
                 pass
     return None
-
-
-def _looks_like_douyin_video_url(url: str) -> bool:
-    lowered = url.lower()
-    video_markers = (
-        "mime_type=video",
-        "mime_type%3dvideo",
-        "video/tos",
-        "/obj/tos-",
-        "/tos-cn-",
-        "playwm",
-        "play_addr",
-        "video_id=",
-    )
-    if _is_douyin_media_host(url):
-        return any(marker in lowered for marker in video_markers)
-
-    # Douyin regularly serves signed video files from rotating CDN domains
-    # (for example sjxydc.com).  Keep this strict enough to avoid treating an
-    # arbitrary page video as content, while accepting those real CDN streams.
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return False
-    return bool(
-        parsed.netloc
-        and "/video/tos/" in parsed.path.lower()
-        and "mime_type=video" in parsed.query.lower()
-        and ("dy_q=" in parsed.query.lower() or "x_r_id=" in parsed.query.lower())
-    )
-
-
-def _looks_like_douyin_audio_url(url: str) -> bool:
-    lowered = url.lower()
-    if "media-audio" in lowered:
-        return True
-    if not _is_douyin_media_host(url):
-        return False
-    return "mime_type=audio" in lowered or "mime_type%3daudio" in lowered or "/audio/" in lowered
-
-
-def _is_douyin_media_host(url: str) -> bool:
-    try:
-        host = urlparse(url).netloc.lower()
-    except Exception:
-        return False
-    return any(
-        marker in host
-        for marker in (
-            "douyinvod.com",
-            "douyin.com",
-            "bytecdn.cn",
-            "bytedance.com",
-            "snssdk.com",
-        )
-    )
-
-
-def _browser_media_headers(captured: dict[str, str]) -> dict[str, str]:
-    """Forward only request headers needed by a signed CDN URL.
-
-    Browser cookies are deliberately excluded: the signed URL is sufficient
-    for the CDN and a raw login cookie must never be forwarded to a different
-    media host or persisted in a task log.
-    """
-    allowed = {"accept", "accept-language", "referer", "user-agent", "origin", "range"}
-    headers = {key: value for key, value in captured.items() if key.lower() in allowed}
-    headers.setdefault("referer", "https://www.douyin.com/")
-    headers.setdefault("accept", "*/*")
-    headers["accept-encoding"] = "identity"
-    return headers
-
-
-def _needs_douyin_media_refresh(status_code: int | None) -> bool:
-    """Return whether a captured signed media URL must be collected again."""
-    return status_code in {401, 403}
-
-
-def _douyin_video_variants(payload: object, video_id: str) -> list[tuple[str, int, str]]:
-    """Extract all signed video alternatives advertised for one work."""
-    aweme = _find_douyin_aweme(payload, video_id)
-    if not aweme:
-        return []
-    video = aweme.get("video") if isinstance(aweme.get("video"), dict) else {}
-    variants = video.get("bit_rate") if isinstance(video.get("bit_rate"), list) else []
-    candidates: list[tuple[str, int, str]] = []
-    for variant in variants:
-        if not isinstance(variant, dict):
-            continue
-        try:
-            bitrate = int(variant.get("bit_rate") or 0)
-        except (TypeError, ValueError):
-            continue
-        address = variant.get("play_addr") if isinstance(variant.get("play_addr"), dict) else {}
-        urls = address.get("url_list") if isinstance(address.get("url_list"), list) else []
-        media_url = next((url for url in urls if isinstance(url, str) and url.startswith(("https://", "http://"))), "")
-        if media_url and bitrate > 0:
-            candidates.append((media_url, bitrate, str(variant.get("gear_name") or "")))
-    # Older response shapes expose a single progressive stream at play_addr.
-    # It is useful for the direct provider even when no bitrate ladder exists.
-    if not candidates:
-        address = video.get("play_addr") if isinstance(video.get("play_addr"), dict) else {}
-        urls = address.get("url_list") if isinstance(address.get("url_list"), list) else []
-        media_url = next((url for url in urls if isinstance(url, str) and url.startswith(("https://", "http://"))), "")
-        if media_url:
-            candidates.append((media_url, 0, "默认"))
-    return candidates
-
-
-def _select_douyin_video_variant(
-    payload: object,
-    video_id: str,
-    quality: str,
-) -> tuple[str, int, str] | None:
-    candidates = _douyin_video_variants(payload, video_id)
-    if not candidates:
-        return None
-    quality = quality if quality in {"low", "standard", "high"} else "standard"
-    with_bitrate = [candidate for candidate in candidates if candidate[1] > 0]
-    if not with_bitrate:
-        return candidates[0]
-    if quality == "low":
-        return min(with_bitrate, key=lambda item: item[1])
-    if quality == "high":
-        return max(with_bitrate, key=lambda item: item[1])
-    # Standard quality favours the middle rung, avoiding the previous
-    # hard-coded lowest stream without forcing a 1080p download for ASR.
-    ordered = sorted(with_bitrate, key=lambda item: item[1])
-    return ordered[(len(ordered) - 1) // 2]
-
-
-def _lowest_douyin_video_variant(payload: object, video_id: str) -> tuple[str, int, str] | None:
-    """Compatibility wrapper for callers that explicitly request low quality."""
-    return _select_douyin_video_variant(payload, video_id, "low")
-
-
-def _douyin_quality_label(quality: str) -> str:
-    return {"low": "省流量", "standard": "标准", "high": "高质量"}.get(quality, "标准")
-
-
-def _is_preferred_douyin_bitrate(candidate: int, current: int | None, quality: str) -> bool:
-    if current is None:
-        return True
-    if quality == "low":
-        return candidate < current
-    if quality == "high":
-        return candidate > current
-    # For standard quality, compare positions against the 2 Mbps target rather
-    # than letting a late 1080p player request silently replace the selection.
-    return abs(candidate - 2_000_000) < abs(current - 2_000_000)
 
 
 def _download_douyin_via_public_metadata(
@@ -945,18 +339,6 @@ def _download_douyin_via_public_metadata(
         },
         logs=logs,
     )
-
-
-def _find_douyin_aweme(payload: object, video_id: str) -> dict | None:
-    return find_douyin_aweme(payload, video_id)
-
-
-def _is_douyin_work_payload_url(url: str) -> bool:
-    return "/aweme/v1/web/" in url and any(part in url for part in ("aweme/detail", "feed", "mix/aweme"))
-
-
-def _is_douyin_comment_payload_url(url: str) -> bool:
-    return "/aweme/v1/web/comment/list" in url or "/web/api/v2/comment/list" in url
 
 
 def _trigger_douyin_playback(page: object) -> None:
@@ -1466,105 +848,6 @@ def _browser_capture_failure_message(page_url: str, page_signals: str, has_cooki
     return "浏览器已打开抖音页面但未捕获媒体请求（可能是无头播放受限、页面风控或页面改版；并非已确认 Cookie 失效）"
 
 
-def _compress_video_for_storage(
-    video_path: Path,
-    logs: list[str],
-    *,
-    progress_callback: ProgressCallback | None = None,
-    cancel_check: CancelCheck | None = None,
-) -> Path:
-    if not settings.compress_downloaded_video:
-        return video_path
-
-    if not video_path.exists() or video_path.stat().st_size <= 10000:
-        return video_path
-
-    original_size = video_path.stat().st_size
-    temp_path = video_path.with_name(f"{video_path.stem}_compact_tmp.mp4")
-    final_path = video_path.with_name(f"{video_path.stem}_compact.mp4")
-    temp_path.unlink(missing_ok=True)
-
-    cmd = [
-        resolve_tool("ffmpeg") or "ffmpeg",
-        "-y",
-        "-i",
-        str(video_path),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a?",
-        "-vf",
-        (
-            f"scale=-2:min({settings.storage_video_max_height}\\,ih),"
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2"
-        ),
-        "-c:v",
-        "libx264",
-        "-preset",
-        settings.storage_video_preset,
-        "-crf",
-        str(settings.storage_video_crf),
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "160k",
-        "-movflags",
-        "+faststart",
-        str(temp_path),
-    ]
-
-    logs.append(
-        f"[压缩] 降低视频画质到约 {settings.storage_video_max_height}p，音频保留原码流..."
-    )
-    def report_compression_progress(progress: FfmpegProgress) -> None:
-        detail = "正在压缩视频缓存"
-        if progress.percent is not None:
-            detail += f"（{progress.percent:.0f}%）"
-        _report_phase(progress_callback, "caching", detail)
-
-    try:
-        result = run_ffmpeg(
-            cmd,
-            output_path=temp_path,
-            duration_seconds=probe_media_duration(video_path),
-            progress_callback=report_compression_progress,
-            cancel_check=cancel_check,
-        )
-    except Exception as exc:
-        temp_path.unlink(missing_ok=True)
-        logs.append(f"[压缩] ffmpeg 异常，保留原视频: {exc}")
-        return video_path
-    if result.cancelled:
-        temp_path.unlink(missing_ok=True)
-        logs.append("[压缩] 已取消，保留原视频")
-        return video_path
-    if result.stalled:
-        temp_path.unlink(missing_ok=True)
-        logs.append("[压缩] ffmpeg 连续 5 分钟没有进度，保留原视频")
-        return video_path
-
-    if not result.success or not temp_path.exists() or temp_path.stat().st_size <= 10000:
-        temp_path.unlink(missing_ok=True)
-        logs.append(f"[压缩] 失败，保留原视频: {result.stderr[-200:]}")
-        return video_path
-
-    compressed_size = temp_path.stat().st_size
-    if compressed_size >= original_size:
-        temp_path.unlink(missing_ok=True)
-        logs.append("[压缩] 原视频已足够小，保留原文件")
-        return video_path
-
-    final_path.unlink(missing_ok=True)
-    temp_path.replace(final_path)
-    if final_path != video_path:
-        video_path.unlink(missing_ok=True)
-
-    saved_mb = (original_size - compressed_size) / 1024 / 1024
-    logs.append(f"[压缩] 完成，节省约 {saved_mb:.1f}MB")
-    return final_path
-
 def _load_cookies_for_playwright() -> list:
     cookie_file = settings.data_dir / "douyin_cookies.txt"
     cookies: list[dict[str, str | bool]] = []
@@ -1589,12 +872,6 @@ def _load_cookies_for_playwright() -> list:
                 })
 
     return cookies
-
-def _load_info_json(output_dir: Path, video_id: str) -> dict:
-    info_file = output_dir / f"{video_id}.info.json"
-    if info_file.exists():
-        return json.loads(info_file.read_text())
-    return {}
 
 def get_video_info(url: str, platform: str = "") -> dict:
     if platform == "bilibili":

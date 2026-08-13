@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from html import unescape
 import re
-from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 try:

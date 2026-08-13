@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const source = await readFile(new URL('./PrimarySidebar.vue', import.meta.url), 'utf8')
+const source = await readFile(new URL('./LibrarySidebar.vue', import.meta.url), 'utf8')
 const linkDockSource = await readFile(new URL('./SidebarLinkDock.vue', import.meta.url), 'utf8')
 
-test('centres and enlarges file-tree toolbar actions without a top divider', () => {
-  assert.match(source, /<SvgMaskIcon :src="folderAddIcon" :size="24"\s*\/>/)
-  assert.match(source, /<SvgMaskIcon :src="markdownImportIcon" :size="24"\s*\/>/)
+test('centres file-tree toolbar actions at the same glyph size as the activity bar', () => {
+  assert.match(source, /<SvgMaskIcon :src="folderAddIcon" :size="18"\s*\/>/)
+  assert.match(source, /<SvgMaskIcon :src="markdownImportIcon" :size="18"\s*\/>/)
   assert.match(
     source,
     /\.sidebar-file-toolbar\s*\{[\s\S]*?justify-content:\s*center;[\s\S]*?min-height:\s*36px;[\s\S]*?padding-block:\s*0;[\s\S]*?border-top:\s*0;/,
@@ -15,6 +15,14 @@ test('centres and enlarges file-tree toolbar actions without a top divider', () 
   assert.match(
     source,
     /\.sidebar-file-toolbar \.sidebar-icon-button\s*\{[\s\S]*?width:\s*36px;[\s\S]*?height:\s*36px;/,
+  )
+})
+
+test('keeps the empty library and search result state readable', () => {
+  assert.match(source, /<div v-else class="sidebar-empty">/)
+  assert.match(
+    source,
+    /\.sidebar-empty\s*\{[\s\S]*?padding:\s*8px 5px;[\s\S]*?color:\s*var\(--vk-muted\);[\s\S]*?font-size:\s*var\(--vk-type-label-size\);/,
   )
 })
 

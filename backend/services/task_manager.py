@@ -22,7 +22,8 @@ from services.database import (
 from services.pipeline_runner import PipelineLog, PipelineRequest, PipelineResponse, classify_pipeline_error, run_pipeline_sync
 from services.repository import ContentRepository, TaskRepository
 from config import settings
-from services.telemetry import record as record_telemetry
+from services.telemetry import record as record_telemetry, telemetry_stage_bucket
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_request, xiaohongshu_capabilities
 
 
 TaskStatus = Literal["queued", "running", "paused", "succeeded", "failed", "cancelled"]
@@ -97,17 +98,6 @@ def _source_sync_identity(request: dict) -> tuple[str, str]:
     return kind, "bulk"
 
 
-def _duration_bucket(value: object) -> str:
-    seconds = float(value or 0)
-    if seconds < 10:
-        return "under_10s"
-    if seconds < 60:
-        return "10_60s"
-    if seconds < 300:
-        return "1_5m"
-    return "5m_plus"
-
-
 def _request_payload(record: TaskRecord) -> dict:
     return {
         "content_item_id": record.content_item_id,
@@ -162,6 +152,7 @@ class TaskManager:
         *,
         task_type: str = "process_video",
     ) -> TaskRecord:
+        require_xiaohongshu_request(request)
         task_id = str(uuid.uuid4())[:8]
         record = self._record_from_request(task_id, request, task_type=task_type)
         # A task is not accepted until its queue record is durable. Otherwise
@@ -270,13 +261,28 @@ class TaskManager:
         except Exception:
             return
 
+        recoverable: list[TaskRecord] = []
+        read_only_task_ids: set[str] = set()
+        xiaohongshu_features = xiaohongshu_capabilities()
+        for row in reversed(rows):
+            if row.task_type not in {"process_video", "generate_wechat_cover", "import_document", "source_sync"}:
+                continue
+            record = self._record_from_row(row)
+            if record is None:
+                continue
+            try:
+                require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)), capabilities=xiaohongshu_features)
+            except XiaohongshuCollectorUnavailable:
+                if record.status in {"queued", "running", "paused"}:
+                    # Leave active work untouched; terminal history loads read-only.
+                    continue
+                read_only_task_ids.add(record.task_id)
+            recoverable.append(record)
+
         recovered_state_changes: list[TaskRecord] = []
         with self._lock:
-            for row in reversed(rows):
-                if row.task_type not in {"process_video", "generate_wechat_cover", "import_document", "source_sync"} or row.id in self._tasks:
-                    continue
-                record = self._record_from_row(row)
-                if record is None:
+            for record in recoverable:
+                if record.task_id in self._tasks:
                     continue
                 if record.status == "running":
                     if record.task_type == "process_video" and record.execution_mode == "background":
@@ -300,7 +306,7 @@ class TaskManager:
         # tasks on startup, while preserving an item a user has already moved
         # out of the processing state.
         for record in self.list():
-            if record.status in {"succeeded", "failed", "cancelled"}:
+            if record.status in {"succeeded", "failed", "cancelled"} and record.task_id not in read_only_task_ids:
                 self._persist_content_status(record, only_if_processing=True)
         self._schedule_next()
 
@@ -308,13 +314,14 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status not in {"failed", "cancelled"}:
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.status = "queued"
             record.cancel_requested = False
             if record.share_text and not record.local_video_path and not record.local_subtitle_path:
@@ -333,13 +340,14 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status != "queued":
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.status = "paused"
             record.updated_at = _now_iso()
             if record.future:
@@ -358,13 +366,14 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status != "paused":
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.status = "queued"
             record.cancel_requested = False
             record.updated_at = _now_iso()
@@ -380,19 +389,26 @@ class TaskManager:
         with self._lock:
             record = self._tasks.get(task_id)
             if not record:
-                record = self._load_record_from_database(task_id)
+                record = self._load_record_for_control(task_id)
                 if record:
                     self._tasks[task_id] = record
             if not record:
                 return None
             if record.status not in {"queued", "paused"}:
                 return self._copy_record(record)
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
             record.priority = priority
             record.updated_at = _now_iso()
             snapshot = self._copy_record(record)
         self._persist_priority(snapshot)
         self._schedule_next()
         return self.get(task_id)
+
+    def _load_record_for_control(self, task_id: str) -> TaskRecord | None:
+        record = self._load_record_from_database(task_id)
+        if record is not None and record.status in {"queued", "running", "paused"}:
+            require_xiaohongshu_request(PipelineRequest.model_validate(_request_payload(record)))
+        return record
 
     def list(self) -> list[TaskRecord]:
         with self._lock:
@@ -573,7 +589,7 @@ class TaskManager:
                     current.content_item_id = result.content_item_id or current.content_item_id
                     current.updated_at = _now_iso()
                     snapshot = self._copy_record(current)
-                is_streamed_summary = bool(result.summary) and result.step == "summarize"
+                is_streamed_summary = result.step == "summarize" and bool(result.summary or result.reasoning_content)
                 now = time.monotonic()
                 if not is_streamed_summary or now - last_state_persist_at >= SUMMARY_STATE_PERSIST_INTERVAL_SECONDS:
                     self._persist_state(snapshot)
@@ -583,9 +599,10 @@ class TaskManager:
                 # bottleneck, while the final terminal state is still durable.
                 self._broadcast_update(snapshot)
                 stage = str(result.step or "")
-                if stage and stage != last_telemetry_stage:
-                    last_telemetry_stage = stage
-                    record_telemetry("pipeline_stage_completed", {"stage": stage[:40]})
+                stage_bucket = telemetry_stage_bucket(stage)
+                if stage and stage_bucket != last_telemetry_stage:
+                    last_telemetry_stage = stage_bucket
+                    record_telemetry("pipeline_stage_reached", {"stage": stage_bucket})
 
             def cancel_check() -> bool:
                 with self._lock:
@@ -701,31 +718,11 @@ class TaskManager:
                     logger.info("Could not record task completion notification", exc_info=True)
             if final_snapshot.status in {"succeeded", "failed"}:
                 if final_snapshot.status == "failed":
-                    record_telemetry("pipeline_stage_failed", {"stage": str(result.step or "unknown")[:40]})
+                    record_telemetry("pipeline_stage_failed", {"stage": telemetry_stage_bucket(result.step)})
                 record_telemetry(
                     "task_finished",
-                    {"result": final_snapshot.status, "stage": str(result.step or "unknown")[:40]},
+                    {"result": final_snapshot.status, "stage": telemetry_stage_bucket(result.step)},
                 )
-                timings = result.timings or {}
-                if "download" in timings or result.step == "download":
-                    record_telemetry(
-                        "media_download_completed",
-                        {"result": final_snapshot.status, "duration_bucket": _duration_bucket(timings.get("download"))},
-                    )
-                if "transcribe" in timings or result.step == "transcribe":
-                    record_telemetry(
-                        "asr_completed",
-                        {
-                            "backend": str(final_snapshot.asr_backend or "auto")[:40],
-                            "result": final_snapshot.status,
-                            "duration_bucket": _duration_bucket(timings.get("transcribe")),
-                        },
-                    )
-                if "summarize" in timings or result.step == "summarize":
-                    record_telemetry(
-                        "ai_summary_completed",
-                        {"result": final_snapshot.status, "duration_bucket": _duration_bucket(timings.get("summarize"))},
-                    )
             self._wake_openclaw_terminal_delivery()
         except Exception as exc:
             with self._lock:

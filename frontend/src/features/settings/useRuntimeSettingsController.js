@@ -19,7 +19,8 @@ function apiErrorMessage(error, fallback) {
 export function useRuntimeSettingsController({
   formatBytes,
   loadAiTokenUsageSummary,
-  requestDestructiveConfirmation
+  requestDestructiveConfirmation,
+  notify = ElMessage,
 }) {
   const mediaTools = ref({})
   const ffmpegPath = ref('')
@@ -66,13 +67,13 @@ export function useRuntimeSettingsController({
         { auto_summarize: manualAutoSummarize.value },
         { timeout: 10000 }
       )
-      ElMessage.success(
+      notify.success(
         manualAutoSummarize.value
           ? '主动收藏将自动生成 AI 总结'
           : '主动收藏将仅抓取正文，不自动总结'
       )
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, '主动收藏设置保存失败'))
+      notify.error(apiErrorMessage(error, '主动收藏设置保存失败'))
       await loadManualCollectionSettings().catch(() => null)
     }
   }
@@ -95,9 +96,15 @@ export function useRuntimeSettingsController({
   async function saveDeepSeekSettings() {
     savingDeepSeekSettings.value = true
     try {
+      // The generic provider editor may have changed this URL after the legacy
+      // pricing form was opened. Re-read the canonical profile so saving local
+      // cost estimates cannot overwrite a newer provider endpoint.
+      const canonical = await axios.get(LLM_SETTINGS_API, { timeout: 10000 })
+      const canonicalBaseUrl = String(canonical.data?.deepseek_base_url || deepseekBaseUrl.value).trim()
+      deepseekBaseUrl.value = canonicalBaseUrl
       const response = await axios.put(DEEPSEEK_SETTINGS_API, {
         deepseek_api_key: deepseekApiKey.value.trim() || undefined,
-        deepseek_base_url: deepseekBaseUrl.value.trim(),
+        deepseek_base_url: canonicalBaseUrl,
         deepseek_pricing: deepseekPricing.value,
         deepseek_peak_pricing_multiplier: deepseekPeakPricingMultiplier.value
       }, { timeout: 10000 })
@@ -108,9 +115,9 @@ export function useRuntimeSettingsController({
       deepseekPeakPricingMultiplier.value = Number(response.data?.deepseek_peak_pricing_multiplier ?? 1)
       deepseekApiKey.value = ''
       void loadAiTokenUsageSummary()
-      ElMessage.success('DeepSeek 配置已保存')
+      notify.success('DeepSeek 配置已保存')
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, 'DeepSeek 配置保存失败'))
+      notify.error(apiErrorMessage(error, 'DeepSeek 配置保存失败'))
     } finally {
       savingDeepSeekSettings.value = false
     }
@@ -124,9 +131,9 @@ export function useRuntimeSettingsController({
         deepseek_base_url: deepseekBaseUrl.value.trim() || undefined
       }, { timeout: 30000 })
       const elapsed = Number(response.data?.elapsed_ms || 0)
-      ElMessage.success(`DeepSeek 连接成功${elapsed ? ` · ${elapsed} ms` : ''}`)
+      notify.success(`DeepSeek 连接成功${elapsed ? ` · ${elapsed} ms` : ''}`)
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, 'DeepSeek 连接失败'))
+      notify.error(apiErrorMessage(error, 'DeepSeek 连接失败'))
     } finally {
       testingDeepSeekConnection.value = false
     }
@@ -144,9 +151,9 @@ export function useRuntimeSettingsController({
       embeddingBaseUrl.value = response.data?.campus_embedding_api_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1'
       embeddingModel.value = response.data?.campus_embedding_api_model || 'qwen3.7-text-embedding'
       embeddingApiKey.value = ''
-      ElMessage.success('Embedding 配置已保存')
+      notify.success('Embedding 配置已保存')
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, 'Embedding 配置保存失败'))
+      notify.error(apiErrorMessage(error, 'Embedding 配置保存失败'))
     } finally {
       savingEmbeddingSettings.value = false
     }
@@ -162,11 +169,11 @@ export function useRuntimeSettingsController({
       }, { timeout: 30000 })
       const elapsed = Number(response.data?.elapsed_ms || 0)
       const dimensions = Number(response.data?.dimensions || 0)
-      ElMessage.success(
+      notify.success(
         `Embedding 连接成功${dimensions ? ` · ${dimensions} 维` : ''}${elapsed ? ` · ${elapsed} ms` : ''}`
       )
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, 'Embedding 连接失败'))
+      notify.error(apiErrorMessage(error, 'Embedding 连接失败'))
     } finally {
       testingEmbeddingConnection.value = false
     }
@@ -192,9 +199,9 @@ export function useRuntimeSettingsController({
       paddleOcrBaseUrl.value = response.data?.base_url || 'https://paddleocr.aistudio-app.com/api/v2/ocr/jobs'
       paddleOcrModel.value = response.data?.model || 'PaddleOCR-VL-1.6'
       paddleOcrAccessToken.value = ''
-      ElMessage.success('PaddleOCR 配置已保存')
+      notify.success('PaddleOCR 配置已保存')
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, 'PaddleOCR 配置保存失败'))
+      notify.error(apiErrorMessage(error, 'PaddleOCR 配置保存失败'))
     } finally {
       savingPaddleOcrSettings.value = false
     }
@@ -215,9 +222,9 @@ export function useRuntimeSettingsController({
         yt_dlp_path: ytDlpPath.value.trim()
       }, { timeout: 10000 })
       mediaTools.value = response.data || {}
-      ElMessage.success('媒体工具路径已保存并检测')
+      notify.success('媒体工具路径已保存并检测')
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, '媒体工具路径不可用'))
+      notify.error(apiErrorMessage(error, '媒体工具路径不可用'))
     } finally {
       savingMediaTools.value = false
     }
@@ -245,7 +252,7 @@ export function useRuntimeSettingsController({
       runtimeComponents.value = response.data || { browser: {}, models: [] }
       scheduleRuntimeComponentsPoll()
     } catch (error) {
-      if (!silent) ElMessage.error(apiErrorMessage(error, '无法检查设备准备情况'))
+      if (!silent) notify.error(apiErrorMessage(error, '无法检查设备准备情况'))
     } finally {
       if (!silent) loadingRuntimeComponents.value = false
     }
@@ -257,7 +264,7 @@ export function useRuntimeSettingsController({
       runtimeComponents.value = { ...runtimeComponents.value, browser: response.data || {} }
       scheduleRuntimeComponentsPoll()
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, '浏览器组件下载未能启动'))
+      notify.error(apiErrorMessage(error, '浏览器组件下载未能启动'))
     }
   }
 
@@ -270,7 +277,7 @@ export function useRuntimeSettingsController({
       )
       await loadRuntimeComponents({ silent: true })
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, '语音识别模型下载未能启动'))
+      notify.error(apiErrorMessage(error, '语音识别模型下载未能启动'))
     }
   }
 
@@ -288,9 +295,9 @@ export function useRuntimeSettingsController({
         timeout: 15000
       })
       await loadRuntimeComponents({ silent: true })
-      ElMessage.success('本机模型已移除')
+      notify.success('本机模型已移除')
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, '移除本机模型失败'))
+      notify.error(apiErrorMessage(error, '移除本机模型失败'))
     }
   }
 

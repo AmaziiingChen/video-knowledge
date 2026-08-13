@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import RLock
 
 from config import ensure_private_data_directory, ensure_private_data_file, settings
-from services.database_migrations import MIGRATIONS, SCHEMA_VERSION, migration_named
+from services.database_migrations import MIGRATIONS, SCHEMA_VERSION, migration_named  # noqa: F401
 
 
 _DATABASE_INITIALIZE_LOCK = RLock()

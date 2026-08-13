@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from config import settings
 from routers.qa import QARequest, _timestamped_qa_transcript, ask_video_note
+from services.ai_response_envelope import AIResponseEnvelope
 from services.summarizer import build_qa_messages
 
 
@@ -28,7 +29,7 @@ def test_qa_prompt_keeps_timestamp_material_and_prohibits_invented_times():
         video_title="测试视频",
     )
 
-    source_context = messages[1].content
+    source_context = next(message.content for message in messages if message.role == "user" and "当前内容资料" in message.content)
     assert "[01:15](#video-t=75) 关键结论" in source_context
     assert "不得编造、估算或改写时间" in source_context
 
@@ -46,7 +47,7 @@ def test_normal_video_qa_sends_timestamped_material_and_normalizes_valid_answer_
                 "routers.qa._timestamped_qa_transcript",
                 return_value=("[01:15](#video-t=75) 关键结论", {75}),
             ),
-            patch("routers.qa.answer_question", return_value="答案见 [01:15]。") as answer_question,
+            patch("routers.qa.answer_question_envelope", return_value=AIResponseEnvelope(answer="答案见 [01:15]。")) as answer_question,
             patch("routers.qa._save_content_qa_exchange", return_value=None),
         ):
             response = ask_video_note(QARequest(question="结论在哪里？", content_item_id="video-1"))

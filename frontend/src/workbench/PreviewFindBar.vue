@@ -53,7 +53,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, Close, Search } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, Close, Search } from '../components/macosSymbolComponents.js'
 import SvgMaskIcon from '../components/SvgMaskIcon.vue'
 const magnifyingglassIcon = 'magnifyingglass'
 

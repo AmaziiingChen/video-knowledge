@@ -1,31 +1,22 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import ipaddress
-import io
 import json
-import os
 import re
-import shutil
-import subprocess
-import textwrap
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 from time import perf_counter
-from typing import Any, Callable, Literal
-from urllib.parse import quote
+from typing import Any, Callable
 
 import requests
-from bs4 import BeautifulSoup
-from markdown_it import MarkdownIt
-from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from config import settings
 from services.ai_call_logger import record_image_generation_call, tracked_llm_provider
+from services.wechat_cover_brief import (
+    CoverVisualBrief,
+    json_object as _json_object,
+    parse_visual_brief as _parse_visual_brief,
+    stored_visual_brief as _stored_visual_brief,
+)
 from services.database import connect, initialize_database, utc_now_iso
 from services.llm_provider import LLMMessage, LLMProvider, default_llm_provider
 from services.markdown_sync import get_markdown_state
@@ -43,11 +34,47 @@ from services.github_pages_deployment import (
     verify_github_pages_url,
 )
 from services.repository import new_id
-from services.wechat_report_layout import ReportSource, render_wechat_report
+from services.wechat_publishing_markdown import (
+    default_digest as _default_digest,
+    markdown_to_wechat_html,
+    plain_text as _plain_text,
+    wechat_digest as _wechat_digest,
+)
+from services.wechat_publishing_covers import (
+    cover_bytes as _cover_bytes,
+    has_persisted_cover as _has_persisted_cover,
+    local_cover_url as _local_cover_url,
+    normalized_cover_jpeg_bytes as _normalized_cover_jpeg_bytes,
+    remove_uncommitted_cover as _remove_uncommitted_cover,
+    validated_local_cover_path as _validated_local_cover_path,
+    write_local_cover as _write_local_cover,
+)
+from services.wechat_publishing_cover_policy import (
+    COVER_STYLE_LABELS,
+    COVER_STYLE_MINIMAL_ZINE,
+    QWEN_COVER_NEGATIVE_PROMPTS,  # noqa: F401 - legacy public import
+    WECHAT_COVER_QUEUE_TASK_TYPE,
+    cover_negative_prompt as _cover_negative_prompt,
+    cover_task_dict as _cover_task_dict,
+    cover_version_payload as _cover_version_payload,
+    image_visual_brief as _image_visual_brief,
+    normalize_cover_style as _normalize_cover_style,
+    report_type_label as _report_type_label,
+    resolve_required_prompt_inputs as _resolve_required_prompt_inputs,
+    select_cover_style_block as _select_cover_style_block,
+)
+from services.wechat_publishing_secrets import (
+    KeychainPublishingSecretStore,
+    PublishingCredentials,
+    QwenCoverCredentials,
+    WeChatPublishingError,
+)
+from services.wechat_publishing_report_rendering import render_report_html as _render_report_html
+
+__all__ = ["markdown_to_wechat_html"]
 
 
 WECHAT_API_BASE = "https://api.weixin.qq.com/cgi-bin"
-KEYCHAIN_SERVICE = "KnowledgeHub WeChat Publishing"
 KEYCHAIN_ACCOUNT = "wechat-publishing:default"
 QWEN_COVER_KEYCHAIN_ACCOUNT = "wechat-publishing:qwen-cover"
 REQUEST_TIMEOUT_SECONDS = 20
@@ -58,103 +85,6 @@ QWEN_COVER_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multi
 QWEN_COVER_MODEL = "qwen-image-2.0"
 WECHAT_COVER_PLANNER_TASK_TYPE = "wechat_cover_planner"
 WECHAT_COVER_IMAGE_TASK_TYPE = "wechat_cover_image"
-WECHAT_COVER_QUEUE_TASK_TYPE = "generate_wechat_cover"
-COVER_STYLE_MINIMAL_ZINE = "minimal_zine"
-COVER_STYLE_POETIC_ANIMATION = "poetic_animation"
-COVER_STYLE_TRANSPARENT_WATERCOLOR = "transparent_watercolor"
-COVER_STYLE_TWILIGHT_PAINTERLY = "twilight_painterly"
-COVER_STYLE_DUOTONE_RISOGRAPH = "duotone_risograph"
-COVER_STYLE_MODERN_GEOMETRIC = "modern_geometric"
-COVER_STYLE_EDITORIAL_COLLECTOR = "editorial_collector"
-COVER_STYLE_ORIENTAL_INK = "oriental_ink"
-COVER_STYLE_LABELS = {
-    COVER_STYLE_MINIMAL_ZINE: "Minimal Zine",
-    COVER_STYLE_POETIC_ANIMATION: "诗意动画背景插画",
-    COVER_STYLE_TRANSPARENT_WATERCOLOR: "雨幕透明水彩",
-    COVER_STYLE_TWILIGHT_PAINTERLY: "暮色氛围绘画",
-    COVER_STYLE_DUOTONE_RISOGRAPH: "两色孔版印刷",
-    COVER_STYLE_MODERN_GEOMETRIC: "现代几何平涂",
-    COVER_STYLE_EDITORIAL_COLLECTOR: "编辑型收藏海报",
-    COVER_STYLE_ORIENTAL_INK: "东方水墨留白",
-}
-TEXT_PERMITTED_COVER_STYLES = {
-    COVER_STYLE_MINIMAL_ZINE,
-    COVER_STYLE_DUOTONE_RISOGRAPH,
-    COVER_STYLE_EDITORIAL_COLLECTOR,
-}
-QWEN_ZINE_NEGATIVE_PROMPT = (
-    "全幅写实场景，高分辨率图库摄影，商业广告，产品宣传，巨大商业标题，"
-    "长段整齐文字，未指定文字，错误文字，乱码汉字，logo，品牌标志，CTA，"
-    "水印，二维码，光泽海报样机，桌面摆拍，电影光效，硬阴影，景深虚化，"
-    "3D，霓虹，干净企业矢量插画，可爱卡通，动漫，时尚大片，密集手账拼贴，"
-    "多主题拼贴，过多物件，过多颜色，可辨识人物肖像，主体畸变"
-)
-QWEN_POETIC_ANIMATION_NEGATIVE_PROMPT = (
-    "写实摄影，纪实摄影，图库摄影，3D，光泽CG，电影级写实渲染，景深虚化，"
-    "真实皮肤，过度精细人脸，Q版人物，儿童绘本，可爱贴纸，粗重描边，"
-    "企业矢量插画，信息图，PPT，UI，霓虹色，赛博朋克，拥挤场景，"
-    "巨大标题，汉字，字母，数字，标牌，logo，品牌标志，水印，二维码，"
-    "可辨识人物肖像，主体畸变"
-)
-QWEN_TRANSPARENT_WATERCOLOR_NEGATIVE_PROMPT = (
-    "写实摄影，图库摄影，3D，光泽CG，镜头光斑，景深虚化，厚重油画，"
-    "不透明厚涂，硬边矢量，粗黑描边，儿童课本插画，儿童绘本，Q版人物，"
-    "可爱贴纸，企业宣传插画，信息图，PPT，霓虹色，拥挤场景，"
-    "巨大标题，汉字，字母，数字，标牌，logo，品牌标志，水印，二维码，"
-    "可辨识人物肖像，主体畸变"
-)
-QWEN_TWILIGHT_PAINTERLY_NEGATIVE_PROMPT = (
-    "写实摄影，图库摄影，3D，光泽CG，镜头景深，清晰相机锐化，线稿插画，"
-    "粗重描边，儿童课本插画，儿童绘本，Q版，可爱卡通，企业矢量插画，"
-    "宣传合影，信息图，PPT，霓虹，赛博朋克，拥挤场景，"
-    "标题，文字，数字，标牌，logo，水印，二维码，可辨识人物肖像，主体畸变"
-)
-QWEN_DUOTONE_RISOGRAPH_NEGATIVE_PROMPT = (
-    "写实摄影，3D，光泽CG，平滑数字渐变，完美无颗粒表面，超过三种主色，"
-    "彩虹配色，企业矢量插画，可爱卡通，儿童绘本，信息图，PPT，产品广告，"
-    "巨大商业标题，长段文字，乱码汉字，logo，品牌标志，CTA，水印，二维码，"
-    "密集拼贴，可辨识人物肖像，主体畸变"
-)
-QWEN_MODERN_GEOMETRIC_NEGATIVE_PROMPT = (
-    "写实摄影，3D，光泽CG，复杂渐变，景深，厚重纹理，粗黑动漫描边，"
-    "儿童课本插画，儿童绘本，Q版，可爱贴纸，通用企业团队插画，"
-    "瑜伽健康素材插画，信息图，PPT，霓虹，密集小物件，巨大标题，"
-    "文字，数字，logo，品牌标志，水印，二维码，可辨识人物肖像，主体畸变"
-)
-QWEN_EDITORIAL_COLLECTOR_NEGATIVE_PROMPT = (
-    "写实图库摄影，商业广告，产品宣传，九宫格，信息墙，逐栏目拼贴，"
-    "密集手账，PPT，信息图，3D，光泽样机，霓虹，赛博朋克，巨大商业标题，"
-    "长段文字，乱码汉字，logo，品牌标志，CTA，二维码，水印，"
-    "可辨识人物肖像，主体畸变"
-)
-QWEN_ORIENTAL_INK_NEGATIVE_PROMPT = (
-    "写实摄影，3D，光泽CG，西式油画，厚重颜料，硬边矢量，粗黑动漫描边，"
-    "儿童课本插画，儿童绘本，古风游戏海报，仙侠宣传图，金色奢华边框，"
-    "饱和多彩背景，信息图，PPT，伪造书法，伪造印章，题字，文字，数字，"
-    "logo，品牌标志，水印，二维码，可辨识人物肖像，主体畸变"
-)
-QWEN_COVER_NEGATIVE_PROMPTS = {
-    COVER_STYLE_MINIMAL_ZINE: QWEN_ZINE_NEGATIVE_PROMPT,
-    COVER_STYLE_POETIC_ANIMATION: QWEN_POETIC_ANIMATION_NEGATIVE_PROMPT,
-    COVER_STYLE_TRANSPARENT_WATERCOLOR: QWEN_TRANSPARENT_WATERCOLOR_NEGATIVE_PROMPT,
-    COVER_STYLE_TWILIGHT_PAINTERLY: QWEN_TWILIGHT_PAINTERLY_NEGATIVE_PROMPT,
-    COVER_STYLE_DUOTONE_RISOGRAPH: QWEN_DUOTONE_RISOGRAPH_NEGATIVE_PROMPT,
-    COVER_STYLE_MODERN_GEOMETRIC: QWEN_MODERN_GEOMETRIC_NEGATIVE_PROMPT,
-    COVER_STYLE_EDITORIAL_COLLECTOR: QWEN_EDITORIAL_COLLECTOR_NEGATIVE_PROMPT,
-    COVER_STYLE_ORIENTAL_INK: QWEN_ORIENTAL_INK_NEGATIVE_PROMPT,
-}
-_COVER_STYLE_BLOCK = re.compile(
-    r"\[\[STYLE:([a-z_]+)\]\](.*?)\[\[/STYLE\]\]",
-    re.DOTALL,
-)
-# The draft API reports the article digest as ``description`` and rejects it
-# once its UTF-8 payload exceeds this limit.  Character-count truncation is
-# unsafe for Chinese reports, because one Han character occupies three bytes.
-WECHAT_DIGEST_MAX_BYTES = 120
-
-
-class WeChatPublishingError(RuntimeError):
-    """A safe, user-facing official-account publishing error."""
 
 
 class WeChatIpWhitelistError(WeChatPublishingError):
@@ -163,167 +93,6 @@ class WeChatIpWhitelistError(WeChatPublishingError):
     def __init__(self, message: str, *, current_ip: str = "") -> None:
         super().__init__(message)
         self.current_ip = current_ip
-
-
-@dataclass(frozen=True)
-class PublishingCredentials:
-    app_id: str
-    app_secret: str
-
-
-@dataclass(frozen=True)
-class QwenCoverCredentials:
-    api_key: str
-
-
-class CoverVisualBrief(BaseModel):
-    """The editable contract between editorial planning and image generation."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    cover_style: Literal[
-        "minimal_zine",
-        "poetic_animation",
-        "transparent_watercolor",
-        "twilight_painterly",
-        "duotone_risograph",
-        "modern_geometric",
-        "editorial_collector",
-        "oriental_ink",
-    ] = COVER_STYLE_MINIMAL_ZINE
-    core_theme: str = Field(min_length=2, max_length=160)
-    selection_reason: str = Field(min_length=2, max_length=500)
-    evidence_sections: list[str] = Field(min_length=1, max_length=8)
-    confidence: float = Field(ge=0, le=1)
-    content_category: str = Field(min_length=1, max_length=80)
-    primary_subject: str = Field(min_length=2, max_length=240)
-    scene: str = Field(min_length=2, max_length=400)
-    visual_metaphor: str = Field(default="", max_length=240)
-    decorative_microcopy: str = Field(default="", max_length=28)
-    rendering_style: str = Field(min_length=2, max_length=240)
-    mood: str = Field(min_length=1, max_length=160)
-    palette: str = Field(min_length=1, max_length=240)
-    composition: str = Field(min_length=2, max_length=400)
-    supporting_elements: list[str] = Field(default_factory=list, max_length=2)
-    factual_constraints: list[str] = Field(default_factory=list, max_length=8)
-    must_avoid: list[str] = Field(default_factory=list, max_length=12)
-
-    @field_validator(
-        "core_theme",
-        "selection_reason",
-        "content_category",
-        "primary_subject",
-        "scene",
-        "visual_metaphor",
-        "decorative_microcopy",
-        "rendering_style",
-        "mood",
-        "palette",
-        "composition",
-        mode="before",
-    )
-    @classmethod
-    def _strip_text(cls, value: Any) -> str:
-        return " ".join(str(value or "").split())
-
-    @field_validator(
-        "evidence_sections",
-        "supporting_elements",
-        "factual_constraints",
-        "must_avoid",
-        mode="before",
-    )
-    @classmethod
-    def _clean_string_list(cls, value: Any) -> list[str]:
-        if isinstance(value, str):
-            value = [line for line in value.splitlines() if line.strip()]
-        if not isinstance(value, list):
-            return []
-        return [" ".join(str(item).split()) for item in value if str(item).strip()]
-
-
-class KeychainPublishingSecretStore:
-    """Store the AppSecret in Keychain, never in SQLite or UI responses."""
-
-    def _security_command(self) -> str:
-        command = shutil.which("security")
-        if not command:
-            raise WeChatPublishingError("当前系统未提供 macOS Keychain，无法保存公众号 AppSecret")
-        return command
-
-    def save(self, keychain_ref: str, credentials: PublishingCredentials) -> None:
-        self._save_json(keychain_ref, {"app_id": credentials.app_id, "app_secret": credentials.app_secret})
-
-    def save_qwen_cover(self, keychain_ref: str, credentials: QwenCoverCredentials) -> None:
-        self._save_json(keychain_ref, {"api_key": credentials.api_key})
-
-    def _save_json(self, keychain_ref: str, payload: dict[str, str]) -> None:
-        try:
-            result = subprocess.run(
-                [
-                    self._security_command(),
-                    "add-generic-password",
-                    "-U",
-                    "-a",
-                    keychain_ref,
-                    "-s",
-                    KEYCHAIN_SERVICE,
-                    "-w",
-                    json.dumps(payload),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=5,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise WeChatPublishingError("写入公众号 AppSecret 超时，请检查钥匙串访问权限") from exc
-        if result.returncode != 0:
-            raise WeChatPublishingError("无法写入公众号 AppSecret，请检查钥匙串访问权限")
-
-    def load(self, keychain_ref: str) -> PublishingCredentials:
-        payload = self._load_json(keychain_ref)
-        credentials = PublishingCredentials(
-            app_id=str(payload.get("app_id") or "").strip(),
-            app_secret=str(payload.get("app_secret") or "").strip(),
-        )
-        if not credentials.app_id or not credentials.app_secret:
-            raise WeChatPublishingError("公众号 AppID 或 AppSecret 不完整，请重新配置")
-        return credentials
-
-    def load_qwen_cover(self, keychain_ref: str) -> QwenCoverCredentials:
-        payload = self._load_json(keychain_ref, missing_message="未找到千问封面 API Key，请在设置中重新配置")
-        credentials = QwenCoverCredentials(api_key=str(payload.get("api_key") or "").strip())
-        if not credentials.api_key:
-            raise WeChatPublishingError("千问封面 API Key 不完整，请重新配置")
-        return credentials
-
-    def _load_json(self, keychain_ref: str, *, missing_message: str = "未找到公众号 AppSecret，请在设置中重新配置") -> dict[str, Any]:
-        try:
-            result = subprocess.run(
-                [
-                    self._security_command(),
-                    "find-generic-password",
-                    "-a",
-                    keychain_ref,
-                    "-s",
-                    KEYCHAIN_SERVICE,
-                    "-w",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=5,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise WeChatPublishingError("读取公众号 AppSecret 超时，请检查钥匙串访问权限") from exc
-        if result.returncode != 0:
-            raise WeChatPublishingError(missing_message)
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise WeChatPublishingError("公众号 AppSecret 已损坏，请重新配置") from exc
-        return payload if isinstance(payload, dict) else {}
 
 
 class WeChatPublishingService:
@@ -696,7 +465,7 @@ class WeChatPublishingService:
             "can_publish": bool(self.settings()["configured"]),
             "public_site_configured": bool(self.settings().get("public_site_base_url")),
             "latest_publication": latest_publication,
-            "preview_html": self._render_report_html(report, markdown, digest),
+            "preview_html": _render_report_html(report, markdown, digest),
             "cover_url": str(report.get("cover_url") or ""),
             "cover_status": str(report.get("cover_status") or ""),
             "cover_visual_brief": visual_brief,
@@ -971,7 +740,7 @@ class WeChatPublishingService:
             raise WeChatPublishingError("草稿标题不能超过 64 个字符")
 
         article_digest = _wechat_digest(str(digest or _default_digest(state.markdown)).strip())
-        body_html = self._render_report_html(
+        body_html = _render_report_html(
             report,
             state.markdown,
             article_digest,
@@ -1453,56 +1222,6 @@ class WeChatPublishingService:
             raise WeChatPublishingError("只有日报、周报和区间报告可以存入公众号草稿箱")
         return report
 
-    def _render_report_html(
-        self,
-        report: dict[str, Any],
-        markdown: str,
-        digest: str,
-        *,
-        title: str | None = None,
-    ) -> str:
-        return render_wechat_report(
-            title=str(title or report.get("title") or "报告"),
-            markdown=markdown,
-            digest=digest,
-            report_type=str(report.get("report_type") or "range"),
-            sources=self._report_sources(report),
-        )
-
-    def _report_sources(self, report: dict[str, Any]) -> list[ReportSource]:
-        try:
-            coverage = json.loads(str(report.get("source_coverage_json") or "[]"))
-        except json.JSONDecodeError:
-            coverage = []
-        entries = [entry for entry in coverage if isinstance(entry, dict) and entry.get("citation_id") and entry.get("content_item_id")]
-        if not entries:
-            return []
-        ids = [str(entry["content_item_id"]) for entry in entries]
-        placeholders = ",".join("?" for _ in ids)
-        with connect() as connection:
-            rows = connection.execute(
-                f"""SELECT c.id, c.title, c.source_url, c.published_at,
-                           COALESCE(NULLIF(c.source_name, ''), ws.mp_name, rss.title, '') AS publisher
-                      FROM content_items c
-                      LEFT JOIN wechat_subscription_items wsi ON wsi.content_item_id=c.id
-                      LEFT JOIN wechat_subscriptions ws ON ws.id=wsi.subscription_id
-                      LEFT JOIN rss_source_items rsi ON rsi.content_item_id=c.id
-                      LEFT JOIN rss_sources rss ON rss.id=rsi.source_id
-                     WHERE c.id IN ({placeholders})""",
-                ids,
-            ).fetchall()
-        by_id = {str(row["id"]): dict(row) for row in rows}
-        return [
-            ReportSource(
-                citation_id=str(entry["citation_id"]),
-                title=str((by_id.get(str(entry["content_item_id"])) or {}).get("title") or "原始文章"),
-                url=str((by_id.get(str(entry["content_item_id"])) or {}).get("source_url") or ""),
-                publisher=str((by_id.get(str(entry["content_item_id"])) or {}).get("publisher") or ""),
-                published_at=str((by_id.get(str(entry["content_item_id"])) or {}).get("published_at") or ""),
-            )
-            for entry in entries
-        ]
-
     def _current_public_ipv4(self) -> str:
         """Return the direct IPv4 that will be used for the WeChat route."""
         try:
@@ -1625,385 +1344,6 @@ class WeChatPublishingService:
         if not media_id:
             raise WeChatPublishingError("公众号未返回封面素材标识")
         return media_id
-
-
-def markdown_to_wechat_html(markdown: str) -> str:
-    """Render the report body to conservative HTML accepted by WeChat drafts."""
-    source = _strip_report_frontmatter(markdown)
-    renderer = MarkdownIt("commonmark", {"html": False, "breaks": False}).enable("table")
-    html = renderer.render(source)
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all(["script", "style", "iframe", "form", "input", "button"]):
-        tag.decompose()
-    for tag in soup.find_all(True):
-        allowed = {"p", "br", "strong", "em", "del", "blockquote", "ul", "ol", "li", "h1", "h2", "h3", "h4", "table", "thead", "tbody", "tr", "th", "td", "a", "img", "hr", "code", "pre"}
-        if tag.name not in allowed:
-            tag.unwrap()
-            continue
-        attributes = {}
-        if tag.name == "a" and tag.get("href"):
-            attributes["href"] = str(tag["href"])
-        if tag.name == "img" and tag.get("src"):
-            attributes["src"] = str(tag["src"])
-        if tag.name in {"img", "a"} and tag.get("title"):
-            attributes["title"] = str(tag["title"])
-        tag.attrs = attributes
-    return str(soup)
-
-
-def _strip_report_frontmatter(markdown: str) -> str:
-    source = str(markdown or "").strip()
-    source = source.replace("\r\n", "\n")
-    source = source.replace("\r", "\n")
-    if source.startswith("---\n"):
-        closing = source.find("\n---", 4)
-        if closing >= 0:
-            source = source[closing + 4 :].lstrip("\n")
-    # The reader already presents the document title. Avoid a duplicated H1 in
-    # the public article while retaining all report headings below it.
-    return _drop_first_heading(source)
-
-
-def _drop_first_heading(markdown: str) -> str:
-    lines = markdown.splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("# "):
-            return "\n".join(lines[:index] + lines[index + 1 :]).lstrip()
-        if line.strip():
-            break
-    return markdown
-
-
-def _default_digest(markdown: str) -> str:
-    # The first line in a generated report is an internal production note
-    # (group / analyzed count / citations).  It must never become the reader
-    # facing WeChat digest.
-    lines = [
-        line
-        for line in str(markdown or "").splitlines()
-        if not line.strip().startswith("> 分组：") and not line.strip().startswith("[^S")
-    ]
-    text = _plain_text("\n".join(lines))
-    return textwrap.shorten(text, width=120, placeholder="…") if text else ""
-
-
-def _wechat_digest(value: str) -> str:
-    """Keep the digest under WeChat's byte-based description limit."""
-    return _truncate_utf8(str(value or "").strip(), WECHAT_DIGEST_MAX_BYTES)
-
-
-def _truncate_utf8(value: str, max_bytes: int) -> str:
-    kept: list[str] = []
-    size = 0
-    for character in value:
-        character_size = len(character.encode("utf-8"))
-        if size + character_size > max_bytes:
-            break
-        kept.append(character)
-        size += character_size
-    return "".join(kept)
-
-
-def _plain_text(value: str) -> str:
-    return " ".join(BeautifulSoup(str(value or ""), "html.parser").get_text(" ", strip=True).split())
-
-
-def _cover_bytes(
-    cover_url: str,
-    *,
-    cover_path: str = "",
-) -> tuple[bytes, str, str]:
-    if cover_path:
-        path = Path(cover_path).expanduser().resolve()
-        try:
-            path.relative_to(settings.data_dir.expanduser().resolve())
-        except ValueError as exc:
-            raise WeChatPublishingError("本地封面路径不在 KnowledgeHub 数据目录中") from exc
-        if path.is_file():
-            mime_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
-            return path.read_bytes(), path.name, mime_type
-    value = str(cover_url or "").strip()
-    if value.startswith(("data:image/jpeg;base64,", "data:image/jpg;base64,")) and "," in value:
-        _, encoded = value.split(",", 1)
-        try:
-            return base64.b64decode(encoded, validate=True), "report-cover.jpg", "image/jpeg"
-        except (ValueError, TypeError):
-            pass
-    if value.startswith("data:image/png;base64,") and "," in value:
-        _, encoded = value.split(",", 1)
-        try:
-            return base64.b64decode(encoded, validate=True), "report-cover.png", "image/png"
-        except (ValueError, TypeError):
-            pass
-    image = Image.new("RGB", (900, 500), "#FDF6E3")
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((54, 54, 846, 446), radius=34, fill="#E8DECB")
-    draw.rectangle((104, 130, 620, 154), fill="#3D3A32")
-    draw.rectangle((104, 190, 760, 206), fill="#8E877A")
-    draw.rectangle((104, 226, 690, 242), fill="#8E877A")
-    draw.rectangle((104, 338, 370, 354), fill="#8E877A")
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue(), "knowledgehub-report-cover.png", "image/png"
-
-
-def _normalized_cover_jpeg_bytes(image_bytes: bytes) -> bytes:
-    """Return a compact, predictable cover ready for local persistence."""
-    try:
-        with Image.open(io.BytesIO(image_bytes)) as image:
-            normalized = ImageOps.fit(
-                image.convert("RGB"),
-                (900, 383),
-                method=Image.Resampling.LANCZOS,
-                centering=(0.5, 0.5),
-            )
-            buffer = io.BytesIO()
-            normalized.save(buffer, format="JPEG", quality=88, optimize=True)
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
-        raise WeChatPublishingError("千问返回的封面不是有效图片，请重试") from exc
-    return buffer.getvalue()
-
-
-def _write_local_cover(content_item_id: str, image_bytes: bytes) -> Path:
-    """Atomically replace the current local file only after normalization."""
-    safe_id = "".join(character for character in content_item_id if character.isalnum() or character in "-_")
-    if not safe_id:
-        raise WeChatPublishingError("报告标识无效，无法保存封面")
-    directory = settings.data_dir / "report_covers" / safe_id
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / f"cover-{hashlib.sha256(image_bytes).hexdigest()[:16]}.jpg"
-    temporary_path: Path | None = None
-    try:
-        with NamedTemporaryFile(
-            mode="wb",
-            prefix="cover-",
-            suffix=".jpg.tmp",
-            dir=directory,
-            delete=False,
-        ) as handle:
-            handle.write(image_bytes)
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary_path = Path(handle.name)
-        os.replace(temporary_path, target)
-    finally:
-        if temporary_path and temporary_path.exists():
-            temporary_path.unlink(missing_ok=True)
-    return target.resolve()
-
-
-def _remove_uncommitted_cover(cover_path: str) -> None:
-    path = Path(cover_path).expanduser().resolve()
-    try:
-        path.relative_to((settings.data_dir / "report_covers").resolve())
-    except ValueError:
-        return
-    if path.is_file():
-        path.unlink(missing_ok=True)
-
-
-def _validated_local_cover_path(cover_path: str) -> Path:
-    path = Path(cover_path).expanduser().resolve()
-    try:
-        path.relative_to((settings.data_dir / "report_covers").resolve())
-    except ValueError as exc:
-        raise WeChatPublishingError("封面版本不在 KnowledgeHub 数据目录中") from exc
-    if not path.is_file():
-        raise WeChatPublishingError("本地封面文件已不存在")
-    return path
-
-
-def _cover_version_payload(
-    row: dict[str, Any],
-    *,
-    current_path: str,
-) -> dict[str, Any] | None:
-    try:
-        path = _validated_local_cover_path(str(row.get("cover_path") or ""))
-    except WeChatPublishingError:
-        return None
-    content_hash = str(row.get("content_hash") or "").strip()
-    version = content_hash or str(row.get("id") or "")
-    brief = _json_object(row.get("visual_brief_json"))
-    metadata = _json_object(row.get("prompt_metadata_json"))
-    style = str(
-        brief.get("cover_style")
-        or metadata.get("cover_style")
-        or COVER_STYLE_MINIMAL_ZINE
-    )
-    try:
-        normalized_current = (
-            Path(current_path).expanduser().resolve() if current_path else None
-        )
-    except OSError:
-        normalized_current = None
-    return {
-        "id": str(row.get("id") or ""),
-        "url": _local_cover_url(path, version=version[:12]),
-        "selected": bool(normalized_current and path == normalized_current),
-        "created_at": str(row.get("created_at") or ""),
-        "cover_style": style,
-        "cover_style_label": COVER_STYLE_LABELS.get(style, style),
-    }
-
-
-def _local_cover_url(path: Path, *, version: str) -> str:
-    return (
-        "http://127.0.0.1:8000/api/media?"
-        f"path={quote(str(path), safe='')}&v={quote(str(version), safe='')}"
-    )
-
-
-def _has_persisted_cover(cover_url: str, cover_path: str) -> bool:
-    if cover_path and Path(cover_path).expanduser().is_file():
-        return True
-    return str(cover_url or "").startswith("data:image/")
-
-
-def _json_object(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return dict(value)
-    try:
-        parsed = json.loads(str(value or "{}"))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _resolve_required_prompt_inputs(
-    template: str,
-    inputs: dict[str, tuple[str, str]],
-) -> str:
-    """Resolve managed variables and retain required runtime inputs if removed."""
-    source = str(template or "")
-    resolved = source
-    missing: list[tuple[str, str]] = []
-    for variable, (label, value) in inputs.items():
-        if variable in source:
-            resolved = resolved.replace(variable, value)
-        else:
-            missing.append((label, value))
-    if missing:
-        fallback = "\n\n".join(f"{label}：\n{value}" for label, value in missing)
-        resolved = f"{resolved.rstrip()}\n\n运行时必要输入：\n{fallback}"
-    return resolved.strip()
-
-
-def _image_visual_brief(visual_brief: CoverVisualBrief) -> str:
-    """Keep editorial reasoning out of the image model's attention budget."""
-    def line(label: str, value: str) -> str | None:
-        cleaned = " ".join(str(value or "").split())
-        return f"{label}：{cleaned}" if cleaned else None
-
-    visual_elements = [
-        item
-        for item in visual_brief.supporting_elements
-        if not str(item).strip().startswith("微型排字：")
-    ]
-    lines = [
-        line("唯一主题", visual_brief.core_theme),
-        line("主视觉主体", visual_brief.primary_subject),
-        line("场景与动作", visual_brief.scene),
-        line("视觉隐喻", visual_brief.visual_metaphor),
-        line("辅助视觉元素", "；".join(visual_elements)),
-        line("表现媒介", visual_brief.rendering_style),
-        line("画面情绪", visual_brief.mood),
-        line("色彩", visual_brief.palette),
-        line("横版构图", visual_brief.composition),
-        line("避免", "；".join(visual_brief.must_avoid)),
-    ]
-    microcopy = visual_brief.decorative_microcopy
-    if microcopy and visual_brief.cover_style in TEXT_PERMITTED_COVER_STYLES:
-        lines.append(f"允许的唯一装饰微文案：{microcopy}")
-    else:
-        lines.append("允许的唯一装饰微文案：无")
-    return "\n".join(item for item in lines if item)
-
-
-def _normalize_cover_style(value: Any) -> str:
-    style = str(value or COVER_STYLE_MINIMAL_ZINE).strip()
-    if style not in COVER_STYLE_LABELS:
-        raise WeChatPublishingError("不支持的公众号封面风格")
-    return style
-
-
-def _select_cover_style_block(template: str, cover_style: str) -> str:
-    """Keep common prompt text and only the explicitly selected style block."""
-    style = _normalize_cover_style(cover_style)
-    source = str(template or "")
-    matches = list(_COVER_STYLE_BLOCK.finditer(source))
-    if not matches:
-        # Custom prompts created before style presets remain usable. The
-        # selected key is still available through the managed variable.
-        return source
-    available = {match.group(1) for match in matches}
-    if style not in available:
-        raise WeChatPublishingError(
-            f"当前提示词缺少“{COVER_STYLE_LABELS[style]}”风格区块"
-        )
-    return _COVER_STYLE_BLOCK.sub(
-        lambda match: match.group(2).strip() if match.group(1) == style else "",
-        source,
-    )
-
-
-def _cover_negative_prompt(cover_style: str) -> str:
-    style = _normalize_cover_style(cover_style)
-    return QWEN_COVER_NEGATIVE_PROMPTS[style]
-
-
-def _stored_visual_brief(report: dict[str, Any]) -> dict[str, Any]:
-    value = _json_object(report.get("cover_plan_json"))
-    if not value:
-        return {}
-    try:
-        return CoverVisualBrief.model_validate(value).model_dump()
-    except ValidationError:
-        return {}
-
-
-def _parse_visual_brief(value: Any) -> CoverVisualBrief:
-    if isinstance(value, CoverVisualBrief):
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("```"):
-            text = text.removeprefix("```json").removeprefix("```")
-            text = text.rsplit("```", 1)[0].strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start < 0 or end < start:
-            raise WeChatPublishingError("文本模型没有返回有效的封面视觉策划")
-        try:
-            value = json.loads(text[start : end + 1])
-        except json.JSONDecodeError as exc:
-            raise WeChatPublishingError("文本模型返回的封面视觉策划不是合法 JSON") from exc
-    try:
-        return CoverVisualBrief.model_validate(value)
-    except ValidationError as exc:
-        fields = sorted({".".join(str(part) for part in item["loc"]) for item in exc.errors()})
-        detail = "、".join(fields[:5])
-        raise WeChatPublishingError(f"封面视觉策划字段不完整：{detail}") from exc
-
-
-def _cover_task_dict(task: Any) -> dict[str, Any]:
-    result = getattr(task, "result", None)
-    return {
-        "task_id": str(task.task_id),
-        "task_type": str(getattr(task, "task_type", WECHAT_COVER_QUEUE_TASK_TYPE)),
-        "content_item_id": str(task.content_item_id or ""),
-        "status": str(task.status),
-        "step": str(getattr(result, "step", "") or ""),
-        "error": str(getattr(result, "error", "") or ""),
-    }
-
-
-def _report_type_label(report_type: str) -> str:
-    return {
-        "daily": "日报",
-        "weekly": "周报",
-        "range": "专题汇总",
-    }.get(report_type, "报告")
 
 
 def _response_json(response: Any, fallback: str) -> dict[str, Any]:

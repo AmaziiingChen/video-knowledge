@@ -1,20 +1,30 @@
 import hmac
+import importlib.util
 import os
 import re
 from contextlib import asynccontextmanager
 
+from config import settings
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import importlib.util
-
-from config import settings
 from router_registry import register_api_routers
-from services.llm_provider import DEEPSEEK_MODEL_OPTIONS, deepseek_model_option_value
+from services.application_lifecycle import start_application, stop_application
+from services.llm_provider import deepseek_model_option_value
+from services.llm_settings import (
+    available_text_model_options,
+    default_text_model_selection,
+    text_model_configured,
+)
+from services.mcp_bridge_security import (
+    MCP_TOKEN_ENV,
+    MCP_TOKEN_HEADER,
+    is_mcp_api_request_allowed,
+    mcp_bridge_lease_is_valid,
+)
 from services.pipeline_runner import ASR_MODEL_STRATEGIES, WHISPER_MODELS
 from services.runtime_components import supported_asr_backends
 from services.task_manager import TaskPersistenceError
-from services.application_lifecycle import start_application, stop_application
 
 
 @asynccontextmanager
@@ -26,7 +36,7 @@ async def application_lifespan(_app: FastAPI):
         await stop_application()
 
 
-app = FastAPI(title="KnowledgeHub Pipeline", version="0.1.0", lifespan=application_lifespan)
+app = FastAPI(title="KnowledgeHub Pipeline", version="0.1.3", lifespan=application_lifespan)
 
 
 @app.exception_handler(TaskPersistenceError)
@@ -67,6 +77,30 @@ async def require_desktop_instance_token(request: Request, call_next):
     is_health_check = request.url.path == "/api/health"
     is_preflight = request.method.upper() == "OPTIONS"
     if request.url.path.startswith("/api/") and not is_health_check and not is_preflight:
+        received_mcp_token = request.headers.get(MCP_TOKEN_HEADER, "")
+        if received_mcp_token:
+            expected_mcp_token = os.environ.get(MCP_TOKEN_ENV, "").strip()
+            if request.headers.get("origin", ""):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "MCP capability 不接受浏览器来源请求"},
+                )
+            if not expected_mcp_token or not hmac.compare_digest(received_mcp_token, expected_mcp_token):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "KnowledgeHub MCP 请求未获授权"},
+                )
+            if not is_mcp_api_request_allowed(request.method, request.url.path):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "KnowledgeHub MCP capability 不允许访问此 API"},
+                )
+            if not mcp_bridge_lease_is_valid():
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "KnowledgeHub MCP 会话已失效，请重新启动应用"},
+                )
+            return await call_next(request)
         if not _is_allowed_local_origin(request):
             return JSONResponse(
                 status_code=403,
@@ -112,7 +146,9 @@ async def get_config():
         "deepseek_configured": bool(settings.deepseek_api_key),
         "deepseek_model": settings.deepseek_model,
         "deepseek_model_option": deepseek_model_option_value(settings.deepseek_model),
-        "available_ai_models": DEEPSEEK_MODEL_OPTIONS,
+        "text_model_configured": text_model_configured(),
+        "default_ai_model": default_text_model_selection(),
+        "available_ai_models": available_text_model_options(),
         "whisper_model": settings.whisper_model,
         "available_whisper_models": sorted(WHISPER_MODELS),
         "asr_backend": settings.asr_backend,

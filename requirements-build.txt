@@ -1,0 +1,3 @@
+# Desktop packaging only.  This is intentionally separate from the runtime
+# manifest so local users do not install the packager merely to run the app.
+pyinstaller==6.21.0

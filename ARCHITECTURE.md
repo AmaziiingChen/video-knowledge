@@ -61,13 +61,34 @@ The current `composables/`, `workbench/`, `routers/`, and `services/` directorie
 | `features/wechat/useWechatCoverController.js` | cover planning, history selection, task polling and cleanup | publication credentials, report generation, editor rendering |
 | `features/wechat/useWechatAccountController.js` | account authorization, QR polling, manual credential handoff, account transfer and public-account search | subscription sync queue, subscription filters, report-group refresh |
 | `features/wechat/useWechatSubscriptionSyncController.js` | single/bulk subscription task enqueueing, observer progress and completion feedback | account authorization, subscription loading, filters and report groups |
+| `features/wechat/useWechatSubscriptionManagementController.js` | subscription creation, optimistic edits, bounded batch changes, profile refresh and initial-sync library refresh | account authorization, full subscription snapshot loading, sync task status and report groups |
+| `features/reports/useWechatReportGenerationController.js` | report preflight, user confirmation/cancel, event-stream progress, process-log updates and post-generation refresh | report-group CRUD/scheduling, cover planning, report rendering |
 | `features/library/useLibrarySearchController.js` | debounced library search, stale-result rejection, result hydration and search lifecycle cleanup | sidebar tree presentation, content selection, telemetry transport |
 | `features/library/useLibraryTrashController.js` | trash loading, restore/delete/empty transactions and the bounded undo notice | folder/history model, selected tabs, content-tree rendering |
-| `features/library/libraryTreeModel.js` | pure folder/content/unread/pinned tree-node construction and deterministic ordering | localStorage preferences, drag/drop, selection, virtual rendering and parent events |
+| `features/library/useMarkdownOutputSettingsController.js` | Markdown/Obsidian output settings, input validation and canonical-path refresh | folder picking, document export execution and application startup orchestration |
+| `features/integrations/usePlatformCredentialController.js` | manual platform-cookie saves, desktop login/forget confirmation and per-platform status refresh | credential-status polling, settings markup, task execution and data persistence |
+| `features/tasks/useTaskQueueController.js` | queue snapshots, compact-detail merging, task polling, cancellation and retry | single-task runner presentation, content hydration implementation, workbench selection |
+| `features/library/libraryTreeModel.js` | pure folder/content/unread/pinned tree construction, unread-ancestor counts, folder paths and deterministic ordering | localStorage preferences, drag/drop, selection, virtual rendering and parent events |
+| `features/library/libraryTreeDragPolicy.js` | external-file import targets, separator eligibility and tree drop-position rules | event dispatch, optimistic move requests and sidebar selection state |
+| `workbench/useTreeBoxSelectionController.js` | library-tree marquee selection, additive selection and pointer-listener cleanup | tree-node construction, drag/drop, context menus and persistent folder state |
+| `workbench/useVirtualLibraryTreeController.js` | fixed-row virtual window, scroll settling and ResizeObserver lifecycle | tree-node construction, drag/drop, selection and context-menu content |
 | `features/assistant/useSelectedTextContext.js` | selected quote normalization and its explicit assistant-input token | reader DOM selection, Q&A transport, document persistence |
 | `features/prompts/useWechatReportPromptController.js` | report-prompt loading, selection, editing and save boundary | prompt file tabs, report generation, account subscriptions |
 | `workbench/usePreviewFindController.js` | find-bar state, local highlighting, navigation and cleanup | deciding which reader DOM is active, webview implementation details |
+| `workbench/useMediaTranscriptWorkspaceController.js` | timed-media timeline state, reader split resizing, playback-following and cleanup | content ingestion, player implementation, article rendering and source persistence |
+| `workbench/useXhsGalleryController.js` | Xiaohongshu image-gallery index, scrolling, keyboard navigation and reset | article capture state, layout selection and gallery markup |
+| `workbench/useReadingProgressController.js` | local reader scroll progress, iframe listener lifecycle and refresh-frame cleanup | remote webview progress, reader markup, content persistence and source selection |
+| `workbench/useReaderSelectionController.js` | local, iframe and WeChat-page text-selection action, listener lifecycle and assistant handoff | reader markup, remote-page bridge parsing and content persistence |
+| `workbench/libraryGroupLayout.js` | pure root-folder grouping, separator placement and legacy layout migration | tree selection, drag events, localStorage I/O and folder/content mutations |
 | `services/group_report_models.py` | immutable report inputs, outputs and progress contracts | model calls, persistence, Markdown rendering |
+| `services/creator_sync_models.py` | immutable creator-video, preview and sync-result contracts plus UI-safe sync failures | browser capture, source persistence, task creation and scheduling |
+| `services/creator_capture_status.py` | thread-safe creator-browser capture status and bounded provider diagnostics | browser automation, source persistence and task execution |
+| `services/creator_sync_policy.py` | creator subscription validation, processing-mode resolution and retry classification | browser capture, SQLite I/O and task creation |
+| `services/creator_source_registry.py` | creator subscription SQLite queries, normalization, membership anchors and sync-history persistence | browser capture, task creation and provider parsing |
+| `services/creator_source_urls.py` | validated creator-source URL parsing and canonical/capture URL selection | browser automation, SQLite I/O, task execution and UI state |
+| `services/creator_remote_payloads.py` | provider list-response parsing into normalized creator-video metadata | browser automation, SQLite I/O, task execution and source scheduling |
+| `services/creator_browser_capture.py` | bundled-browser launch, response collection and virtualized-list page loading | source persistence, queue creation, UI state and provider-result parsing |
+| `services/creator_sync_selection.py` | creator date-window filtering, incremental anchors and pagination stop policy | browser launch, SQLite I/O, provider HTTP details and task creation |
 | `services/group_report_markdown.py` | deterministic citation and Markdown normalization | report planning, provider calls, summary cache, task state |
 | `routers/content_usage.py` | AI/OCR call history and daily usage observability HTTP transport | library content mutation, capture, folder or import behavior |
 

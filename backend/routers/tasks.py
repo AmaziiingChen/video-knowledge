@@ -19,6 +19,7 @@ from services.source_context_store import (
     load_source_context,
 )
 from services.task_manager import task_manager
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable
 
 
 router = APIRouter()
@@ -49,7 +50,10 @@ class SourceContextStatusResponse(BaseModel):
 
 @router.post("/tasks", response_model=TaskResponse)
 async def create_task(req: PipelineRequest):
-    return to_task_response(task_manager.create(req))
+    try:
+        return to_task_response(task_manager.create(req))
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/tasks", response_model=list[TaskResponse])
@@ -101,7 +105,10 @@ async def retry_latest_content_task(item_id: str):
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="该内容没有可重试的处理任务")
-    record = task_manager.retry(str(row["id"]))
+    try:
+        record = task_manager.retry(str(row["id"]))
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="处理任务不存在")
     return to_task_response(record)
@@ -138,16 +145,19 @@ async def refresh_content_source_context(item_id: str):
             raise HTTPException(status_code=404, detail="内容不存在") from exc
     if item.source_provider not in SUPPORTED_SOURCE_CONTEXT_PROVIDERS or not item.source_url:
         raise HTTPException(status_code=400, detail="该内容来源不支持互动数据采集")
-    record = task_manager.create_source_sync(
-        {
-            "kind": "source_context_refresh",
-            "source_id": item.id,
-            "comment_limit": 60,
-            "comment_pages": 3,
-        },
-        source_title=f"补采互动数据：{item.title or item.source_provider}",
-        execution_mode="foreground",
-    )
+    try:
+        record = task_manager.create_source_sync(
+            {
+                "kind": "source_context_refresh",
+                "source_id": item.id,
+                "comment_limit": 60,
+                "comment_pages": 3,
+            },
+            source_title=f"补采互动数据：{item.title or item.source_provider}",
+            execution_mode="foreground",
+        )
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return to_task_response(record)
 
 
@@ -420,7 +430,10 @@ async def cancel_active_tasks():
 
 @router.post("/tasks/{task_id}/pause", response_model=TaskResponse)
 async def pause_task(task_id: str):
-    record = task_manager.pause(task_id)
+    try:
+        record = task_manager.pause(task_id)
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not record:
         raise HTTPException(status_code=404, detail="任务不存在")
     return to_task_response(record)
@@ -428,7 +441,10 @@ async def pause_task(task_id: str):
 
 @router.post("/tasks/{task_id}/resume", response_model=TaskResponse)
 async def resume_task(task_id: str):
-    record = task_manager.resume(task_id)
+    try:
+        record = task_manager.resume(task_id)
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not record:
         raise HTTPException(status_code=404, detail="任务不存在")
     return to_task_response(record)
@@ -436,7 +452,10 @@ async def resume_task(task_id: str):
 
 @router.post("/tasks/{task_id}/prioritize", response_model=TaskResponse)
 async def prioritize_task(task_id: str):
-    record = task_manager.reprioritize(task_id, 10)
+    try:
+        record = task_manager.reprioritize(task_id, 10)
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not record:
         raise HTTPException(status_code=404, detail="任务不存在")
     return to_task_response(record)
@@ -444,7 +463,10 @@ async def prioritize_task(task_id: str):
 
 @router.post("/tasks/{task_id}/retry", response_model=TaskResponse)
 async def retry_task(task_id: str):
-    record = task_manager.retry(task_id)
+    try:
+        record = task_manager.retry(task_id)
+    except XiaohongshuCollectorUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not record:
         raise HTTPException(status_code=404, detail="任务不存在")
     return to_task_response(record)

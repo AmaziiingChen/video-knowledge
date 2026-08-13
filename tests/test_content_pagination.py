@@ -11,14 +11,13 @@ sys.path.insert(0, str(BACKEND))
 
 from config import settings
 from routers.content import (
-    _delete_content_item_data,
-    _cleanup_content_files_after_commit,
     ContentItemsResolveRequest,
     get_content_item,
     list_library_folder_history,
     list_content_page,
     resolve_content_items,
 )
+from services.content_deletion import cleanup_content_files_after_commit, delete_content_item_data
 from services.cache import (
     cache_dir_for_url,
     write_cached_transcript,
@@ -220,14 +219,14 @@ def test_permanent_delete_keeps_files_until_the_database_transaction_commits(mon
         )
         connection.commit()
 
-        cleanup = _delete_content_item_data(connection, repository, item)
+        cleanup = delete_content_item_data(connection, repository, item)
         connection.rollback()
 
     assert document.exists()
 
     with connect() as connection:
-        cleanup = _delete_content_item_data(connection, ContentRepository(connection), item)
+        cleanup = delete_content_item_data(connection, ContentRepository(connection), item)
         connection.commit()
-    _cleanup_content_files_after_commit(cleanup)
+    cleanup_content_files_after_commit(cleanup)
 
     assert not document.exists()

@@ -11,6 +11,7 @@ from services.openclaw_conversations import bind_task
 from services.pipeline_runner import PipelineRequest, WHISPER_MODELS
 from services.task_manager import task_manager
 from services.url_parser import parse_share_text
+from services.xiaohongshu_capability import XiaohongshuCollectorUnavailable, require_xiaohongshu_feature
 
 
 router = APIRouter()
@@ -61,6 +62,11 @@ async def ingest_link(req: IngestLinkRequest):
         raise HTTPException(status_code=400, detail="没有识别到抖音、B站、微信公众号或小红书链接")
     if parsed.platform not in SUPPORTED_PLATFORMS:
         raise HTTPException(status_code=400, detail=f"暂不支持的来源: {parsed.platform}")
+    if parsed.platform == "xiaohongshu":
+        try:
+            require_xiaohongshu_feature("note_capture")
+        except XiaohongshuCollectorUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     capture = capture_link_to_inbox(parsed.url)
     if capture.error or capture.item is None:

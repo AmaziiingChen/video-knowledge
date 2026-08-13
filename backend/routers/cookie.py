@@ -1,5 +1,5 @@
 from pathlib import Path
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from config import settings
 from services.bilibili_auth import clear_saved_bilibili_cookie, get_bilibili_cookie_status, save_bilibili_cookie
