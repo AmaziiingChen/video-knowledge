@@ -581,6 +581,7 @@
         :openclaw-status-text="openclawStatusText"
         :openclaw-connection-items="openclawConnectionItems"
         :openclaw-status-tone="openclawStatusTone"
+        :openclaw-mcp-repair-available="openclawMcpRepairAvailable"
         :wechat-accounts="wechatAccounts"
         :wechat-subscriptions="wechatSubscriptions"
         :wechat-loading="loadingWeChatSubscriptions"
@@ -633,6 +634,7 @@
         @choose-folder-import="chooseFolderImportDirectory"
         @toggle-folder-import="toggleFolderImportWatching"
         @start-openclaw="startOpenClawGateway"
+        @repair-openclaw-mcp="repairOpenClawMcp"
         @load-wechat="loadWeChatSubscriptions"
         @start-wechat-qr="startWeChatQrLogin"
         @reauthorize-account="startWeChatQrLogin($event)"
@@ -970,7 +972,9 @@ const {
   openclawStatusText,
   openclawConnectionItems,
   openclawStatusTone,
+  openclawMcpRepairAvailable,
   loadOpenClawStatus,
+  repairOpenClawMcp,
   obsidianVaultPath,
   markdownExportPath,
   obsidianAutoWrite,

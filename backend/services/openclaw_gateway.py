@@ -197,6 +197,47 @@ def _mcp_stdio_probe_cached(
         return result
 
 
+def _expected_mcp_entry_arguments() -> list[str]:
+    arguments = ["--mcp-stdio"]
+    if not getattr(sys, "frozen", False):
+        arguments.insert(0, str(Path(__file__).resolve().parents[1] / "desktop_server.py"))
+    return arguments
+
+
+def _current_mcp_descriptor() -> dict[str, Any]:
+    """Build the one safe OpenClaw entry for the running desktop session."""
+    token_file = os.environ.get(MCP_TOKEN_FILE_ENV, "").strip()
+    expected_token = os.environ.get(MCP_TOKEN_ENV, "").strip()
+    try:
+        issued_api_base = read_mcp_bridge_api_base(token_file)
+        bridge_ready = bool(
+            token_file
+            and expected_token
+            and hmac.compare_digest(read_mcp_bridge_token(token_file), expected_token)
+            and issued_api_base == expected_backend_api_base()
+            and mcp_bridge_lease_is_valid()
+        )
+    except McpBridgeUnavailable as exc:
+        raise OpenClawGatewayError("KnowledgeHub MCP bridge 尚未就绪，请先保持应用运行") from exc
+    if not bridge_ready:
+        raise OpenClawGatewayError("KnowledgeHub MCP bridge 尚未就绪，请先保持应用运行")
+    return {
+        "command": str(Path(sys.executable).resolve()),
+        "args": _expected_mcp_entry_arguments(),
+        "env": {
+            MCP_TOKEN_FILE_ENV: token_file,
+            "KNOWLEDGEHUB_API_BASE": issued_api_base,
+        },
+    }
+
+
+def _clear_status_cache() -> None:
+    global _status_cache, _status_cache_expires_at
+    with _status_cache_lock:
+        _status_cache = None
+        _status_cache_expires_at = 0.0
+
+
 def _mcp_status() -> dict[str, Any]:
     servers = ((_openclaw_config().get("mcp") or {}).get("servers") or {})
     descriptor = servers.get("knowledgehub") if isinstance(servers, dict) else None
@@ -222,10 +263,7 @@ def _mcp_status() -> dict[str, Any]:
             discovered = shutil.which(command) or ""
             resolved_command = str(Path(discovered).resolve()) if discovered else ""
     expected_command = str(Path(sys.executable).resolve())
-    expected_arguments = ["--mcp-stdio"]
-    if not getattr(sys, "frozen", False):
-        desktop_server = Path(__file__).resolve().parents[1] / "desktop_server.py"
-        expected_arguments.insert(0, str(desktop_server))
+    expected_arguments = _expected_mcp_entry_arguments()
     valid_command = resolved_command == expected_command
     valid_arguments = arguments == expected_arguments
     allowed_environment_keys = {MCP_TOKEN_FILE_ENV, "KNOWLEDGEHUB_API_BASE"}
@@ -461,4 +499,20 @@ def start_openclaw_gateway() -> dict:
         if status["gateway_running"]:
             return status
         time.sleep(0.75)
+    return status
+
+
+def repair_openclaw_mcp() -> dict[str, Any]:
+    """Explicitly replace only OpenClaw's KnowledgeHub MCP entry, then probe it."""
+    descriptor = _current_mcp_descriptor()
+    serialized_descriptor = json.dumps(descriptor, ensure_ascii=False, separators=(",", ":"))
+    _ensure_command_succeeded(
+        _run_openclaw_cli("mcp", "set", "knowledgehub", serialized_descriptor, timeout=20),
+        "MCP 配置更新",
+    )
+    _ensure_command_succeeded(_run_openclaw_cli("mcp", "reload", timeout=20), "MCP 重载")
+    _clear_status_cache()
+    status = get_openclaw_status(force_refresh=True)
+    if not status["mcp"]["configured"]:
+        raise OpenClawGatewayError(status["mcp"]["detail"])
     return status

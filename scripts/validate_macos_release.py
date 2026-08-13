@@ -20,7 +20,11 @@ PACKAGE_JSON = ROOT / "frontend" / "package.json"
 SOURCE_ICON = ROOT / "frontend" / "build" / "icon.icns"
 EXPECTED_BUNDLE_ID = "com.knowledgehub.desktop"
 MAX_DMG_BYTES = 1_200 * 1024 * 1024
-MAX_BACKEND_BYTES = 650 * 1024 * 1024
+# MLX Whisper loads its native Metal library, shader archive and word-timing
+# runtime from the frozen backend.  Those required Apple Silicon components add
+# roughly 185 MiB to the previous portable ASR baseline, so retain a meaningful
+# release guard while allowing the verified native runtime to ship.
+MAX_BACKEND_BYTES = 800 * 1024 * 1024
 MODEL_SUFFIXES = {".ckpt", ".gguf", ".pt", ".pth", ".safetensors"}
 MODEL_FILE_PATTERN = re.compile(r"^(ggml-|whisper-).+\.bin$", re.IGNORECASE)
 

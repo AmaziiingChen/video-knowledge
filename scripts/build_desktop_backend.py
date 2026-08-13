@@ -89,6 +89,24 @@ def build_backend(target: str) -> None:
             str(ROOT / "backend"),
             "--hidden-import",
             "mcp_server",
+            # MLX is imported only in the disposable transcription worker, so
+            # static analysis can miss its native extension and support files.
+            # Do not use ``--collect-all mlx``: that imports every MLX
+            # subpackage while packaging and crashes headless macOS builders
+            # that have no Metal device.  Collect files without importing them
+            # and mark the runtime entry modules explicitly instead.
+            "--hidden-import",
+            "mlx.core",
+            "--hidden-import",
+            "mlx.nn",
+            "--hidden-import",
+            "mlx_whisper",
+            "--collect-binaries",
+            "mlx",
+            "--collect-data",
+            "mlx",
+            "--collect-data",
+            "mlx_whisper",
             # The Apple Silicon MLX path never imports mlx_whisper's legacy
             # PyTorch compatibility implementation. Exclude it so PyInstaller
             # does not turn an optional upstream module into a 400 MB runtime

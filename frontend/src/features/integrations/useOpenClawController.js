@@ -34,6 +34,10 @@ export function useOpenClawController({
     return ['error', 'unavailable'].includes(openclawState.value) ? 'is-invalid' : 'is-warning'
   })
 
+  const openclawMcpRepairAvailable = computed(() => (
+    Boolean(openclawBridge.value?.installed) && !openclawBridge.value?.mcp?.configured
+  ))
+
   const openclawConnectionItems = computed(() => {
     const bridge = openclawBridge.value || {}
     const statusClass = (state, readyStates) => readyStates.includes(state) ? 'is-valid' : (
@@ -109,15 +113,35 @@ export function useOpenClawController({
     }
   }
 
+  async function repairOpenClawMcp() {
+    openclawScanning.value = true
+    try {
+      const response = await request.post(`${apiBase}/openclaw-gateway/repair-mcp`, {}, { timeout: 45000 })
+      applyOpenClawStatus(response.data)
+      if (!openclawBridge.value.mcp?.configured) {
+        throw new Error(openclawBridge.value.mcp?.detail || 'KnowledgeHub MCP 未能完成验证')
+      }
+      notify.success('KnowledgeHub MCP 已修复并完成自检')
+    } catch (error) {
+      const message = error.response?.data?.detail || error.message || '修复 KnowledgeHub MCP 失败'
+      openclawStatus.value = typeof message === 'string' ? message : '修复 KnowledgeHub MCP 失败'
+      notify.error(openclawStatus.value)
+    } finally {
+      openclawScanning.value = false
+    }
+  }
+
   return {
     openclawRunning,
     openclawScanning,
     openclawConnectionItems,
     openclawStatusTone,
+    openclawMcpRepairAvailable,
     openclawStatusText,
     startOpenClawStatusPolling,
     stopOpenClawStatusPolling,
     loadOpenClawStatus,
-    startOpenClawGateway
+    startOpenClawGateway,
+    repairOpenClawMcp
   }
 }

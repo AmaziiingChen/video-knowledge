@@ -7,6 +7,19 @@ that tag was continuous and was not distributed as versioned releases.
 
 - Architecture hardening under a product feature freeze.
 
+## v0.1.4
+
+- Restore visible AI reasoning for manual summaries and preserve the existing
+  reasoning stream for automatic article and video summaries.
+- Add bounded follow-up suggestion generation for summaries and conversations
+  when a model does not emit the strict stream trailer.
+- Restore clean-room, user-initiated Xiaohongshu single-note reading while
+  keeping favourites, creator sync and comment refresh unavailable.
+- Disable unavailable WeChat public-account authorization and subscription
+  entry points without affecting existing collections, groups or RSS.
+- Bundle the native MLX runtime support files required by MLX Whisper in the
+  macOS backend, and update diagnostic collection to the Cloudflare v3 notice.
+
 ## v0.1.3
 
 - Add a strict Cloudflare release manifest that checks the official GitHub

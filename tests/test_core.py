@@ -370,13 +370,28 @@ class ClipboardWatcherTests(unittest.TestCase):
             "短链 https://b23.tv/xyz987 "
             "重复 https://v.douyin.com/abc123/"
         )
-
         self.assertEqual(
             links,
             [
                 "https://v.douyin.com/abc123/",
                 "https://www.bilibili.com/video/BV1xx411c7mD",
                 "https://b23.tv/xyz987",
+            ],
+        )
+
+    def test_clipboard_uses_the_same_canonical_platform_patterns_as_manual_import(self):
+        links = extract_supported_links(
+            "抖音 https://www.douyin.com/video/7512345678901234567 "
+            "B站 https://www.bilibili.com/video/BV1xx411c7mD?p=2 "
+            "小红书 https://xhslink.cn/a/AbC123"
+        )
+
+        self.assertEqual(
+            links,
+            [
+                "https://www.douyin.com/video/7512345678901234567",
+                "https://www.bilibili.com/video/BV1xx411c7mD?p=2",
+                "https://xhslink.cn/a/AbC123",
             ],
         )
 
@@ -458,6 +473,10 @@ class WatcherPersistenceTests(unittest.TestCase):
 
                 self.assertTrue(saved["enabled"])
                 self.assertEqual(load_clipboard_watcher_settings()["whisper_model"], "small")
+                self.assertEqual(load_clipboard_watcher_settings()["poll_interval"], 2.5)
+
+                saved = save_clipboard_watcher_settings({"poll_interval": 0.1})
+                self.assertEqual(saved["poll_interval"], 0.5)
         finally:
             settings.data_dir = old_data_dir
 
@@ -587,6 +606,18 @@ class OpenClawGatewayApiTests(unittest.TestCase):
         }
         with patch("routers.openclaw.start_openclaw_gateway", return_value=expected):
             response = TestClient(app).post("/api/openclaw-gateway/start")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+
+    def test_openclaw_gateway_mcp_repair_is_exposed(self):
+        expected = {
+            "state": "running",
+            "gateway_running": True,
+            "mcp": {"configured": True, "detail": "KnowledgeHub MCP 已就绪"},
+        }
+        with patch("routers.openclaw.repair_openclaw_mcp", return_value=expected):
+            response = TestClient(app).post("/api/openclaw-gateway/repair-mcp")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)

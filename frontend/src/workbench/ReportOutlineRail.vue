@@ -46,6 +46,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { canShowReportOutline } from './reportOutlineLayout.js'
 
 const props = defineProps({
   scrollRoot: { type: Object, default: null },
@@ -155,11 +156,11 @@ function measure() {
   }
 
   const scrollBox = scrollRoot.getBoundingClientRect()
-  const contentBox = contentRoot ? entryRect(contentRoot) : null
-  const leftGutter = isRemoteOutline.value || props.scrollRoot instanceof HTMLIFrameElement
-    ? 70
-    : contentBox.left - scrollBox.left
-  const canFitRail = scrollBox.width >= 760 && leftGutter >= 70 && scrollBox.height >= 300
+  const canFitRail = canShowReportOutline({
+    width: scrollBox.width,
+    height: scrollBox.height,
+    entryCount: entries.value.length,
+  })
   visible.value = canFitRail
   if (!canFitRail) {
     isOverflowing.value = false

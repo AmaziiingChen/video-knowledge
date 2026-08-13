@@ -82,13 +82,17 @@ function controllerHarness(overrides = {}) {
   }
 }
 
-test('loads only the folder tree during startup and then restores the active tab', async () => {
+test('loads a bounded recent window during startup so unread state is available before expansion', async () => {
   const harness = controllerHarness()
   harness.controller.allContentItems.value = [{ id: 'loaded-1' }]
 
   await harness.controller.loadContentItems({ startup: true })
 
   assert.deepEqual(harness.folderLoads, [[{ throwOnError: true }]])
+  assert.deepEqual(harness.getCalls, [[
+    '/api/content/page',
+    { params: { limit: 200 }, timeout: 15000 },
+  ]])
   assert.equal(harness.workspaceSyncs.length, 1)
   assert.equal(harness.controller.startupBlocking.value, false)
   assert.equal(harness.controller.startupCanRetry.value, false)
@@ -97,10 +101,11 @@ test('loads only the folder tree during startup and then restores the active tab
     detail: '资料库与后台任务正在准备中。',
   })
   assert.deepEqual(harness.controller.contentPageLoadStatus, {
-    state: 'idle',
+    state: 'ready',
     loaded: 1,
     total: 1,
   })
+  assert.deepEqual(harness.reconciliations, [[[{ id: 'loaded-1' }], { initialWindowComplete: true }]])
 })
 
 test('ignores a stale startup completion when a newer load wins', async () => {

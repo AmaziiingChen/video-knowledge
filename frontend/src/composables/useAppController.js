@@ -145,11 +145,11 @@ export function useAppController() {
     openclawScanning,
     openclawConnectionItems,
     openclawStatusTone,
-    openclawStatusText,
+    openclawStatusText, openclawMcpRepairAvailable,
     startOpenClawStatusPolling,
     stopOpenClawStatusPolling,
     loadOpenClawStatus,
-    startOpenClawGateway
+    startOpenClawGateway, repairOpenClawMcp
   } = useOpenClawController()
   const {
     questionInput,
@@ -1084,7 +1084,7 @@ export function useAppController() {
     openclawRunning,
     openclawScanning,
     openclawConnectionItems,
-    openclawStatusTone,
+    openclawStatusTone, openclawMcpRepairAvailable,
     obsidianVaultPath,
     markdownExportPath,
     obsidianAutoWrite,
@@ -1170,7 +1170,7 @@ export function useAppController() {
     renderMarkdown,
     setTaskQueuePollingInterval,
     toggleClipboardWatching,
-    loadOpenClawStatus,
+    loadOpenClawStatus, repairOpenClawMcp,
     startOpenClawGateway,
     saveObsidianSettingsFromForm,
     setContentViewedState,

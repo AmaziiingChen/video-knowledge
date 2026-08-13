@@ -41,7 +41,11 @@ export function shouldHydrateProgressiveTask(task, previousSnapshot) {
 }
 
 export function shouldRefreshContentForTask(task, previousSnapshot, queueInitialized, terminalStatuses) {
-  if (!queueInitialized || !task?.content_item_id) return false
+  // Source synchronization creates new content without a single owning
+  // content_item_id.  Refresh its bounded recent page at completion so RSS
+  // unread badges update before the user opens that source folder.
+  const createsLibraryContent = Boolean(task?.content_item_id) || task?.task_type === 'source_sync'
+  if (!queueInitialized || !createsLibraryContent) return false
   if (!terminalStatuses.has(task.status)) return false
   return previousSnapshot !== taskContentSnapshot(task)
 }

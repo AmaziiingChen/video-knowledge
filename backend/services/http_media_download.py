@@ -111,7 +111,7 @@ def download_browser_context_media(
     headers: dict[str, str] | None = None,
     progress_callback: ProgressCallback | None = None,
     cancel_check: CancelCheck | None = None,
-    timeout: float = 120.0,
+    timeout: float = 15.0,
     chunk_size: int = 2 * 1024 * 1024,
 ) -> HttpMediaDownloadResult:
     """Download media through the active Playwright browser context.
@@ -121,7 +121,9 @@ def download_browser_context_media(
     browser context that produced it.  This helper keeps the transfer inside
     Playwright's request context, which shares the page's cookie store, while
     writing bounded Range chunks to disk so a whole video is never retained in
-    memory.
+    memory. Each request is intentionally short-lived so a queued cancellation
+    is observed between chunks instead of waiting for a two-minute browser
+    request timeout.
 
     ``request_context`` is deliberately duck-typed to avoid making
     Playwright a mandatory import for the shared download module.

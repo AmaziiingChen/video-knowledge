@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
 from services import openclaw_gateway
 
 
@@ -146,6 +147,43 @@ def test_mcp_status_rejects_unmanaged_child_environment_overrides(tmp_path, monk
     monkeypatch.setattr(openclaw_gateway, "_mcp_stdio_probe_cached", lambda *_args: True)
 
     assert openclaw_gateway._mcp_status()["configured"] is False
+
+
+def test_repair_mcp_replaces_only_the_knowledgehub_cli_entry_and_rechecks_it(tmp_path, monkeypatch):
+    command, arguments = _source_mcp_command()
+    _write_ready_config(tmp_path, monkeypatch, command=command, arguments=arguments)
+    calls: list[tuple[str, ...]] = []
+
+    def run_cli(*args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    ready = {"mcp": {"configured": True, "detail": "KnowledgeHub MCP 已就绪"}}
+    monkeypatch.setattr(openclaw_gateway, "_run_openclaw_cli", run_cli)
+    monkeypatch.setattr(openclaw_gateway, "get_openclaw_status", lambda **_kwargs: ready)
+
+    assert openclaw_gateway.repair_openclaw_mcp() == ready
+    assert calls[0][:3] == ("mcp", "set", "knowledgehub")
+    descriptor = json.loads(calls[0][3])
+    assert descriptor == {
+        "command": str(Path(sys.executable).resolve()),
+        "args": arguments,
+        "env": {
+            "KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE": str(tmp_path / "run" / "mcp-bridge-token"),
+            "KNOWLEDGEHUB_API_BASE": "http://127.0.0.1:8000/api",
+        },
+    }
+    assert calls[1] == ("mcp", "reload")
+
+
+def test_repair_mcp_refuses_to_write_when_the_desktop_bridge_is_not_ready(tmp_path, monkeypatch):
+    command, arguments = _source_mcp_command()
+    _write_ready_config(tmp_path, monkeypatch, command=command, arguments=arguments)
+    monkeypatch.delenv("KNOWLEDGEHUB_MCP_BRIDGE_TOKEN", raising=False)
+    monkeypatch.setattr(openclaw_gateway, "_run_openclaw_cli", lambda *_args, **_kwargs: pytest.fail("must not write config"))
+
+    with pytest.raises(openclaw_gateway.OpenClawGatewayError, match="bridge 尚未就绪"):
+        openclaw_gateway.repair_openclaw_mcp()
 
 
 def test_stdio_probe_rejects_a_nonzero_process_even_with_valid_responses(monkeypatch):

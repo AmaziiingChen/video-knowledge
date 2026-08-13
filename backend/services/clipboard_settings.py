@@ -20,7 +20,7 @@ _DEFAULTS: dict[str, Any] = {
     "asr_fallback_enabled": None,
     "ai_model": None,
     "use_cache": True,
-    "poll_interval": 2.5,
+    "poll_interval": 0.75,
     "capture_mode": "task",
 }
 
@@ -59,6 +59,6 @@ def save_clipboard_watcher_settings(updates: dict[str, Any]) -> dict[str, Any]:
 
 def _poll_interval(value: Any) -> float:
     try:
-        return max(1.0, min(float(value), 10.0))
+        return max(0.5, min(float(value), 10.0))
     except (TypeError, ValueError):
-        return 2.5
+        return 0.75
