@@ -11,7 +11,7 @@ npm run desktop:package:mac
 ```
 
 该命令生成 DMG，位于 `frontend/release/`。安装包不启用自动下载、静默安装或一键更新。
-从 `0.1.2` 的发布桥接版开始，应用会在启动时读取固定的 Cloudflare
+从 `0.1.3` 的发布桥接版开始，应用会在启动时读取固定的 Cloudflare
 版本清单；当 GitHub Release 出现更高版本时，应用提示用户打开对应的
 Release 页面自行下载并安装。关闭应用时无法接收系统级推送；下一次启动
 或手动检查更新时才会显示提示。

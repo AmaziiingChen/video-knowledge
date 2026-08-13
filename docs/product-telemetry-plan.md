@@ -119,7 +119,7 @@ Vue / Electron / FastAPI 产生预定义事件
     "event_id": "随机 UUID",
     "event_name": "task_finished",
     "occurred_at": "2026-08-13T09:20:00Z",
-    "app_version": "0.1.2",
+    "app_version": "0.1.3",
     "platform": "macos",
     "os_major": 15,
     "architecture": "arm64",

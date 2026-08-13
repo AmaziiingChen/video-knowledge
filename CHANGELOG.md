@@ -7,14 +7,16 @@ that tag was continuous and was not distributed as versioned releases.
 
 - Architecture hardening under a product feature freeze.
 
-## v0.1.2
+## v0.1.3
 
 - Add a strict Cloudflare release manifest that checks the official GitHub
   Release page at startup and prompts for manual macOS updates.
 - Keep the unsigned-DMG installation contract: updates never download,
   replace, or restart the app automatically.
-- Use a stable fallback for the `key.circle` SF Symbol when a macOS Runner
-  does not include that newer symbol name.
+- Use stable SF Symbol fallbacks when an older macOS runner does not provide
+  a newer symbol.
+- Install the pinned PyInstaller release-build dependency in the macOS GitHub
+  Actions job before packaging the bundled backend.
 
 ## v0.1.0
 
