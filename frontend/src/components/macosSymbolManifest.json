@@ -50,7 +50,7 @@
   "h.square.fill": { "asset": "h.square.fill.png", "candidates": ["h.square.fill"] },
   "highlighter": { "asset": "highlighter.png", "candidates": ["highlighter"] },
   "key": { "asset": "key.png", "candidates": ["key"] },
-  "key.circle": { "asset": "key.circle.png", "candidates": ["key.circle"] },
+  "key.circle": { "asset": "key.circle.png", "candidates": ["key.circle", "key"] },
   "link": { "asset": "link.png", "candidates": ["link"] },
   "magnifyingglass": { "asset": "magnifyingglass.png", "candidates": ["magnifyingglass"] },
   "minus": { "asset": "minus.png", "candidates": ["minus"] },
