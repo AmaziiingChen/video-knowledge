@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import sqlite3
 from datetime import datetime, timezone
 from threading import Event, Lock, Thread
@@ -24,6 +25,7 @@ REGULAR_INTERVAL_SECONDS = 12 * 60 * 60.0
 MIN_RETRY_SECONDS = 5 * 60.0
 MAX_RETRY_SECONDS = REGULAR_INTERVAL_SECONDS
 REQUEST_TIMEOUT_SECONDS = 5.0
+TELEMETRY_PROXY_ENVIRONMENT_NAME = "KNOWLEDGEHUB_TELEMETRY_PROXY_URL"
 
 
 def validated_collector_url(
@@ -61,6 +63,34 @@ def validated_collector_url(
     return f"https://{hostname}{COLLECTOR_PATH}"
 
 
+def validated_telemetry_proxy_url(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or not parsed.hostname
+        or (port is not None and (port < 1 or port > 65535))
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    default_port = 80 if parsed.scheme == "http" else 443
+    normalized_port = port if port is not None else default_port
+    hostname = str(parsed.hostname).lower()
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    return f"{parsed.scheme}://{host}:{normalized_port}"
+
+
 def upload_once(*, collector_url: object | None = None, client: httpx.Client | None = None) -> str:
     url = validated_collector_url(settings.telemetry_collector_url if collector_url is None else collector_url)
     if not url:
@@ -78,15 +108,20 @@ def upload_once(*, collector_url: object | None = None, client: httpx.Client | N
     event_ids = [str(event.get("event_id") or "") for event in events if isinstance(event, dict)]
     if len(event_ids) != len(events) or any(not event_id for event_id in event_ids):
         return "failed"
-    active_client = client or httpx.Client(
-        timeout=REQUEST_TIMEOUT_SECONDS,
-        follow_redirects=False,
-        # The packaged backend strips proxy environment variables at launch.
-        # Allow httpx/urllib to resolve the user's macOS system proxy for this
-        # one fixed HTTPS destination so Workers remains reachable on networks
-        # where direct connections to workers.dev are blocked.
-        trust_env=True,
+    client_options: dict[str, object] = {
+        "timeout": REQUEST_TIMEOUT_SECONDS,
+        "follow_redirects": False,
+        # Other backend clients remain direct. Electron passes only a sanitized
+        # proxy URL into the dedicated variable below, and only this fixed
+        # Cloudflare telemetry destination is allowed to consume it.
+        "trust_env": False,
+    }
+    telemetry_proxy_url = validated_telemetry_proxy_url(
+        os.environ.get(TELEMETRY_PROXY_ENVIRONMENT_NAME)
     )
+    if telemetry_proxy_url:
+        client_options["proxy"] = telemetry_proxy_url
+    active_client = client or httpx.Client(**client_options)
     owns_client = client is None
     try:
         # The independent send gate lets records continue while guaranteeing

@@ -7,6 +7,12 @@ that tag was continuous and was not distributed as versioned releases.
 
 - Architecture hardening under a product feature freeze.
 
+## v0.1.10
+
+- Route only the fixed Cloudflare diagnostics uploader through a sanitized,
+  dedicated copy of the user's HTTP(S) proxy while every other backend network
+  client remains isolated from proxy environment variables.
+
 ## v0.1.9
 
 - Restore OpenClaw MCP bridge sessions when a healthy backend belongs to an
