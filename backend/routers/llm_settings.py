@@ -71,7 +71,15 @@ class TextProviderRequest(BaseModel):
     label: str = Field(..., min_length=1, max_length=80)
     base_url: str = Field(..., min_length=1, max_length=500)
     models: list[str] = Field(default_factory=list, max_length=40)
-    thinking_parameter: Literal["thinking", "enable_thinking", "none"] = "none"
+    thinking_parameter: Literal[
+        "thinking",
+        "enable_thinking",
+        "reasoning_effort",
+        "chat_template_enable_thinking",
+        "reasoning_split",
+        "none",
+    ] = "none"
+    auth_scheme: Literal["bearer", "api_key", "x_api_key"] = "bearer"
     send_temperature: bool | None = None
     stream_options: bool | None = None
     response_format: bool | None = None
@@ -124,6 +132,7 @@ async def put_text_provider(provider_id: str, req: TextProviderRequest):
             base_url=req.base_url,
             models=req.models,
             thinking_parameter=req.thinking_parameter,
+            auth_scheme=req.auth_scheme,
             send_temperature=req.send_temperature,
             stream_options=req.stream_options,
             response_format=req.response_format,

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('knowledgeHubDesktop', {
   backendAccessToken: () => ipcRenderer.invoke('knowledgehub:backend-access-token'),
   waitForBackend: () => ipcRenderer.invoke('knowledgehub:wait-for-backend'),
   setPendingNotifications: (items) => ipcRenderer.invoke('knowledgehub:set-pending-notifications', items),
+  setUnreadBadgeCount: (count) => ipcRenderer.invoke('knowledgehub:set-unread-badge-count', count),
   campusAuthStatus: () => ipcRenderer.invoke('knowledgehub:campus-auth-status'),
   connectCampusWebVpn: () => ipcRenderer.invoke('knowledgehub:campus-connect'),
   disconnectCampusWebVpn: () => ipcRenderer.invoke('knowledgehub:campus-disconnect'),
@@ -31,6 +32,12 @@ contextBridge.exposeInMainWorld('knowledgeHubDesktop', {
     const handler = (_event, item) => listener(item)
     ipcRenderer.on('knowledgehub:open-pending-notification', handler)
     return () => ipcRenderer.removeListener('knowledgehub:open-pending-notification', handler)
+  },
+  onMenuAction: (listener) => {
+    if (typeof listener !== 'function') return () => {}
+    const handler = (_event, action) => listener(action)
+    ipcRenderer.on('knowledgehub:menu-action', handler)
+    return () => ipcRenderer.removeListener('knowledgehub:menu-action', handler)
   },
 })
 

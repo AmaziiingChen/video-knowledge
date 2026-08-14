@@ -401,7 +401,7 @@ export function useAppController() {
     scheduleContentViewed,
     setContentViewedState
   } = useContentReadState({
-    isCurrentContent: (contentItemId) => String(selectedContentItem.value?.id || '') === contentItemId
+    isCurrentContent: (contentItemId) => String(selectedContentItem.value?.id || '') === contentItemId, allContentItems,
   })
   const { selectContentItem } = useContentSelectionController({
     selectedContentItem,
@@ -1171,8 +1171,8 @@ export function useAppController() {
     setTaskQueuePollingInterval,
     toggleClipboardWatching,
     loadOpenClawStatus, repairOpenClawMcp,
-    startOpenClawGateway,
-    saveObsidianSettingsFromForm,
+    startOpenClawGateway, saveObsidianSettingsFromForm,
+    checkManualUpdate,
     setContentViewedState,
     saveCookie,
     saveBilibiliCookie,

@@ -18,9 +18,24 @@ export const TEXT_PROVIDER_PRESETS = Object.freeze({
   },
   custom: {
     id: '', type: 'custom', label: '', base_url: 'http://127.0.0.1:11434/v1',
-    models: [], thinking_parameter: 'none', send_temperature: false, stream_options: false, response_format: false,
+    models: [], auth_scheme: 'bearer', thinking_parameter: 'none', send_temperature: false, stream_options: false, response_format: false,
   },
 })
+
+// They fill only verified OpenAI Chat Completions dialect fields. A model can
+// still reject optional extensions, so each capability remains opt-in.
+export const CUSTOM_PROVIDER_DIALECT_PRESETS = Object.freeze([
+  { value: 'generic-bearer', label: '通用 OpenAI Chat Completions（Bearer）', auth_scheme: 'bearer', thinking_parameter: 'none', send_temperature: false, stream_options: false, response_format: false },
+  { value: 'generic-api-key', label: '通用 Chat Completions（api-key 请求头）', auth_scheme: 'api_key', thinking_parameter: 'chat_template_enable_thinking', send_temperature: false, stream_options: false, response_format: false },
+  { value: 'openai', label: 'OpenAI', label_value: 'OpenAI', base_url: 'https://api.openai.com/v1', auth_scheme: 'bearer', thinking_parameter: 'none', send_temperature: true, stream_options: true, response_format: true },
+  { value: 'gemini-openai', label: 'Google Gemini（OpenAI 兼容）', label_value: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', auth_scheme: 'bearer', thinking_parameter: 'reasoning_effort', send_temperature: true, stream_options: false, response_format: false },
+  { value: 'claude-openai', label: 'Claude（OpenAI 兼容）', label_value: 'Claude', base_url: 'https://api.anthropic.com/v1', auth_scheme: 'bearer', thinking_parameter: 'none', send_temperature: true, stream_options: true, response_format: false },
+  { value: 'glm', label: 'GLM / Z.AI', label_value: 'GLM / Z.AI', base_url: 'https://api.z.ai/api/paas/v4', auth_scheme: 'bearer', thinking_parameter: 'thinking', send_temperature: true, stream_options: true, response_format: false },
+  { value: 'minimax', label: 'MiniMax', label_value: 'MiniMax', base_url: 'https://api.minimaxi.com/v1', auth_scheme: 'bearer', thinking_parameter: 'reasoning_split', send_temperature: true, stream_options: false, response_format: false },
+  { value: 'groq', label: 'Groq', label_value: 'Groq', base_url: 'https://api.groq.com/openai/v1', auth_scheme: 'bearer', thinking_parameter: 'none', send_temperature: true, stream_options: false, response_format: false },
+  { value: 'openrouter', label: 'OpenRouter', label_value: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', auth_scheme: 'bearer', thinking_parameter: 'none', send_temperature: true, stream_options: false, response_format: false },
+  { value: 'mistral', label: 'Mistral AI', label_value: 'Mistral AI', base_url: 'https://api.mistral.ai/v1', auth_scheme: 'bearer', thinking_parameter: 'reasoning_effort', send_temperature: true, stream_options: false, response_format: false },
+])
 
 function errorMessage(error, fallback) {
   return error?.response?.data?.detail || error?.message || fallback
@@ -33,6 +48,7 @@ function cloneDraft(source) {
     label: String(source?.label || ''),
     base_url: String(source?.base_url || ''),
     models: Array.isArray(source?.models) ? [...source.models] : [],
+    auth_scheme: String(source?.auth_scheme || 'bearer'),
     thinking_parameter: String(source?.thinking_parameter || 'none'),
     send_temperature: source?.send_temperature === true,
     stream_options: source?.stream_options === true,
@@ -58,6 +74,7 @@ export function useTextModelProviderSettingsController({
   const busyAction = ref('')
   const editorOpen = ref(false)
   const editingExisting = ref(false)
+  const dialectPreset = ref('generic-bearer')
   const draft = reactive(cloneDraft(TEXT_PROVIDER_PRESETS.custom))
   let loadRequestId = 0
 
@@ -75,14 +92,28 @@ export function useTextModelProviderSettingsController({
 
   function openCreate() {
     replaceDraft(TEXT_PROVIDER_PRESETS.custom)
+    dialectPreset.value = 'generic-bearer'
     editingExisting.value = false
     editorOpen.value = true
   }
 
   function openEdit(provider) {
     replaceDraft(provider)
+    dialectPreset.value = ''
     editingExisting.value = true
     editorOpen.value = true
+  }
+
+  function applyDialectPreset(value) {
+    const preset = CUSTOM_PROVIDER_DIALECT_PRESETS.find((item) => item.value === value)
+    if (!preset || editingExisting.value) return
+    Object.assign(draft, cloneDraft({
+      ...TEXT_PROVIDER_PRESETS.custom,
+      ...preset,
+      id: draft.id,
+      label: preset.label_value || draft.label,
+      models: draft.models,
+    }))
   }
 
   function closeEditor() {
@@ -136,6 +167,7 @@ export function useTextModelProviderSettingsController({
       thinking_parameter: draft.thinking_parameter,
     }
     if (draft.type === 'custom') {
+      payload.auth_scheme = draft.auth_scheme
       payload.send_temperature = draft.send_temperature
       payload.stream_options = draft.stream_options
       payload.response_format = draft.response_format
@@ -267,8 +299,8 @@ export function useTextModelProviderSettingsController({
 
   return {
     providers, modelOptions, loading, loadError, busyAction, isBusy,
-    editorOpen, editingExisting, draft, draftModelsText,
-    openCreate, openEdit, closeEditor, loadProviders, saveProvider,
+    editorOpen, editingExisting, dialectPreset, draft, draftModelsText,
+    openCreate, openEdit, applyDialectPreset, closeEditor, loadProviders, saveProvider,
     testProvider, refreshModels, deleteProvider, setDefaultModel,
   }
 }

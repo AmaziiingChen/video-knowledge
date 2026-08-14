@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -33,6 +33,11 @@ _LEGACY_MODEL_ALIASES = {
 }
 
 ResponseFormat = str | None
+
+
+def _strip_sdk_bearer_header(request: httpx.Request) -> None:
+    """Remove the OpenAI SDK's synthetic Bearer header for header-key APIs."""
+    request.headers.pop("Authorization", None)
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,7 @@ class OpenAICompatibleProvider:
         model: str,
         thinking_type: str = "enabled",
         thinking_parameter: str = "thinking",
+        auth_scheme: str = "bearer",
         send_temperature: bool = True,
         supports_stream_options: bool = True,
         supports_response_format: bool = True,
@@ -118,20 +124,42 @@ class OpenAICompatibleProvider:
         self.model = model
         self.thinking_type = thinking_type
         self.thinking_parameter = thinking_parameter
+        self.auth_scheme = auth_scheme
         self.send_temperature = send_temperature
         self.supports_stream_options = supports_stream_options
         self.supports_response_format = supports_response_format
         self._api_key_redaction = api_key
-        self._client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=max(
+        headers: dict[str, str] = {}
+        client_api_key = api_key
+        if auth_scheme == "api_key":
+            headers["api-key"] = api_key
+            client_api_key = "unused"
+        elif auth_scheme == "x_api_key":
+            headers["x-api-key"] = api_key
+            client_api_key = "unused"
+        elif auth_scheme != "bearer":
+            raise ValueError("不支持的 API Key 鉴权方式")
+        http_client_options: dict[str, object] = {
+            "follow_redirects": False,
+            "trust_env": False,
+        }
+        if auth_scheme != "bearer":
+            http_client_options["event_hooks"] = {
+                "request": [_strip_sdk_bearer_header]
+            }
+        client_options: dict[str, object] = {
+            "api_key": client_api_key,
+            "base_url": base_url,
+            "timeout": max(
                 5.0,
                 float(settings.llm_request_timeout_seconds if request_timeout_seconds is None else request_timeout_seconds),
             ),
-            max_retries=0,
-            http_client=httpx.Client(follow_redirects=False, trust_env=False),
-        )
+            "max_retries": 0,
+            "http_client": httpx.Client(**http_client_options),
+        }
+        if headers:
+            client_options["default_headers"] = headers
+        self._client = OpenAI(**client_options)
 
     def _extra_body(self) -> dict[str, object] | None:
         parameter = getattr(self, "thinking_parameter", "thinking")
@@ -139,9 +167,44 @@ class OpenAICompatibleProvider:
             return {"thinking": {"type": self.thinking_type}}
         if parameter == "enable_thinking":
             return {"enable_thinking": self.thinking_type == "enabled"}
+        if parameter == "chat_template_enable_thinking":
+            return {
+                "chat_template_kwargs": {
+                    "enable_thinking": self.thinking_type == "enabled"
+                }
+            }
+        if parameter == "reasoning_split" and self.thinking_type == "enabled":
+            return {"reasoning_split": True}
         return None
 
+    @staticmethod
+    def _reasoning_text(value: object | None) -> str:
+        """Read only explicit reasoning fields; never strip markup from content."""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, Mapping):
+            return OpenAICompatibleProvider._reasoning_text(
+                value.get("text") or value.get("content") or value.get("reasoning")
+            )
+        if isinstance(value, (list, tuple)):
+            return "".join(OpenAICompatibleProvider._reasoning_text(item) for item in value)
+        text = getattr(value, "text", None) or getattr(value, "content", None)
+        return text if isinstance(text, str) else ""
+
+    @classmethod
+    def _response_reasoning(cls, message: object | None) -> str:
+        if message is None:
+            return ""
+        for field in ("reasoning_content", "reasoning", "reasoning_details"):
+            value = getattr(message, field, None)
+            normalized = cls._reasoning_text(value)
+            if normalized:
+                return normalized
+        return ""
+
     def _reasoning_effort(self) -> str | None:
+        if getattr(self, "thinking_parameter", "") == "reasoning_effort":
+            return "high" if self.thinking_type == "enabled" else "none"
         # DeepSeek V4 accepts the thinking switch and effort as separate
         # controls. Send both explicitly so a saved thinking selection cannot
         # silently fall back to a response without reasoning metadata.
@@ -218,9 +281,7 @@ class OpenAICompatibleProvider:
             raise self._safe_error(exc) from exc
         choice = response.choices[0]
         content = (choice.message.content or "").strip()
-        reasoning_content = str(
-            getattr(choice.message, "reasoning_content", "") or ""
-        )
+        reasoning_content = self._response_reasoning(choice.message)
         usage = getattr(response, "usage", None)
         return LLMResponse(
             content=content,
@@ -296,18 +357,14 @@ class OpenAICompatibleProvider:
             choice = event.choices[0]
             delta = getattr(choice, "delta", None)
             text = getattr(delta, "content", None) if delta else None
-            reasoning = (
-                getattr(delta, "reasoning_content", None)
-                if delta
-                else None
-            )
+            reasoning = self._response_reasoning(delta)
             finish_reason = (
                 str(getattr(choice, "finish_reason", "") or "") or None
             )
             if text or reasoning or normalized_usage or finish_reason:
                 yield LLMStreamChunk(
                     content=str(text or ""),
-                    reasoning_content=str(reasoning or ""),
+                    reasoning_content=reasoning,
                     usage=normalized_usage,
                     finish_reason=finish_reason,
                 )
@@ -355,6 +412,7 @@ def default_llm_provider(model: str | None = None) -> LLMProvider:
         model=runtime["model"],
         thinking_type=runtime["thinking_type"],
         thinking_parameter=runtime["thinking_parameter"],
+        auth_scheme=runtime["auth_scheme"],
         send_temperature=runtime["send_temperature"],
         supports_stream_options=runtime["stream_options"],
         supports_response_format=runtime["response_format"],

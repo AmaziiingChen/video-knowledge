@@ -166,6 +166,7 @@ defineExpose({
   focusLibrarySearch: () => librarySidebar.value?.focusLibrarySearch?.(),
   showLibrarySearch: () => librarySidebar.value?.showLibrarySearch?.(),
   showLibraryFiles: () => librarySidebar.value?.showLibraryFiles?.(),
+  chooseLocalFileImport: () => librarySidebar.value?.chooseLocalFileImport?.(),
 })
 </script>
 

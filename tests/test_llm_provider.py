@@ -4,13 +4,19 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from services.llm_provider import LLMMessage, OpenAICompatibleProvider
+from services.llm_provider import (
+    LLMMessage,
+    LLMStreamChunk,
+    OpenAICompatibleProvider,
+    _strip_sdk_bearer_header,
+)
 
 
 class _FakeCompletions:
@@ -155,6 +161,103 @@ def test_qwen_uses_enable_thinking_while_custom_sends_no_vendor_parameter():
     provider.chat([LLMMessage(role="user", content="test")])
     assert "extra_body" not in completions.calls[-1]
     assert "reasoning_effort" not in completions.calls[-1]
+
+
+@pytest.mark.parametrize(
+    ("thinking_parameter", "expected_extra_body"),
+    [
+        (
+            "chat_template_enable_thinking",
+            {"chat_template_kwargs": {"enable_thinking": True}},
+        ),
+        ("reasoning_split", {"reasoning_split": True}),
+    ],
+)
+def test_common_openai_compatible_thinking_dialects_are_explicit(
+    thinking_parameter, expected_extra_body
+):
+    completions = _FakeCompletions()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.name = "custom"
+    provider.model = "test-model"
+    provider.thinking_type = "enabled"
+    provider.thinking_parameter = thinking_parameter
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    provider.chat([LLMMessage(role="user", content="test")])
+
+    assert completions.calls[-1]["extra_body"] == expected_extra_body
+
+
+def test_reasoning_effort_is_sent_as_a_standard_chat_completion_field():
+    completions = _FakeCompletions()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.name = "custom"
+    provider.model = "test-model"
+    provider.thinking_type = "enabled"
+    provider.thinking_parameter = "reasoning_effort"
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    provider.chat([LLMMessage(role="user", content="test")])
+
+    assert completions.calls[-1]["reasoning_effort"] == "high"
+    assert "extra_body" not in completions.calls[-1]
+
+
+def test_reasoning_details_are_kept_separate_from_content_for_common_variants():
+    completions = _FakeCompletions()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.name = "custom"
+    provider.model = "test-model"
+    provider.thinking_type = "enabled"
+    provider.thinking_parameter = "none"
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+    message = SimpleNamespace(
+        content="final answer",
+        reasoning_details=[{"text": "first"}, SimpleNamespace(content=" second")],
+    )
+    assert provider._response_reasoning(message) == "first second"
+
+    chunks = list(provider._stream_chunks(iter([
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="answer", reasoning_details=[{"text": "thought"}]),
+                    finish_reason=None,
+                )
+            ],
+            usage=None,
+        )
+    ])))
+    assert chunks == [LLMStreamChunk(content="answer", reasoning_content="thought")]
+
+
+def test_non_bearer_auth_uses_the_selected_fixed_header_without_sdk_bearer(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class CapturingOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("services.llm_provider.OpenAI", CapturingOpenAI)
+    OpenAICompatibleProvider(
+        api_key="test-secret",
+        base_url="https://example.test/v1",
+        model="example-model",
+        auth_scheme="api_key",
+    )
+
+    assert captured["api_key"] == "unused"
+    assert captured["default_headers"] == {"api-key": "test-secret"}
+    request = httpx.Request(
+        "POST",
+        "https://example.test/v1/chat/completions",
+        headers={"Authorization": "Bearer unused", "api-key": "test-secret"},
+    )
+    _strip_sdk_bearer_header(request)
+    assert dict(request.headers)["api-key"] == "test-secret"
+    assert "authorization" not in request.headers
 
 
 @pytest.mark.parametrize(

@@ -252,6 +252,7 @@ def test_runtime_resolves_each_provider_key_url_model_and_thinking_parameter(mon
             "base_url": base_url,
             "model": model,
             "thinking_type": "enabled",
+            "auth_scheme": "bearer",
             "thinking_parameter": thinking_parameter,
             "send_temperature": False,
             "stream_options": provider_id == "qwen",
@@ -265,6 +266,21 @@ def test_custom_provider_sends_no_guessed_thinking_parameter():
     assert provider.name == "local-gateway"
     assert provider.model == "vendor/model-v1"
     assert provider.thinking_parameter == "none"
+
+
+def test_custom_provider_preserves_explicit_auth_and_common_thinking_dialect():
+    _save_custom_provider(
+        auth_scheme="api_key",
+        thinking_parameter="chat_template_enable_thinking",
+    )
+
+    runtime = resolve_text_model_runtime("local-gateway::vendor/model-v1:enabled")
+
+    assert runtime["auth_scheme"] == "api_key"
+    assert runtime["thinking_parameter"] == "chat_template_enable_thinking"
+    provider = default_llm_provider("local-gateway::vendor/model-v1:enabled")
+    assert provider.auth_scheme == "api_key"
+    assert provider.thinking_parameter == "chat_template_enable_thinking"
 
 
 def test_model_discovery_uses_saved_profile_and_falls_back_without_leaking_secret(monkeypatch):

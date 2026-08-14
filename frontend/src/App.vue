@@ -1059,6 +1059,7 @@ const {
   formatDateTime,
   renderMarkdown,
   toggleClipboardWatching,
+  checkManualUpdate,
   startOpenClawGateway,
   saveObsidianSettingsFromForm,
   saveCookie,
@@ -2558,6 +2559,41 @@ async function focusLibrarySearch() {
   primarySidebar.value?.showLibrarySearch?.()
 }
 
+async function handleDesktopMenuAction(action) {
+  switch (String(action || '')) {
+    case 'settings':
+      await openSettings()
+      break
+    case 'check-for-update':
+      await checkManualUpdate({ interactive: true })
+      break
+    case 'import-local-files':
+      await showLibraryFiles()
+      primarySidebar.value?.chooseLocalFileImport?.()
+      break
+    case 'open-command-palette':
+      commandPaletteOpen.value = true
+      break
+    case 'toggle-primary-sidebar':
+      setPrimarySidebarOpen(!primarySidebarOpen.value)
+      break
+    case 'toggle-context-sidebar':
+      if (['library', 'knowledge'].includes(activeView.value)) {
+        contextSidebarOpen.value = !contextSidebarOpen.value
+      }
+      break
+    case 'toggle-process-log':
+      processLogOpen.value = !processLogOpen.value
+      break
+    case 'toggle-clipboard-watching':
+      await toggleClipboardWatching(!clipboardWatching.value)
+      break
+    case 'refresh-library':
+      await Promise.all([loadLibraryFolders(), loadContentItems()])
+      break
+  }
+}
+
 function handlePaneSnapCollapse(side) {
   if (side === 'primary') {
     setPrimarySidebarOpen(false)
@@ -2676,10 +2712,16 @@ watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
 
 onMounted(() => {
   void telemetryNoticeController.start()
+  const removeMenuActionListener = window.knowledgeHubDesktop?.onMenuAction?.((action) => {
+    void handleDesktopMenuAction(action)
+  })
+  window.__knowledgeHubRemoveMenuActionListener = removeMenuActionListener
 })
 
 onBeforeUnmount(() => {
   telemetryNoticeController.stop()
+  window.__knowledgeHubRemoveMenuActionListener?.()
+  delete window.__knowledgeHubRemoveMenuActionListener
   disposeWechatReportGenerationController()
   disposeWechatAccountController()
   disposeWechatCoverController()

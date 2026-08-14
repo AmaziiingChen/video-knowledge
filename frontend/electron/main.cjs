@@ -69,6 +69,7 @@ let backendReady = false
 let backendReadyWaiters = []
 let notificationTray = null
 let pendingNotifications = []
+let unreadDockBadgeCount = 0
 
 function trayIcon() {
   const image = nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png'))
@@ -83,6 +84,83 @@ function showMainWindow() {
   }
   mainWindow.show()
   mainWindow.focus()
+}
+
+function sendRendererMenuAction(action) {
+  showMainWindow()
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const deliver = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('knowledgehub:menu-action', action)
+  }
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', deliver)
+  } else {
+    deliver()
+  }
+}
+
+function createApplicationMenu() {
+  const action = (id) => () => sendRendererMenuAction(id)
+  const template = [
+    {
+      label: 'KnowledgeHub',
+      submenu: [
+        { role: 'about', label: '关于 KnowledgeHub' },
+        { type: 'separator' },
+        { label: '设置…', accelerator: 'CommandOrControl+,', click: action('settings') },
+        { label: '检查更新…', click: action('check-for-update') },
+        { type: 'separator' },
+        { role: 'hide', label: '隐藏 KnowledgeHub' },
+        { role: 'hideOthers', label: '隐藏其他应用' },
+        { role: 'unhide', label: '显示全部' },
+        { type: 'separator' },
+        { role: 'quit', label: '退出 KnowledgeHub' },
+      ],
+    },
+    {
+      label: '文件',
+      submenu: [
+        { label: '导入本地资料…', accelerator: 'CommandOrControl+O', click: action('import-local-files') },
+      ],
+    },
+    { role: 'editMenu', label: '编辑' },
+    {
+      label: '视图',
+      submenu: [
+        { label: '快速打开…', accelerator: 'CommandOrControl+K', click: action('open-command-palette') },
+        { type: 'separator' },
+        { label: '显示或隐藏文件栏', accelerator: 'CommandOrControl+Shift+L', click: action('toggle-primary-sidebar') },
+        { label: '显示或隐藏右侧栏', accelerator: 'CommandOrControl+Shift+I', click: action('toggle-context-sidebar') },
+        { label: '显示或隐藏处理日志', accelerator: 'CommandOrControl+Shift+J', click: action('toggle-process-log') },
+      ],
+    },
+    {
+      label: '工具',
+      submenu: [
+        { label: '切换剪贴板监听', click: action('toggle-clipboard-watching') },
+        { label: '刷新资料库', click: action('refresh-library') },
+      ],
+    },
+    {
+      role: 'window',
+      label: '窗口',
+      submenu: [
+        { role: 'minimize', label: '最小化' },
+        { role: 'zoom', label: '缩放' },
+        { type: 'separator' },
+        { role: 'front', label: '置于前台' },
+      ],
+    },
+    {
+      role: 'help',
+      label: '帮助',
+      submenu: [
+        { label: '检查更新…', click: action('check-for-update') },
+      ],
+    },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 function updateNotificationTray() {
@@ -112,6 +190,15 @@ function createNotificationTray() {
   notificationTray = new Tray(trayIcon())
   notificationTray.on('click', showMainWindow)
   updateNotificationTray()
+}
+
+function setUnreadDockBadgeCount(value) {
+  const numericValue = Number(value)
+  unreadDockBadgeCount = Number.isFinite(numericValue)
+    ? Math.min(999, Math.max(0, Math.floor(numericValue)))
+    : 0
+  if (process.platform === 'darwin') app.setBadgeCount(unreadDockBadgeCount)
+  return unreadDockBadgeCount
 }
 
 function markBackendReady() {
@@ -301,6 +388,9 @@ ipcMain.handle('knowledgehub:set-pending-notifications', trustedIpcHandler((item
     : []
   updateNotificationTray()
   return true
+}))
+ipcMain.handle('knowledgehub:set-unread-badge-count', trustedIpcHandler((count = 0) => {
+  return setUnreadDockBadgeCount(count)
 }))
 
 ipcMain.handle('knowledgehub:campus-auth-status', trustedIpcHandler(async () => campusWebVpn.status()))
@@ -730,6 +820,7 @@ app.whenReady().then(async () => {
   // Render the real Vue workbench immediately. Its data hydration waits on the
   // bridge below, so the visible shell does not make failed API requests while
   // Python is still booting.
+  createApplicationMenu()
   createWindow()
   createNotificationTray()
 
@@ -756,6 +847,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  setUnreadDockBadgeCount(0)
   stopMcpBridgeSession({ ignoreErrors: true })
   terminateBackendProcess(backendProcess)
   clearBackendLease(backendRuntime().runDir, backendProcess?.pid)

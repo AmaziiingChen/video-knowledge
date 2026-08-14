@@ -51,6 +51,21 @@
 
     <el-dialog v-model="editorOpen" append-to-body width="min(580px, calc(100vw - 32px))" class="text-provider-editor" :title="editingExisting ? `编辑 ${draft.label}` : '新增文本模型服务'" :close-on-click-modal="!isBusy" :close-on-press-escape="!isBusy">
       <div class="text-provider-form">
+        <template v-if="!editingExisting">
+          <label for="text-provider-dialect">常见服务快速预设</label>
+          <el-select id="text-provider-dialect" v-model="dialectPreset" aria-label="常见服务快速预设" @change="applyDialectPreset">
+            <el-option label="通用 OpenAI Chat Completions（Bearer）" value="generic-bearer" />
+            <el-option label="通用 Chat Completions（api-key 请求头）" value="generic-api-key" />
+            <el-option label="OpenAI" value="openai" />
+            <el-option label="Google Gemini（OpenAI 兼容）" value="gemini-openai" />
+            <el-option label="Claude（OpenAI 兼容）" value="claude-openai" />
+            <el-option label="GLM / Z.AI" value="glm" />
+            <el-option label="MiniMax" value="minimax" />
+            <el-option label="Groq" value="groq" />
+            <el-option label="OpenRouter" value="openrouter" />
+            <el-option label="Mistral AI" value="mistral" />
+          </el-select>
+        </template>
         <label for="text-provider-id">Provider ID</label>
         <el-input id="text-provider-id" v-model="draft.id" name="text-provider-id" autocomplete="off" spellcheck="false" :disabled="editingExisting" placeholder="例如 local-gateway" />
         <label for="text-provider-label">显示名称</label>
@@ -67,12 +82,21 @@
             <el-option label="不发送额外思考参数" value="none" />
             <el-option label="thinking.type" value="thinking" />
             <el-option label="enable_thinking" value="enable_thinking" />
+            <el-option label="reasoning_effort" value="reasoning_effort" />
+            <el-option label="chat_template_kwargs.enable_thinking" value="chat_template_enable_thinking" />
+            <el-option label="reasoning_split（输出独立思考字段）" value="reasoning_split" />
+          </el-select>
+          <label for="text-provider-auth">鉴权方式</label>
+          <el-select id="text-provider-auth" v-model="draft.auth_scheme" aria-label="鉴权方式">
+            <el-option label="Authorization: Bearer" value="bearer" />
+            <el-option label="api-key 请求头" value="api_key" />
+            <el-option label="x-api-key 请求头" value="x_api_key" />
           </el-select>
           <label><el-checkbox v-model="draft.send_temperature">发送 temperature</el-checkbox></label>
           <label><el-checkbox v-model="draft.stream_options">发送 stream_options</el-checkbox></label>
           <label><el-checkbox v-model="draft.response_format">支持 JSON response_format</el-checkbox></label>
         </div>
-        <p class="text-provider-form-note">Knowledge 类结构化任务只会使用支持 response_format 的服务；系统不会自动猜测 Base URL，也不会自动故障转移。</p>
+        <p class="text-provider-form-note">快速预设只填入已验证的 Chat Completions 方言；模型名称仍需按服务文档填写或刷新。Knowledge 类结构化任务只会使用支持 response_format 的服务；系统不会猜测 Base URL、发送任意自定义请求头或自动故障转移。</p>
       </div>
       <template #footer>
         <div class="text-provider-editor-footer">
@@ -103,8 +127,8 @@ const emit = defineEmits(['update:selectedModel', 'options-updated'])
 
 const {
   providers, modelOptions, loading, loadError, busyAction, isBusy,
-  editorOpen, editingExisting, draft, draftModelsText,
-  openCreate, openEdit, closeEditor, loadProviders, saveProvider,
+  editorOpen, editingExisting, dialectPreset, draft, draftModelsText,
+  openCreate, openEdit, applyDialectPreset, closeEditor, loadProviders, saveProvider,
   testProvider, refreshModels, deleteProvider, setDefaultModel,
 } = useTextModelProviderSettingsController({
   notify: ElMessage,
