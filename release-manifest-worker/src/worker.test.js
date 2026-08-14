@@ -5,6 +5,7 @@ import { handleReleaseManifestRequest } from './worker.js'
 
 const LATEST_RELEASE_PAGE = 'https://github.com/AmaziiingChen/video-knowledge/releases/latest'
 const RELEASE_PAGE = 'https://github.com/AmaziiingChen/video-knowledge/releases/tag/v0.1.1'
+const LATEST_RELEASE_API = 'https://api.github.com/repos/AmaziiingChen/video-knowledge/releases/latest'
 
 function latestReleaseResponse(location = RELEASE_PAGE) {
   return new Response(null, { status: 302, headers: { location } })
@@ -42,6 +43,41 @@ test('uses the platform fetch when Workers passes an environment object', async 
 
   assert.equal(response.status, 200)
   assert.equal((await response.json()).latest_version, '0.1.1')
+})
+
+test('falls back to GitHub\'s release API when the public redirect is unavailable', async () => {
+  const calls = []
+  const response = await handleReleaseManifestRequest(
+    new Request('https://knowledgehub-release-manifest.example.workers.dev/v1/manifest.json'),
+    async (url, init) => {
+      calls.push({ url, init })
+      if (url === LATEST_RELEASE_PAGE) return new Response('unavailable', { status: 503 })
+      return Response.json({
+        tag_name: 'v0.1.7',
+        html_url: 'https://github.com/AmaziiingChen/video-knowledge/releases/tag/v0.1.7',
+        body: '修复更新检查。',
+      })
+    },
+  )
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    latest_version: '0.1.7',
+    download_page_url: 'https://github.com/AmaziiingChen/video-knowledge/releases/tag/v0.1.7',
+    release_notes: '修复更新检查。',
+  })
+  assert.deepEqual(calls, [
+    { url: LATEST_RELEASE_PAGE, init: { redirect: 'manual' } },
+    {
+      url: LATEST_RELEASE_API,
+      init: {
+        headers: {
+          accept: 'application/vnd.github+json',
+          'user-agent': 'KnowledgeHub-release-manifest',
+        },
+      },
+    },
+  ])
 })
 
 test('rejects other routes without fetching GitHub', async () => {
