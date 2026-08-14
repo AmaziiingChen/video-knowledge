@@ -36,7 +36,7 @@
     "katex": "^0.16.47",
     "marked": "^18.0.6",
     "splitpanes": "^4.1.2",
-    "vue": "^3.5.39"
+    "vue": "^3.5.41"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.7",
