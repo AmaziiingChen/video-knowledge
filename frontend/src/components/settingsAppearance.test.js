@@ -50,14 +50,16 @@ test('Telegram controls are absent from the desktop UI', () => {
   assert.doesNotMatch(chromeSource, /Telegram|telegram/)
 })
 
-test('privacy settings explain the bounded diagnostic data without a stale status switch', () => {
+test('privacy settings explain and control the bounded diagnostic data with upload status', () => {
   assert.match(source, /17 个固定的功能结果与处理阶段数据/)
   assert.match(source, /为改进软件体验/)
   assert.match(source, /低频收集 17 个固定的功能结果与处理阶段数据，并发送至 Cloudflare/)
   assert.match(source, /数据最多保留 3 个月/)
-  assert.doesNotMatch(source, /正在读取当前诊断状态/)
-  assert.doesNotMatch(source, /尚未读取当前诊断状态/)
-  assert.doesNotMatch(source, /useTelemetrySettingsController/)
+  assert.match(source, /上传状态/)
+  assert.match(source, /emit\('save-telemetry'/)
+  assert.match(source, /emit\('retry-telemetry-upload'/)
+  assert.match(appSource, /useTelemetrySettingsController/)
+  assert.match(appSource, /loadTelemetryStatus\(\)/)
   assert.doesNotMatch(source, /仅在你允许后/)
   assert.doesNotMatch(source, /未配置官方 HTTPS 收集端前不会上传/)
 })

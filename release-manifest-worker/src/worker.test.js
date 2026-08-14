@@ -34,15 +34,26 @@ test('serves only the public manifest path and uses the fixed GitHub latest-rele
   assert.equal(response.headers.get('cache-control'), 'public, max-age=300, stale-while-revalidate=60')
 })
 
-test('uses the platform fetch when Workers passes an environment object', async () => {
-  const response = await handleReleaseManifestRequest(
-    new Request('https://knowledgehub-release-manifest.example.workers.dev/v1/manifest.json'),
-    {},
-    async () => latestReleaseResponse(),
-  )
+test('uses platform fetch rather than mistaking the Workers runtime context for a fetcher', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (...args) => {
+    calls.push(args)
+    return latestReleaseResponse()
+  }
+  try {
+    const response = await handleReleaseManifestRequest(
+      new Request('https://knowledgehub-release-manifest.example.workers.dev/v1/manifest.json'),
+      {},
+      { waitUntil() {} },
+    )
 
-  assert.equal(response.status, 200)
-  assert.equal((await response.json()).latest_version, '0.1.1')
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).latest_version, '0.1.1')
+    assert.equal(calls.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('falls back to GitHub\'s release API when the public redirect is unavailable', async () => {

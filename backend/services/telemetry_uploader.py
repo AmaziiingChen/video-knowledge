@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import sqlite3
+from datetime import datetime, timezone
 from threading import Event, Lock, Thread
 from urllib.parse import urlparse
 
@@ -80,7 +81,11 @@ def upload_once(*, collector_url: object | None = None, client: httpx.Client | N
     active_client = client or httpx.Client(
         timeout=REQUEST_TIMEOUT_SECONDS,
         follow_redirects=False,
-        trust_env=False,
+        # The packaged backend strips proxy environment variables at launch.
+        # Allow httpx/urllib to resolve the user's macOS system proxy for this
+        # one fixed HTTPS destination so Workers remains reachable on networks
+        # where direct connections to workers.dev are blocked.
+        trust_env=True,
     )
     owns_client = client is None
     try:
@@ -115,7 +120,12 @@ class TelemetryUploader:
     def __init__(self) -> None:
         self._stop_event = Event()
         self._lock = Lock()
+        self._upload_lock = Lock()
         self._thread: Thread | None = None
+        self._last_result = ""
+        self._last_attempt_at = ""
+        self._last_success_at = ""
+        self._consecutive_failures = 0
 
     def start(self) -> bool:
         if not validated_collector_url(settings.telemetry_collector_url):
@@ -138,11 +148,37 @@ class TelemetryUploader:
             if self._thread is thread and (thread is None or not thread.is_alive()):
                 self._thread = None
 
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            running = self._thread is not None and self._thread.is_alive()
+            return {
+                "upload_running": running,
+                "last_upload_result": self._last_result,
+                "last_upload_attempt_at": self._last_attempt_at,
+                "last_upload_success_at": self._last_success_at,
+                "consecutive_upload_failures": self._consecutive_failures,
+            }
+
+    def upload_now(self) -> dict[str, object]:
+        with self._upload_lock:
+            result = upload_once()
+            attempted_at = datetime.now(timezone.utc).isoformat()
+            with self._lock:
+                self._last_result = result
+                self._last_attempt_at = attempted_at
+                if result == "succeeded":
+                    self._last_success_at = attempted_at
+                self._consecutive_failures = (
+                    self._consecutive_failures + 1 if result == "failed" else 0
+                )
+            return self.status()
+
     def _run(self) -> None:
         delay = INITIAL_DELAY_SECONDS
         failures = 0
         while not self._stop_event.wait(delay):
-            result = upload_once()
+            self.upload_now()
+            result = str(self.status()["last_upload_result"])
             delay, failures = next_upload_delay(result, failures)
 
 

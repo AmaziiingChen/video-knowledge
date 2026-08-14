@@ -171,7 +171,7 @@ class Settings(BaseSettings):
     # Manual updates only: clients read the fixed public manifest and open its
     # official GitHub Release page in the browser. The app never downloads or
     # installs an update in the background.
-    app_version: str = "0.1.4"
+    app_version: str = "0.1.9"
     release_manifest_url: str = (
         "https://knowledgehub-release-manifest.knowledgehub4chen.workers.dev/v1/manifest.json"
     )

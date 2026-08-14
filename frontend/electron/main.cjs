@@ -43,9 +43,10 @@ const BACKEND_INSTANCE_TOKEN = randomUUID()
 // Electron's platform-default userData path.
 applyUserDataDirectoryOverride(app)
 
-// KnowledgeHub owns explicit direct-network clients. Do not let Electron
-// navigation or platform login windows silently follow the macOS system proxy.
-app.commandLine.appendSwitch('no-proxy-server')
+// Public HTTPS requests such as release checks follow the user's macOS network
+// settings. Renderer and login-window navigation remain restricted to their
+// reviewed host allowlists, while the local backend still receives a proxy-free
+// child environment for credentialed collection and download tasks.
 
 protocol.registerSchemesAsPrivileged([
   {

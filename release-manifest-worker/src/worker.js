@@ -87,8 +87,12 @@ async function fetchLatestReleasePage(fetcher) {
   return manifest || unavailable('release_validation')
 }
 
-export async function handleReleaseManifestRequest(request, envOrFetcher, injectedFetcher = fetch) {
-  const fetcher = typeof envOrFetcher === 'function' ? envOrFetcher : injectedFetcher
+export async function handleReleaseManifestRequest(request, envOrFetcher) {
+  // Cloudflare invokes module handlers as (request, env, ctx). Never interpret
+  // the runtime context passed as the third argument as an injected fetcher.
+  // Tests may pass a fetcher in the env position; production always uses the
+  // platform fetch bound here.
+  const fetcher = typeof envOrFetcher === 'function' ? envOrFetcher : fetch
   const url = new URL(request.url)
   if (request.method !== 'GET' || url.pathname !== MANIFEST_PATH || url.search || url.hash) {
     return json(404, { error: 'not_found' })

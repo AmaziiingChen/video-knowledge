@@ -254,7 +254,7 @@ def test_environment_url_cannot_enable_an_unreviewed_destination(monkeypatch):
     assert client.calls == []
 
 
-def test_default_client_disables_proxies_and_redirects(monkeypatch):
+def test_default_client_allows_system_proxy_only_for_the_fixed_destination(monkeypatch):
     batch = {"events": [{"event_id": "event-one"}]}
     client = _Client(_Response(payload={"accepted": 1}))
     client_options: list[dict[str, object]] = []
@@ -272,9 +272,26 @@ def test_default_client_disables_proxies_and_redirects(monkeypatch):
     assert client_options == [{
         "timeout": telemetry_uploader.REQUEST_TIMEOUT_SECONDS,
         "follow_redirects": False,
-        "trust_env": False,
+        "trust_env": True,
     }]
     assert client.closed is True
+
+
+def test_uploader_exposes_bounded_retry_status(monkeypatch):
+    results = iter(["failed", "succeeded"])
+    monkeypatch.setattr(telemetry_uploader, "upload_once", lambda: next(results))
+    uploader = telemetry_uploader.TelemetryUploader()
+
+    failed = uploader.upload_now()
+    succeeded = uploader.upload_now()
+
+    assert failed["last_upload_result"] == "failed"
+    assert failed["consecutive_upload_failures"] == 1
+    assert failed["last_upload_attempt_at"]
+    assert failed["last_upload_success_at"] == ""
+    assert succeeded["last_upload_result"] == "succeeded"
+    assert succeeded["consecutive_upload_failures"] == 0
+    assert succeeded["last_upload_success_at"] == succeeded["last_upload_attempt_at"]
 
 
 def test_failed_uploads_back_off_without_exceeding_the_regular_interval():
