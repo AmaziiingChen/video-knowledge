@@ -62,6 +62,12 @@ test('privacy settings explain the bounded diagnostic data without a stale statu
   assert.doesNotMatch(source, /未配置官方 HTTPS 收集端前不会上传/)
 })
 
+test('privacy settings expose a manual update check wired to the desktop action', () => {
+  assert.match(source, /emit\('check-updates'\)/)
+  assert.match(source, />检查更新</)
+  assert.match(appSource, /@check-updates="checkManualUpdate\(\{ interactive: true \}\)"/)
+})
+
 test('Xiaohongshu credentials remain usable while the initial capability state is unknown', () => {
   assert.match(source, /当前仅支持主动导入单篇图文，收藏、创作者同步与评论采集暂未开放/)
   assert.match(source, /:disabled="!platformAuthAvailable \|\| !xiaohongshuSessionProbeAvailable"/)

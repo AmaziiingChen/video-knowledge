@@ -9,6 +9,7 @@ const { pathToFileURL } = require('url')
 const { createCampusWebVpnController } = require('./campus-webvpn.cjs')
 const { createPlatformAuthController } = require('./platform-auth.cjs')
 const { directChildEnvironment } = require('./network-env.cjs')
+const { checkDesktopReleaseUpdate } = require('./release-update.cjs')
 const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
 const {
@@ -279,6 +280,10 @@ ipcMain.handle('knowledgehub:open-path', trustedIpcHandler(async (value) => {
 }))
 
 ipcMain.handle('knowledgehub:open-external', trustedIpcHandler(async (url = '') => openExternalUrl(url)))
+ipcMain.handle('knowledgehub:check-for-update', trustedIpcHandler(async () => checkDesktopReleaseUpdate({
+  fetcher: net.fetch.bind(net),
+  currentVersion: app.getVersion(),
+})))
 ipcMain.handle('knowledgehub:backend-access-token', trustedIpcHandler(() => {
   return BACKEND_INSTANCE_TOKEN
 }))

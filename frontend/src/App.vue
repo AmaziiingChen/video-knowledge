@@ -674,6 +674,7 @@
         @save-paddle-ocr-settings="savePaddleOcrSettings"
         @save-manual-collection-settings="saveManualCollectionSettings"
         @save-video-download-settings="saveVideoDownloadSettings"
+        @check-updates="checkManualUpdate({ interactive: true })"
         @open-wechat-manager="openWeChatManager"
       />
 

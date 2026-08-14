@@ -87,6 +87,9 @@
         </section>
 
         <section v-show="settingsSection === 'privacy'" class="settings-page settings-form-page" aria-label="隐私与诊断">
+          <div class="settings-page-toolbar">
+            <el-button size="small" @click="emit('check-updates')">检查更新</el-button>
+          </div>
           <div class="settings-group">
             <div class="settings-row">
               <div class="settings-row-copy">
@@ -752,6 +755,7 @@ const emit = defineEmits([
   'save-paddle-ocr-settings',
   'save-manual-collection-settings',
   'save-video-download-settings',
+  'check-updates',
   'load-runtime-components',
   'install-browser',
   'download-asr-model',

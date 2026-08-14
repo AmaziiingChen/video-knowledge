@@ -26,6 +26,9 @@ export function useDesktopBootstrapSettingsController({
   const douyinVideoQuality = ref('standard')
 
   async function loadDesktopBootstrapSettings({ hasLocalAiSettings = false } = {}) {
+    // Update discovery is independent of optional local settings.  A damaged
+    // provider/profile configuration must not suppress an available release.
+    void Promise.resolve(checkManualUpdate()).catch(() => {})
     try {
       const configResponse = await request.get(`${apiBase}/config`)
       const config = configResponse.data || {}
@@ -77,7 +80,6 @@ export function useDesktopBootstrapSettingsController({
           : optionValues[0] || assistantAiModel.value
       }
 
-      void checkManualUpdate()
       const videoResponse = await request.get(`${apiBase}/video-download-settings`)
       autoDownloadBilibiliVideo.value = Boolean(videoResponse.data?.auto_download_bilibili_video)
       douyinVideoQuality.value = ['low', 'standard', 'high'].includes(videoResponse.data?.douyin_video_quality)
