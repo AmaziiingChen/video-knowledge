@@ -409,6 +409,7 @@ defineExpose({
   showLibraryFiles() {
     librarySearchInput.value?.blur?.()
   },
+  chooseLocalFileImport: () => chooseMarkdownFile(),
 })
 
 const searchActive = computed(() => props.libraryMode === 'search' && Boolean(props.searchQuery.trim()))

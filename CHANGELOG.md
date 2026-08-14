@@ -7,6 +7,28 @@ that tag was continuous and was not distributed as versioned releases.
 
 - Architecture hardening under a product feature freeze.
 
+## v0.1.11
+
+- Discover the diagnostics-only proxy from Electron's macOS networking session
+  when Finder launches the app without shell proxy environment variables.
+
+## v0.1.10
+
+- Route only the fixed Cloudflare diagnostics uploader through a sanitized,
+  dedicated copy of the user's HTTP(S) proxy while every other backend network
+  client remains isolated from proxy environment variables.
+
+## v0.1.9
+
+- Restore OpenClaw MCP bridge sessions when a healthy backend belongs to an
+  earlier desktop launch, and repair stale OpenClaw capability caches.
+- Let release checks follow the user's macOS network settings while retaining
+  the official Cloudflare manifest and GitHub Release allowlists, and fix the
+  Worker runtime handler so it actually calls GitHub instead of its context.
+- Add a diagnostics switch, pending-event and upload status, and a manual retry
+  action; the fixed Cloudflare collector can use the macOS system proxy when a
+  direct `workers.dev` connection is unavailable.
+
 ## v0.1.4
 
 - Restore visible AI reasoning for manual summaries and preserve the existing

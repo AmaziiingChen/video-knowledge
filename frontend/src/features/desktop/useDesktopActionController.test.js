@@ -164,3 +164,32 @@ test('checks optional updates, opens the confirmed page, and records bounded tel
     ],
   ])
 })
+
+test('reports manual update results without interrupting the workbench', async () => {
+  const current = createController({
+    request: { get: async () => ({ data: { state: 'up_to_date' } }) },
+  })
+  await current.controller.checkManualUpdate({ interactive: true })
+  assert.deepEqual(current.messages, [['success', '当前已是最新版本']])
+
+  const unavailable = createController({
+    request: { get: async () => { throw new Error('offline') } },
+  })
+  await unavailable.controller.checkManualUpdate({ interactive: true })
+  assert.deepEqual(unavailable.messages, [['warning', '暂时无法检查更新，请稍后重试']])
+})
+
+test('uses the trusted desktop update reader instead of the proxy-isolated backend', async () => {
+  const state = createController({
+    bridge: {
+      checkForUpdate: async () => ({
+        state: 'up_to_date',
+        current_version: '0.1.5',
+      }),
+    },
+  })
+
+  await state.controller.checkManualUpdate({ interactive: true })
+  assert.deepEqual(state.requests, [])
+  assert.deepEqual(state.messages, [['success', '当前已是最新版本']])
+})

@@ -146,7 +146,7 @@ placeholder):
         "command": "/Applications/KnowledgeHub.app/Contents/Resources/backend/knowledgehub-backend/knowledgehub-backend",
         "args": ["--mcp-stdio"],
         "env": {
-          "KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE": "<HOME>/Library/Application Support/KnowledgeHub/run/mcp-bridge-token"
+          "KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE": "<HOME>/Library/Application Support/knowledgehub-desktop/run/mcp-bridge-token"
         }
       }
     }

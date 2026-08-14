@@ -254,7 +254,7 @@ def test_environment_url_cannot_enable_an_unreviewed_destination(monkeypatch):
     assert client.calls == []
 
 
-def test_default_client_disables_proxies_and_redirects(monkeypatch):
+def test_default_client_remains_direct_without_a_dedicated_proxy(monkeypatch):
     batch = {"events": [{"event_id": "event-one"}]}
     client = _Client(_Response(payload={"accepted": 1}))
     client_options: list[dict[str, object]] = []
@@ -267,6 +267,7 @@ def test_default_client_disables_proxies_and_redirects(monkeypatch):
         "Client",
         lambda **options: client_options.append(options) or client,
     )
+    monkeypatch.delenv(telemetry_uploader.TELEMETRY_PROXY_ENVIRONMENT_NAME, raising=False)
 
     assert telemetry_uploader.upload_once(collector_url=COLLECTOR_URL) == "succeeded"
     assert client_options == [{
@@ -275,6 +276,67 @@ def test_default_client_disables_proxies_and_redirects(monkeypatch):
         "trust_env": False,
     }]
     assert client.closed is True
+
+
+def test_default_client_uses_only_the_validated_dedicated_proxy(monkeypatch):
+    batch = {"events": [{"event_id": "event-one"}]}
+    client = _Client(_Response(payload={"accepted": 1}))
+    client_options: list[dict[str, object]] = []
+    monkeypatch.setattr(telemetry_uploader, "OFFICIAL_COLLECTOR_HOSTS", ALLOWED_HOSTS)
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_batch_snapshot", lambda limit: (7, batch))
+    monkeypatch.setattr(telemetry_uploader.telemetry, "upload_send_permission", _send_allowed)
+    monkeypatch.setattr(telemetry_uploader.telemetry, "acknowledge_uploaded_events", lambda event_ids: 1)
+    monkeypatch.setattr(
+        telemetry_uploader.httpx,
+        "Client",
+        lambda **options: client_options.append(options) or client,
+    )
+    monkeypatch.setenv(
+        telemetry_uploader.TELEMETRY_PROXY_ENVIRONMENT_NAME,
+        "http://127.0.0.1:7897",
+    )
+
+    assert telemetry_uploader.upload_once(collector_url=COLLECTOR_URL) == "succeeded"
+    assert client_options == [{
+        "timeout": telemetry_uploader.REQUEST_TIMEOUT_SECONDS,
+        "follow_redirects": False,
+        "trust_env": False,
+        "proxy": "http://127.0.0.1:7897",
+    }]
+
+
+def test_telemetry_proxy_rejects_credentials_paths_and_unsupported_schemes():
+    for value in (
+        "",
+        "socks5://127.0.0.1:7897",
+        "http://user:secret@127.0.0.1:7897",
+        "http://127.0.0.1:7897/private",
+        "http://127.0.0.1:7897/?target=private",
+        "http://127.0.0.1:bad",
+    ):
+        assert telemetry_uploader.validated_telemetry_proxy_url(value) == ""
+    assert telemetry_uploader.validated_telemetry_proxy_url("http://127.0.0.1") == "http://127.0.0.1:80"
+    assert (
+        telemetry_uploader.validated_telemetry_proxy_url("https://proxy.example.test:443/")
+        == "https://proxy.example.test:443"
+    )
+
+
+def test_uploader_exposes_bounded_retry_status(monkeypatch):
+    results = iter(["failed", "succeeded"])
+    monkeypatch.setattr(telemetry_uploader, "upload_once", lambda: next(results))
+    uploader = telemetry_uploader.TelemetryUploader()
+
+    failed = uploader.upload_now()
+    succeeded = uploader.upload_now()
+
+    assert failed["last_upload_result"] == "failed"
+    assert failed["consecutive_upload_failures"] == 1
+    assert failed["last_upload_attempt_at"]
+    assert failed["last_upload_success_at"] == ""
+    assert succeeded["last_upload_result"] == "succeeded"
+    assert succeeded["consecutive_upload_failures"] == 0
+    assert succeeded["last_upload_success_at"] == succeeded["last_upload_attempt_at"]
 
 
 def test_failed_uploads_back_off_without_exceeding_the_regular_interval():

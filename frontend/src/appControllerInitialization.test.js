@@ -12,3 +12,8 @@ test('initializes the content detail dependency before completion notifications'
   assert.ok(notifications > readiness)
   assert.match(source.slice(notifications, notifications + 360), /getContentItemDetail/)
 })
+
+test('returns the existing manual update action to its desktop menu and settings callers', () => {
+  const returned = source.slice(source.lastIndexOf('return {'))
+  assert.match(returned, /checkManualUpdate/)
+})

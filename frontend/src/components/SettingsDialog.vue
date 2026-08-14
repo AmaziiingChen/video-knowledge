@@ -87,11 +87,28 @@
         </section>
 
         <section v-show="settingsSection === 'privacy'" class="settings-page settings-form-page" aria-label="隐私与诊断">
+          <div class="settings-page-toolbar">
+            <el-button size="small" @click="emit('check-updates')">检查更新</el-button>
+          </div>
           <div class="settings-group">
             <div class="settings-row">
               <div class="settings-row-copy">
                 <h3>去标识使用诊断</h3>
                 <p>为改进软件体验，应用会低频收集 17 个固定的功能结果与处理阶段数据，并发送至 Cloudflare。不会包含文章、视频、OCR 文本、搜索词、路径、链接、账号、密钥或错误原文；数据最多保留 3 个月。事件范围或用途变更时会再次告知。</p>
+              </div>
+              <div class="settings-row-control settings-switch-control">
+                <el-switch :model-value="telemetryEnabled" :loading="telemetryStatusLoading || telemetrySaving" :disabled="!telemetryStatusLoaded || telemetrySaving" aria-label="去标识使用诊断" @change="emit('save-telemetry', $event)" />
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-copy">
+                <h3>上传状态</h3>
+                <p>{{ telemetryPresentation.description }}</p>
+              </div>
+              <div class="settings-row-control settings-row-actions">
+                <span class="settings-status" :class="telemetryPresentation.tone">{{ telemetryPresentation.label }}</span>
+                <el-button size="small" :loading="telemetryUploadRetrying" :disabled="!telemetryStatusLoaded || !telemetryEnabled || telemetrySaving" @click="emit('retry-telemetry-upload')">立即重试</el-button>
+                <el-button v-if="telemetryStatusError" size="small" @click="emit('reload-telemetry-status')">重新读取</el-button>
               </div>
             </div>
           </div>
@@ -500,6 +517,7 @@ import { ElMessage } from 'element-plus'
 import { IconX } from './macosSymbolComponents.js'
 import WeChatWorkspace from '../features/wechat/WeChatWorkspace.vue'
 import TextModelProviderSettings from '../features/settings/TextModelProviderSettings.vue'
+import { telemetryStatusPresentation } from '../features/telemetry/telemetryStatusPresentation.js'
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import { API_BASE as API } from '../utils/localApiAuth.js'
 import SvgMaskIcon from './SvgMaskIcon.vue'
@@ -513,7 +531,6 @@ const eyeSlashIcon = 'eye.slash'
 const paintPaletteIcon = 'paintpalette'
 const wechatIcon = 'wechat'
 import { requestDestructiveConfirmation } from '../composables/useDestructiveConfirm'
-
 const modelValue = defineModel({ type: Boolean, default: false })
 const selectedTheme = defineModel('selectedTheme', { type: String, default: '' })
 const selectedAiModel = defineModel('selectedAiModel', { type: String, default: '' })
@@ -614,6 +631,9 @@ const {
   testingEmbeddingConnection,
   paddleOcrConfigured,
   savingPaddleOcrSettings,
+  telemetryEnabled, telemetryPendingEvents, telemetrySaving, telemetryStatusLoading, telemetryStatusLoaded,
+  telemetryStatusError, telemetryUploadResult, telemetryLastUploadAttemptAt, telemetryLastUploadSuccessAt,
+  telemetryUploadRetrying,
   runtimeComponents,
   runtimeComponentsLoading
 } = defineProps({
@@ -675,6 +695,16 @@ const {
   testingEmbeddingConnection: Boolean,
   paddleOcrConfigured: Boolean,
   savingPaddleOcrSettings: Boolean,
+  telemetryEnabled: Boolean,
+  telemetryPendingEvents: { type: Number, default: 0 },
+  telemetrySaving: Boolean,
+  telemetryStatusLoading: Boolean,
+  telemetryStatusLoaded: Boolean,
+  telemetryStatusError: { type: String, default: '' },
+  telemetryUploadResult: { type: String, default: '' },
+  telemetryLastUploadAttemptAt: { type: String, default: '' },
+  telemetryLastUploadSuccessAt: { type: String, default: '' },
+  telemetryUploadRetrying: Boolean,
   runtimeComponents: { type: Object, default: () => ({}) },
   runtimeComponentsLoading: Boolean
 })
@@ -752,13 +782,19 @@ const emit = defineEmits([
   'save-paddle-ocr-settings',
   'save-manual-collection-settings',
   'save-video-download-settings',
+  'check-updates',
+  'save-telemetry', 'retry-telemetry-upload', 'reload-telemetry-status',
   'load-runtime-components',
   'install-browser',
   'download-asr-model',
   'delete-asr-model'
 ])
-
 const toolsReady = computed(() => Boolean(mediaTools.ffmpeg_path?.available && mediaTools.yt_dlp_path?.available))
+const telemetryPresentation = computed(() => telemetryStatusPresentation({
+  enabled: telemetryEnabled, pendingEvents: telemetryPendingEvents, loading: telemetryStatusLoading,
+  loaded: telemetryStatusLoaded, error: telemetryStatusError, uploadResult: telemetryUploadResult,
+  lastAttemptAt: telemetryLastUploadAttemptAt, lastSuccessAt: telemetryLastUploadSuccessAt,
+}))
 const settingsSection = ref('appearance')
 const builtInTextPricingModels = [
   { key: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },

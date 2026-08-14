@@ -8,10 +8,12 @@ const path = require('path')
 const { pathToFileURL } = require('url')
 const { createCampusWebVpnController } = require('./campus-webvpn.cjs')
 const { createPlatformAuthController } = require('./platform-auth.cjs')
-const { directChildEnvironment } = require('./network-env.cjs')
+const { directChildEnvironment, telemetryProxyFromElectronRules } = require('./network-env.cjs')
+const { checkDesktopReleaseUpdate } = require('./release-update.cjs')
 const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
 const {
+  backendStartupAction,
   backendSpawnOptions,
   clearBackendLease,
   terminateBackendProcess,
@@ -30,6 +32,8 @@ const {
 const ROOT_DIR = path.resolve(__dirname, '..', '..')
 const BACKEND_URL = 'http://127.0.0.1:8000'
 const HEALTH_URL = `${BACKEND_URL}/api/health`
+const TELEMETRY_COLLECTOR_URL = 'https://knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev/v1/events'
+const PROXY_RESOLUTION_TIMEOUT_MS = 2000
 const WECHAT_PREVIEW_PARTITION = 'persist:knowledgehub-wechat-preview'
 const LOCAL_HTML_PREVIEW_PARTITION = 'persist:knowledgehub-local-html-preview'
 const APP_PROTOCOL = 'knowledgehub'
@@ -39,11 +43,13 @@ const BACKEND_INSTANCE_TOKEN = randomUUID()
 // Release checks use this explicit, process-local override so an isolated DMG
 // run never opens the user's real Electron profile. Normal launches retain
 // Electron's platform-default userData path.
-applyUserDataDirectoryOverride(app)
+const USER_DATA_DIRECTORY_OVERRIDE = applyUserDataDirectoryOverride(app)
 
-// KnowledgeHub owns explicit direct-network clients. Do not let Electron
-// navigation or platform login windows silently follow the macOS system proxy.
-app.commandLine.appendSwitch('no-proxy-server')
+// Public HTTPS requests such as release checks follow the user's macOS network
+// settings. Renderer and login-window navigation remain restricted to their
+// reviewed host allowlists. The local backend still receives a proxy-free child
+// environment for credentialed collection and download tasks, plus one
+// sanitized proxy URL that only the fixed telemetry uploader may consume.
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -68,6 +74,7 @@ let backendReady = false
 let backendReadyWaiters = []
 let notificationTray = null
 let pendingNotifications = []
+let unreadDockBadgeCount = 0
 
 function trayIcon() {
   const image = nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png'))
@@ -82,6 +89,83 @@ function showMainWindow() {
   }
   mainWindow.show()
   mainWindow.focus()
+}
+
+function sendRendererMenuAction(action) {
+  showMainWindow()
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const deliver = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('knowledgehub:menu-action', action)
+  }
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', deliver)
+  } else {
+    deliver()
+  }
+}
+
+function createApplicationMenu() {
+  const action = (id) => () => sendRendererMenuAction(id)
+  const template = [
+    {
+      label: 'KnowledgeHub',
+      submenu: [
+        { role: 'about', label: '关于 KnowledgeHub' },
+        { type: 'separator' },
+        { label: '设置…', accelerator: 'CommandOrControl+,', click: action('settings') },
+        { label: '检查更新…', click: action('check-for-update') },
+        { type: 'separator' },
+        { role: 'hide', label: '隐藏 KnowledgeHub' },
+        { role: 'hideOthers', label: '隐藏其他应用' },
+        { role: 'unhide', label: '显示全部' },
+        { type: 'separator' },
+        { role: 'quit', label: '退出 KnowledgeHub' },
+      ],
+    },
+    {
+      label: '文件',
+      submenu: [
+        { label: '导入本地资料…', accelerator: 'CommandOrControl+O', click: action('import-local-files') },
+      ],
+    },
+    { role: 'editMenu', label: '编辑' },
+    {
+      label: '视图',
+      submenu: [
+        { label: '快速打开…', accelerator: 'CommandOrControl+K', click: action('open-command-palette') },
+        { type: 'separator' },
+        { label: '显示或隐藏文件栏', accelerator: 'CommandOrControl+Shift+L', click: action('toggle-primary-sidebar') },
+        { label: '显示或隐藏右侧栏', accelerator: 'CommandOrControl+Shift+I', click: action('toggle-context-sidebar') },
+        { label: '显示或隐藏处理日志', accelerator: 'CommandOrControl+Shift+J', click: action('toggle-process-log') },
+      ],
+    },
+    {
+      label: '工具',
+      submenu: [
+        { label: '切换剪贴板监听', click: action('toggle-clipboard-watching') },
+        { label: '刷新资料库', click: action('refresh-library') },
+      ],
+    },
+    {
+      role: 'window',
+      label: '窗口',
+      submenu: [
+        { role: 'minimize', label: '最小化' },
+        { role: 'zoom', label: '缩放' },
+        { type: 'separator' },
+        { role: 'front', label: '置于前台' },
+      ],
+    },
+    {
+      role: 'help',
+      label: '帮助',
+      submenu: [
+        { label: '检查更新…', click: action('check-for-update') },
+      ],
+    },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 function updateNotificationTray() {
@@ -111,6 +195,15 @@ function createNotificationTray() {
   notificationTray = new Tray(trayIcon())
   notificationTray.on('click', showMainWindow)
   updateNotificationTray()
+}
+
+function setUnreadDockBadgeCount(value) {
+  const numericValue = Number(value)
+  unreadDockBadgeCount = Number.isFinite(numericValue)
+    ? Math.min(999, Math.max(0, Math.floor(numericValue)))
+    : 0
+  if (process.platform === 'darwin') app.setBadgeCount(unreadDockBadgeCount)
+  return unreadDockBadgeCount
 }
 
 function markBackendReady() {
@@ -279,6 +372,10 @@ ipcMain.handle('knowledgehub:open-path', trustedIpcHandler(async (value) => {
 }))
 
 ipcMain.handle('knowledgehub:open-external', trustedIpcHandler(async (url = '') => openExternalUrl(url)))
+ipcMain.handle('knowledgehub:check-for-update', trustedIpcHandler(async () => checkDesktopReleaseUpdate({
+  fetcher: net.fetch.bind(net),
+  currentVersion: app.getVersion(),
+})))
 ipcMain.handle('knowledgehub:backend-access-token', trustedIpcHandler(() => {
   return BACKEND_INSTANCE_TOKEN
 }))
@@ -296,6 +393,9 @@ ipcMain.handle('knowledgehub:set-pending-notifications', trustedIpcHandler((item
     : []
   updateNotificationTray()
   return true
+}))
+ipcMain.handle('knowledgehub:set-unread-badge-count', trustedIpcHandler((count = 0) => {
+  return setUnreadDockBadgeCount(count)
 }))
 
 ipcMain.handle('knowledgehub:campus-auth-status', trustedIpcHandler(async () => campusWebVpn.status()))
@@ -422,7 +522,9 @@ function pickPython() {
 
 function backendRuntime() {
   if (!app.isPackaged) {
-    const dataDir = path.join(ROOT_DIR, 'data')
+    const dataDir = USER_DATA_DIRECTORY_OVERRIDE
+      ? path.join(USER_DATA_DIRECTORY_OVERRIDE, 'data')
+      : path.join(ROOT_DIR, 'data')
     const args = ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000']
     // The Finder launcher is used as a local, long-running application. A
     // uvicorn reloader tears down its HTTP worker on every saved backend file,
@@ -454,6 +556,23 @@ function backendRuntime() {
     envFile: path.join(app.getPath('userData'), 'settings.env'),
     logDir: path.join(dataDir, 'logs'),
     runDir: path.join(app.getPath('userData'), 'run'),
+  }
+}
+
+async function resolveTelemetryProxyUrl() {
+  let timeout = null
+  try {
+    const proxyRules = await Promise.race([
+      session.defaultSession.resolveProxy(TELEMETRY_COLLECTOR_URL),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve('DIRECT'), PROXY_RESOLUTION_TIMEOUT_MS)
+      }),
+    ])
+    return telemetryProxyFromElectronRules(proxyRules)
+  } catch {
+    return ''
+  } finally {
+    if (timeout) clearTimeout(timeout)
   }
 }
 
@@ -492,11 +611,19 @@ function startMcpBridgeSession(runDir) {
 async function ensureBackend() {
   const runtime = backendRuntime()
   const existingHealth = await inspectBackendHealth(HEALTH_URL)
-  if (existingHealth.ready) return
-  if (existingHealth.reachable) {
+  const startupAction = backendStartupAction({
+    health: existingHealth,
+    hasManagedProcess: Boolean(backendProcess),
+    hasBridgeSession: Boolean(mcpBridgeSession),
+  })
+  if (startupAction === 'reuse') return
+  if (startupAction === 'reject-occupied') {
     throw new Error('本机端口 8000 已被另一个后端或其他服务占用，请先关闭该进程后重试')
   }
   const terminatedLease = terminateLeasedBackend(runtime.runDir, { isExpectedBackendProcess })
+  if (startupAction === 'replace-stale' && !terminatedLease) {
+    throw new Error('检测到未由当前应用管理的 KnowledgeHub 后端，请先完全退出旧版 KnowledgeHub 后重试')
+  }
   if (terminatedLease && !(await waitForPortRelease())) {
     throw new Error('上一轮 KnowledgeHub 后端未能停止，请完全退出旧版 KnowledgeHub 后重试')
   }
@@ -507,8 +634,9 @@ async function ensureBackend() {
   const pathEntries = process.platform === 'darwin'
     ? ['/opt/miniconda3/bin', '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '']
     : [process.env.PATH || '']
+  const telemetryProxyUrl = await resolveTelemetryProxyUrl()
   const env = {
-    ...directChildEnvironment(process.env),
+    ...directChildEnvironment(process.env, telemetryProxyUrl),
     PATH: pathEntries.filter(Boolean).join(path.delimiter),
     NO_PROXY: '127.0.0.1,localhost',
     no_proxy: '127.0.0.1,localhost',
@@ -725,6 +853,7 @@ app.whenReady().then(async () => {
   // Render the real Vue workbench immediately. Its data hydration waits on the
   // bridge below, so the visible shell does not make failed API requests while
   // Python is still booting.
+  createApplicationMenu()
   createWindow()
   createNotificationTray()
 
@@ -751,6 +880,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  setUnreadDockBadgeCount(0)
   stopMcpBridgeSession({ ignoreErrors: true })
   terminateBackendProcess(backendProcess)
   clearBackendLease(backendRuntime().runDir, backendProcess?.pid)

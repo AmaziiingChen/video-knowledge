@@ -12,7 +12,15 @@ PROVIDER_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$")
 THINKING_TYPES = {"enabled", "disabled"}
 PROVIDER_TYPES = {"deepseek", "qwen", "mimo", "custom"}
-THINKING_PARAMETERS = {"thinking", "enable_thinking", "none"}
+THINKING_PARAMETERS = {
+    "thinking",
+    "enable_thinking",
+    "reasoning_effort",
+    "chat_template_enable_thinking",
+    "reasoning_split",
+    "none",
+}
+AUTH_SCHEMES = {"bearer", "api_key", "x_api_key"}
 
 BUILTIN_TEXT_PROVIDERS: tuple[dict[str, Any], ...] = (
     {
@@ -21,6 +29,7 @@ BUILTIN_TEXT_PROVIDERS: tuple[dict[str, Any], ...] = (
         "label": "DeepSeek",
         "base_url": "https://api.deepseek.com",
         "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "auth_scheme": "bearer",
         "thinking_parameter": "thinking",
         "model_discovery": True,
         "send_temperature": False,
@@ -33,6 +42,7 @@ BUILTIN_TEXT_PROVIDERS: tuple[dict[str, Any], ...] = (
         "label": "阿里云百炼 · 千问",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "models": ["qwen3.7-plus", "qwen3.7-max", "qwen3.6-flash"],
+        "auth_scheme": "bearer",
         "thinking_parameter": "enable_thinking",
         "model_discovery": False,
         "send_temperature": False,
@@ -45,6 +55,7 @@ BUILTIN_TEXT_PROVIDERS: tuple[dict[str, Any], ...] = (
         "label": "Xiaomi MiMo",
         "base_url": "https://api.xiaomimimo.com/v1",
         "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+        "auth_scheme": "bearer",
         "thinking_parameter": "thinking",
         "model_discovery": False,
         "send_temperature": False,
@@ -132,8 +143,14 @@ def normalize_provider_profile(value: object, *, fallback: dict[str, Any] | None
     ).strip()
     if thinking_parameter not in THINKING_PARAMETERS:
         raise ValueError("不支持的思考参数类型")
+    auth_scheme = str(
+        candidate.get("auth_scheme") or defaults.get("auth_scheme") or "bearer"
+    ).strip()
+    if auth_scheme not in AUTH_SCHEMES:
+        raise ValueError("不支持的 API Key 鉴权方式")
     if provider_type != "custom":
         thinking_parameter = str(defaults.get("thinking_parameter") or thinking_parameter)
+        auth_scheme = str(defaults.get("auth_scheme") or auth_scheme)
         send_temperature = bool(defaults.get("send_temperature", False))
         stream_options = bool(defaults.get("stream_options", False))
         response_format = bool(defaults.get("response_format", False))
@@ -155,6 +172,7 @@ def normalize_provider_profile(value: object, *, fallback: dict[str, Any] | None
         "label": label,
         "base_url": base_url,
         "models": models[:40],
+        "auth_scheme": auth_scheme,
         "thinking_parameter": thinking_parameter,
         "model_discovery": bool(
             candidate.get("model_discovery", defaults.get("model_discovery", provider_type == "custom"))

@@ -22,3 +22,11 @@ test('macOS tray uses a dedicated template K with standard and Retina assets', (
   assert.match(mainSource, /image\.setTemplateImage\(true\)/)
   assert.doesNotMatch(mainSource, /setPressedImage\(/)
 })
+
+test('macOS Dock badge uses a separate, bounded unread-count IPC path', () => {
+  assert.match(mainSource, /function setUnreadDockBadgeCount\(value\)/)
+  assert.match(mainSource, /Math\.min\(999, Math\.max\(0, Math\.floor\(numericValue\)\)\)/)
+  assert.match(mainSource, /process\.platform === 'darwin'\) app\.setBadgeCount\(unreadDockBadgeCount\)/)
+  assert.match(mainSource, /knowledgehub:set-unread-badge-count/)
+  assert.match(mainSource, /setUnreadDockBadgeCount\(0\)/)
+})

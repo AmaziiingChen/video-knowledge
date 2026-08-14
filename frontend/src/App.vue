@@ -627,6 +627,16 @@
         :testing-embedding-connection="testingEmbeddingConnection"
         :paddle-ocr-configured="paddleOcrConfigured"
         :saving-paddle-ocr-settings="savingPaddleOcrSettings"
+        :telemetry-enabled="telemetryEnabled"
+        :telemetry-pending-events="telemetryPendingEvents"
+        :telemetry-saving="telemetrySaving"
+        :telemetry-status-loading="telemetryStatusLoading"
+        :telemetry-status-loaded="telemetryStatusLoaded"
+        :telemetry-status-error="telemetryStatusError"
+        :telemetry-upload-result="telemetryUploadResult"
+        :telemetry-last-upload-attempt-at="telemetryLastUploadAttemptAt"
+        :telemetry-last-upload-success-at="telemetryLastUploadSuccessAt"
+        :telemetry-upload-retrying="telemetryUploadRetrying"
         @save-obsidian="saveObsidianSettingsFromForm"
         @choose-obsidian-folder="chooseObsidianFolder"
         @choose-export-folder="chooseMarkdownExportFolder"
@@ -674,6 +684,10 @@
         @save-paddle-ocr-settings="savePaddleOcrSettings"
         @save-manual-collection-settings="saveManualCollectionSettings"
         @save-video-download-settings="saveVideoDownloadSettings"
+        @check-updates="checkManualUpdate({ interactive: true })"
+        @save-telemetry="saveTelemetry"
+        @retry-telemetry-upload="retryTelemetryUpload"
+        @reload-telemetry-status="loadTelemetryStatus"
         @open-wechat-manager="openWeChatManager"
       />
 
@@ -838,6 +852,7 @@ import AppleDeleteConfirmDialog from './components/AppleDeleteConfirmDialog.vue'
 import TelemetryConsentNotice from './components/TelemetryConsentNotice.vue'
 import { createTelemetryNoticeController } from './features/telemetry/telemetryNoticeController.js'
 import { assertTelemetryEnabledState } from './features/telemetry/telemetryNoticeState.js'
+import { useTelemetrySettingsController } from './features/telemetry/useTelemetrySettingsController.js'
 import appIconUrl from '../build/icon.svg?url'
 const folderIcon = 'folder'
 const magnifyingglassIcon = 'magnifyingglass'
@@ -1058,6 +1073,7 @@ const {
   formatDateTime,
   renderMarkdown,
   toggleClipboardWatching,
+  checkManualUpdate,
   startOpenClawGateway,
   saveObsidianSettingsFromForm,
   saveCookie,
@@ -1884,10 +1900,19 @@ function openGeneratedReport(contentItemId) {
   if (item) openContentFromSidebar(item)
 }
 
+const {
+  telemetryEnabled, telemetryPendingEvents, telemetrySaving, telemetryStatusLoading, telemetryStatusLoaded,
+  telemetryStatusError, telemetryUploadResult, telemetryLastUploadAttemptAt, telemetryLastUploadSuccessAt,
+  telemetryUploadRetrying, loadTelemetryStatus, saveTelemetry, retryTelemetryUpload,
+} = useTelemetrySettingsController({
+  notifySuccess: (message) => ElMessage.success(message),
+  notifyError: (message) => ElMessage.error(message),
+})
+
 async function openSettings(section = 'appearance') {
   settingsInitialSection.value = section
   showSettings.value = true
-  await Promise.all([loadWeChatSubscriptions(), loadWechatPublishingSettings(), loadWechatQwenCoverSettings(), loadMediaTools(), loadRuntimeComponents(), loadDeepSeekSettings(), loadPaddleOcrSettings(), loadManualCollectionSettings(), loadFolderImportWatcherStatus()])
+  await Promise.all([loadWeChatSubscriptions(), loadWechatPublishingSettings(), loadWechatQwenCoverSettings(), loadMediaTools(), loadRuntimeComponents(), loadDeepSeekSettings(), loadPaddleOcrSettings(), loadManualCollectionSettings(), loadFolderImportWatcherStatus(), loadTelemetryStatus()])
 }
 
 const telemetryNoticeVisible = ref(false)
@@ -2557,6 +2582,41 @@ async function focusLibrarySearch() {
   primarySidebar.value?.showLibrarySearch?.()
 }
 
+async function handleDesktopMenuAction(action) {
+  switch (String(action || '')) {
+    case 'settings':
+      await openSettings()
+      break
+    case 'check-for-update':
+      await checkManualUpdate({ interactive: true })
+      break
+    case 'import-local-files':
+      await showLibraryFiles()
+      primarySidebar.value?.chooseLocalFileImport?.()
+      break
+    case 'open-command-palette':
+      commandPaletteOpen.value = true
+      break
+    case 'toggle-primary-sidebar':
+      setPrimarySidebarOpen(!primarySidebarOpen.value)
+      break
+    case 'toggle-context-sidebar':
+      if (['library', 'knowledge'].includes(activeView.value)) {
+        contextSidebarOpen.value = !contextSidebarOpen.value
+      }
+      break
+    case 'toggle-process-log':
+      processLogOpen.value = !processLogOpen.value
+      break
+    case 'toggle-clipboard-watching':
+      await toggleClipboardWatching(!clipboardWatching.value)
+      break
+    case 'refresh-library':
+      await Promise.all([loadLibraryFolders(), loadContentItems()])
+      break
+  }
+}
+
 function handlePaneSnapCollapse(side) {
   if (side === 'primary') {
     setPrimarySidebarOpen(false)
@@ -2675,10 +2735,16 @@ watch([primarySidebarOpen, contextSidebarOpen], ([primary, context]) => {
 
 onMounted(() => {
   void telemetryNoticeController.start()
+  const removeMenuActionListener = window.knowledgeHubDesktop?.onMenuAction?.((action) => {
+    void handleDesktopMenuAction(action)
+  })
+  window.__knowledgeHubRemoveMenuActionListener = removeMenuActionListener
 })
 
 onBeforeUnmount(() => {
   telemetryNoticeController.stop()
+  window.__knowledgeHubRemoveMenuActionListener?.()
+  delete window.__knowledgeHubRemoveMenuActionListener
   disposeWechatReportGenerationController()
   disposeWechatAccountController()
   disposeWechatCoverController()

@@ -176,7 +176,9 @@ def read_mcp_bridge_token(path_value: str | None = None) -> str:
     """Read one bounded token from the secure per-session file descriptor."""
     configured_path = path_value or os.environ.get(MCP_TOKEN_FILE_ENV, "")
     if not configured_path:
-        raise McpBridgeUnavailable("请先启动 KnowledgeHub 并配置本机 MCP bridge")
+        raise McpBridgeUnavailable(
+            "KnowledgeHub MCP bridge 尚未就绪。请保持 KnowledgeHub 打开，等待本机服务连接完成后重试。"
+        )
     try:
         raw = _read_secure_file(configured_path, max_bytes=160).decode("ascii")
     except UnicodeDecodeError as exc:
@@ -191,7 +193,9 @@ def read_mcp_bridge_api_base(token_path_value: str | None = None) -> str:
     """Read the loopback API endpoint issued by the trusted session owner."""
     configured_token_path = token_path_value or os.environ.get(MCP_TOKEN_FILE_ENV, "")
     if not configured_token_path:
-        raise McpBridgeUnavailable("请先启动 KnowledgeHub 并配置本机 MCP bridge")
+        raise McpBridgeUnavailable(
+            "KnowledgeHub MCP bridge 尚未就绪。请保持 KnowledgeHub 打开，等待本机服务连接完成后重试。"
+        )
     lease_path = Path(configured_token_path).with_name(MCP_LEASE_FILENAME)
     try:
         payload = json.loads(_read_secure_file(str(lease_path), max_bytes=512))

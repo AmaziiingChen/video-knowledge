@@ -98,6 +98,43 @@ test('saves a custom provider without persisting or replaying its transient key'
   assert.equal(controller.draft.api_key, '')
 })
 
+test('applies a common protocol preset but keeps the provider identity and models user-controlled', async () => {
+  const { controller, calls } = createHarness({
+    selected: 'deepseek-v4-flash:enabled',
+    getResponses: [providerPayload],
+  })
+  controller.openCreate()
+  Object.assign(controller.draft, { id: 'minimax', models: ['MiniMax-M2.5'] })
+  controller.applyDialectPreset('minimax')
+
+  assert.equal(controller.draft.id, 'minimax')
+  assert.equal(controller.draft.label, 'MiniMax')
+  assert.equal(controller.draft.base_url, 'https://api.minimaxi.com/v1')
+  assert.equal(controller.draft.auth_scheme, 'bearer')
+  assert.equal(controller.draft.thinking_parameter, 'reasoning_split')
+  assert.deepEqual(controller.draft.models, ['MiniMax-M2.5'])
+
+  assert.equal(await controller.saveProvider(), true)
+  const put = calls.find((call) => call[0] === 'put')
+  assert.equal(put[2].auth_scheme, 'bearer')
+  assert.equal(put[2].thinking_parameter, 'reasoning_split')
+})
+
+test('serializes api-key authentication without retaining the transient key', async () => {
+  const { controller, calls } = createHarness({ getResponses: [providerPayload] })
+  controller.openCreate()
+  Object.assign(controller.draft, {
+    id: 'header-gateway', label: 'Header Gateway', base_url: 'https://gateway.example/v1',
+    models: ['chat-model'], auth_scheme: 'api_key', api_key: 'transient-secret',
+  })
+
+  assert.equal(await controller.saveProvider(), true)
+  const put = calls.find((call) => call[0] === 'put')
+  assert.equal(put[2].auth_scheme, 'api_key')
+  assert.equal(put[2].api_key, 'transient-secret')
+  assert.equal(controller.draft.api_key, '')
+})
+
 test('updates the default only after the backend accepts it and keeps disabled custom providers undeletable', async () => {
   const { controller, request, defaults, calls } = createHarness()
   request.put = async () => { throw new Error('offline') }

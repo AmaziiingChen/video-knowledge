@@ -7,6 +7,9 @@ const enabledStatus = {
   enabled: true,
   pending_events: 3,
   privacy_notice_version: '2026-08-telemetry-v3',
+  last_upload_result: 'failed',
+  last_upload_attempt_at: '2026-08-14T12:00:00Z',
+  last_upload_success_at: '',
 }
 
 test('loads a confirmed telemetry state before enabling the settings control', async () => {
@@ -23,6 +26,8 @@ test('loads a confirmed telemetry state before enabling the settings control', a
   assert.equal(controller.telemetryPendingEvents.value, 3)
   assert.equal(controller.telemetryStatusLoaded.value, true)
   assert.equal(controller.telemetryStatusError.value, '')
+  assert.equal(controller.telemetryUploadResult.value, 'failed')
+  assert.equal(controller.telemetryLastUploadAttemptAt.value, '2026-08-14T12:00:00Z')
 })
 
 test('keeps the control unavailable and exposes a retryable status after a read failure', async () => {
@@ -105,3 +110,38 @@ test('rejects a contradictory 2xx save response and reconciles from the server',
   assert.equal(controller.telemetryStatusLoaded.value, true)
   assert.deepEqual(errors, ['遥测设置保存失败'])
 })
+
+test('manually retries an upload and reconciles the remaining queue', async () => {
+  const requests = []
+  let reads = 0
+  const messages = []
+  const controller = useTelemetrySettingsController({
+    httpClient: {
+      get: async () => {
+        reads += 1
+        return {
+          data: reads === 1
+            ? enabledStatus
+            : { ...enabledStatus, pending_events: 0, last_upload_result: 'succeeded', last_upload_success_at: '2026-08-14T12:01:00Z' },
+        }
+      },
+      post: async (...args) => {
+        requests.push(args)
+        return { data: { last_upload_result: 'succeeded' } }
+      },
+    },
+    notifySuccess: (message) => messages.push(message),
+  })
+  await controller.loadTelemetryStatus()
+
+  await controller.retryTelemetryUpload()
+
+  assert.deepEqual(requests[0], [expectEndpoint('/upload'), {}, { timeout: 8000 }])
+  assert.equal(controller.telemetryPendingEvents.value, 0)
+  assert.equal(controller.telemetryUploadResult.value, 'succeeded')
+  assert.deepEqual(messages, ['诊断数据已上传'])
+})
+
+function expectEndpoint(suffix) {
+  return `http://127.0.0.1:8000/api/telemetry${suffix}`
+}

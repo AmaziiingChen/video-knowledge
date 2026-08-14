@@ -3,6 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services import telemetry
+from services.telemetry_uploader import telemetry_uploader
 
 router = APIRouter()
 
@@ -25,7 +26,7 @@ class TelemetryEventRequest(BaseModel):
 
 @router.get("/telemetry")
 def telemetry_status() -> dict[str, object]:
-    return telemetry.status()
+    return {**telemetry.status(), **telemetry_uploader.status()}
 
 
 @router.put("/telemetry")
@@ -34,6 +35,11 @@ def save_telemetry_settings(request: TelemetrySettingsRequest) -> dict[str, obje
         return telemetry.set_enabled(request.enabled, notice_version=request.privacy_notice_version)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/telemetry/upload")
+def upload_telemetry_now() -> dict[str, object]:
+    return telemetry_uploader.upload_now()
 
 
 @router.post("/telemetry/events", status_code=204)

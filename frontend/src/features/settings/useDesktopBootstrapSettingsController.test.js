@@ -79,7 +79,7 @@ test('normalizes a legacy backend model and rejects an unsupported video quality
   assert.equal(controller.douyinVideoQuality.value, 'standard')
 })
 
-test('a config failure keeps defaults and skips dependent startup reads', async () => {
+test('a config failure keeps defaults, skips dependent startup reads, and still checks updates', async () => {
   const { controller, requests, selectedAiModel, updateChecks } = createController({
     responses: [new Error('offline')],
   })
@@ -87,7 +87,7 @@ test('a config failure keeps defaults and skips dependent startup reads', async 
   await controller.loadDesktopBootstrapSettings()
 
   assert.deepEqual(requests, ['http://api.test/config'])
-  assert.deepEqual(updateChecks, [])
+  assert.deepEqual(updateChecks, ['checked'])
   assert.equal(selectedAiModel.value, 'local-model')
   assert.deepEqual(controller.availableModels.value, ['tiny', 'base', 'small'])
   assert.equal(controller.miniprogramForumCaptureEnabled.value, false)

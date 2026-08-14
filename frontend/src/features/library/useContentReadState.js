@@ -1,9 +1,10 @@
-import { ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import { normalizeContentReadState, uniqueIds } from './contentReadState.js'
+import { useUnreadDockBadgeController } from '../notifications/useUnreadDockBadgeController.js'
 
 const CONTENT_VIEW_STATE_KEY = 'knowledgehub.content-view-state.v1'
 
-export function useContentReadState({ isCurrentContent }) {
+export function useContentReadState({ isCurrentContent, allContentItems }) {
   const restored = loadContentViewState()
   const viewedContentIds = ref(restored.viewedContentIds)
   const explicitlyUnreadContentIds = ref(restored.explicitlyUnreadContentIds)
@@ -11,6 +12,17 @@ export function useContentReadState({ isCurrentContent }) {
   let initialized = restored.initialized
   let needsBaselineMigration = restored.needsBaselineMigration
   let viewedTimer = null
+  const unreadDockBadge = allContentItems ? useUnreadDockBadgeController({
+    allContentItems,
+    viewedContentIds,
+    explicitlyUnreadContentIds,
+    contentViewedBefore,
+  }) : null
+
+  onBeforeUnmount(() => {
+    if (viewedTimer) window.clearTimeout(viewedTimer)
+    unreadDockBadge?.dispose()
+  })
 
   function loadContentViewState() {
     if (typeof window === 'undefined' || !window.localStorage) return normalizeContentReadState(null)

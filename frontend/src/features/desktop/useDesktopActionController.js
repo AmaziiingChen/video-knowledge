@@ -82,11 +82,18 @@ export function useDesktopActionController({
     ).catch(() => {})
   }
 
-  async function checkManualUpdate() {
+  async function checkManualUpdate({ interactive = false } = {}) {
     try {
-      const response = await request.get(`${apiBase}/updates/check`, { timeout: 6000 })
-      const update = response.data || {}
-      if (update.state !== 'available' || !update.download_page_url) return
+      const desktopCheck = getDesktopBridge()?.checkForUpdate
+      const update = desktopCheck
+        ? await desktopCheck()
+        : (await request.get(`${apiBase}/updates/check`, { timeout: 6000 })).data || {}
+      if (update.state !== 'available' || !update.download_page_url) {
+        if (!interactive) return update
+        if (update.state === 'up_to_date') notify.success('当前已是最新版本')
+        else notify.warning('暂时无法检查更新，请稍后重试')
+        return update
+      }
       const notes = String(update.release_notes || '').trim()
       await confirm(
         notes
@@ -102,9 +109,13 @@ export function useDesktopActionController({
       )
       openExternalLink(update.download_page_url)
       void recordTelemetry('update_download_page_opened')
+      return update
     } catch (error) {
       // The manifest is optional and update checks must not interrupt startup.
-      if (error !== 'cancel' && error?.message !== 'cancel') return
+      if (error !== 'cancel' && error?.message !== 'cancel' && interactive) {
+        notify.warning('暂时无法检查更新，请稍后重试')
+      }
+      return { state: 'unavailable' }
     }
   }
 
