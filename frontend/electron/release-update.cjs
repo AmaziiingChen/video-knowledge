@@ -1,4 +1,5 @@
 const RELEASE_MANIFEST_URL = 'https://knowledgehub-release-manifest.knowledgehub4chen.workers.dev/v1/manifest.json'
+const GITHUB_LATEST_RELEASE_API_URL = 'https://api.github.com/repos/AmaziiingChen/video-knowledge/releases/latest'
 const RELEASE_PAGE_PREFIX = 'https://github.com/AmaziiingChen/video-knowledge/releases/tag/v'
 
 function versionKey(value) {
@@ -53,28 +54,66 @@ function updateStatus(payload, currentVersion) {
   }
 }
 
-async function checkDesktopReleaseUpdate({ fetcher, currentVersion, timeoutMs = 6000 }) {
-  if (typeof fetcher !== 'function') return { state: 'unavailable', current_version: currentVersion }
+function githubReleaseManifest(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const tagName = String(payload.tag_name || '').trim()
+  const latestVersion = tagName.startsWith('v') ? tagName.slice(1) : ''
+  return {
+    latest_version: latestVersion,
+    download_page_url: String(payload.html_url || '').trim(),
+    release_notes: String(payload.body || '').slice(0, 500),
+  }
+}
+
+async function fetchJson({ fetcher, url, timeoutMs, headers }) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetcher(RELEASE_MANIFEST_URL, {
+    const response = await fetcher(url, {
       method: 'GET',
       redirect: 'error',
       signal: controller.signal,
+      ...(headers ? { headers } : {}),
     })
-    if (!response?.ok) return { state: 'unavailable', current_version: currentVersion }
-    return updateStatus(await response.json(), currentVersion)
+    if (!response?.ok) return null
+    return await response.json()
   } catch {
-    return { state: 'unavailable', current_version: currentVersion }
+    return null
   } finally {
     clearTimeout(timer)
   }
 }
 
+async function checkDesktopReleaseUpdate({ fetcher, currentVersion, timeoutMs = 6000 }) {
+  if (typeof fetcher !== 'function') return { state: 'unavailable', current_version: currentVersion }
+  const manifestPayload = await fetchJson({
+    fetcher,
+    url: RELEASE_MANIFEST_URL,
+    timeoutMs: Math.min(timeoutMs, 2500),
+  })
+  const manifestStatus = updateStatus(manifestPayload, currentVersion)
+  if (manifestStatus.state !== 'invalid') return manifestStatus
+
+  const githubPayload = await fetchJson({
+    fetcher,
+    url: GITHUB_LATEST_RELEASE_API_URL,
+    timeoutMs,
+    headers: {
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+    },
+  })
+  const githubManifest = githubReleaseManifest(githubPayload)
+  return githubManifest
+    ? updateStatus(githubManifest, currentVersion)
+    : { state: 'unavailable', current_version: currentVersion }
+}
+
 module.exports = {
+  GITHUB_LATEST_RELEASE_API_URL,
   RELEASE_MANIFEST_URL,
   checkDesktopReleaseUpdate,
+  githubReleaseManifest,
   isOfficialReleasePage,
   updateStatus,
 }
