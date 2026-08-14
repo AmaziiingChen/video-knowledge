@@ -7,7 +7,6 @@ from pathlib import Path
 
 from config import settings
 
-
 SETTINGS_FILE = "obsidian_settings.json"
 DEFAULT_AUTO_WRITE = False
 _WINDOWS_RESERVED_NAMES = {
@@ -165,6 +164,7 @@ def save_obsidian_settings(
     *,
     export_path: str | Path,
     auto_write: bool,
+    recover_existing: bool = False,
 ) -> dict[str, object]:
     previous = markdown_output_settings()
     resolved = resolve_obsidian_vault_path(vault_path)
@@ -189,6 +189,16 @@ def save_obsidian_settings(
         source_roots=(previous_root, default_content_library_root()),
         destination_root=destination_root,
     )
+    from services.existing_library_recovery import (
+        empty_recovery_stats,
+        recover_existing_library,
+    )
+
+    recovery = (
+        recover_existing_library(resolved)
+        if auto_write and recover_existing
+        else empty_recovery_stats()
+    )
     if auto_write:
         align_sync_records_to_canonical_documents()
     path = obsidian_settings_path()
@@ -203,6 +213,7 @@ def save_obsidian_settings(
         "managed_vault_paths": managed_paths,
         "migrated_documents": migration["documents"],
         "migrated_attachments": migration["attachments"],
+        **recovery,
     }
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),

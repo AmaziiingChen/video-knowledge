@@ -44,15 +44,45 @@ export function remoteOutlineBridgeScript() {
     let headings = []
     let entries = []
     let scheduled = false
+    let collectTimer = 0
     const text = (value, maximum) => String(value || '').replace(/\\s+/gu, ' ').trim().slice(0, maximum)
+    const visible = (element) => {
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+    }
+    const richHeadingCandidates = (root) => {
+      const bodyFontSize = Number.parseFloat(window.getComputedStyle(root).fontSize) || 16
+      const seen = new Set()
+      return [...root.querySelectorAll('[role="heading"], p, strong, b')].filter((element) => {
+        if (!visible(element)) return false
+        const value = text(element.innerText, 120)
+        const length = Array.from(value).length
+        if (length < 2 || length > 80 || seen.has(value)) return false
+        const style = window.getComputedStyle(element)
+        const tag = element.tagName
+        const parentText = text(element.parentElement?.innerText, 120)
+        const isExplicitHeading = element.getAttribute('role') === 'heading'
+        const isStandaloneStrong = ['STRONG', 'B'].includes(tag) && parentText === value
+        const hasOnlyStrongChild = tag === 'P'
+          && element.children.length === 1
+          && ['STRONG', 'B'].includes(element.firstElementChild?.tagName)
+        const isNumberedSection = /^(?:\\d{1,2}[.、]|[一二三四五六七八九十]{1,3}[、.：:]|第.{1,12}[章节部分]|[（(][一二三四五六七八九十\\d]{1,3}[）)])/u.test(value)
+        const fontSize = Number.parseFloat(style.fontSize) || bodyFontSize
+        const fontWeight = Number.parseInt(style.fontWeight, 10) || 400
+        const isVisuallyProminent = fontWeight >= 600 && fontSize >= bodyFontSize * 1.05
+        if (!isExplicitHeading && !isStandaloneStrong && !hasOnlyStrongChild && !isNumberedSection && !isVisuallyProminent) return false
+        seen.add(value)
+        return true
+      })
+    }
     const collect = () => {
       const articleRoot = document.querySelector('#js_content, article, main') || document.body
       let candidates = [...articleRoot.querySelectorAll('h1, h2, h3, h4')]
       if (candidates.length < 2 && articleRoot !== document.body) candidates = [...document.querySelectorAll('h1, h2, h3, h4')]
-      headings = candidates.filter((element) => {
-        const style = window.getComputedStyle(element)
-        return style.display !== 'none' && style.visibility !== 'hidden' && Boolean(text(element.innerText, 120))
-      }).slice(0, 80)
+      candidates = candidates.filter((element) => visible(element) && Boolean(text(element.innerText, 120)))
+      if (candidates.length < 2) candidates = richHeadingCandidates(articleRoot)
+      headings = candidates.slice(0, 80)
       entries = headings.map((element, index) => {
         let preview = ''
         let sibling = element.nextElementSibling
@@ -64,7 +94,7 @@ export function remoteOutlineBridgeScript() {
           id: 'remote-outline-' + (index + 1),
           text: text(element.innerText, 120),
           preview,
-          level: Number(element.tagName.slice(1)) || 2,
+          level: Number(element.getAttribute('aria-level')) || Number(element.tagName.slice(1)) || 2,
         }
       })
     }
@@ -76,6 +106,10 @@ export function remoteOutlineBridgeScript() {
       return active
     }
     const publishOutline = () => { collect(); send({ kind: 'outline', entries, activeId: activeId() }) }
+    const scheduleOutline = () => {
+      if (collectTimer) window.clearTimeout(collectTimer)
+      collectTimer = window.setTimeout(() => { collectTimer = 0; publishOutline() }, 240)
+    }
     const publishActive = () => send({ kind: 'active', activeId: activeId() })
     const scheduleActive = () => {
       if (scheduled) return
@@ -91,6 +125,9 @@ export function remoteOutlineBridgeScript() {
     }
     window.addEventListener('scroll', scheduleActive, { passive: true })
     window.addEventListener('resize', scheduleActive, { passive: true })
+    if (window.MutationObserver && document.body) {
+      new MutationObserver(scheduleOutline).observe(document.body, { childList: true, subtree: true })
+    }
     publishOutline()
     window.setTimeout(publishOutline, 900)
   })()`

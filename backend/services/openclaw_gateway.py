@@ -503,14 +503,23 @@ def start_openclaw_gateway() -> dict:
 
 
 def repair_openclaw_mcp() -> dict[str, Any]:
-    """Explicitly replace only OpenClaw's KnowledgeHub MCP entry, then probe it."""
+    """Replace only the KnowledgeHub MCP entry and retire cached Gateway runtimes."""
     descriptor = _current_mcp_descriptor()
     serialized_descriptor = json.dumps(descriptor, ensure_ascii=False, separators=(",", ":"))
     _ensure_command_succeeded(
         _run_openclaw_cli("mcp", "set", "knowledgehub", serialized_descriptor, timeout=20),
         "MCP 配置更新",
     )
-    _ensure_command_succeeded(_run_openclaw_cli("mcp", "reload", timeout=20), "MCP 重载")
+    # `openclaw mcp reload` disposes runtimes only in that short-lived CLI
+    # process.  The WeChat channel runs inside the persistent Gateway
+    # LaunchAgent, so an unchanged descriptor can otherwise leave its existing
+    # conversation bound to a stale MCP process after KnowledgeHub rotates the
+    # bridge session.  Restart the managed Gateway after this explicit repair
+    # action so the next turn rebuilds every MCP runtime from the current file.
+    _ensure_command_succeeded(
+        _run_openclaw("restart", "--json", timeout=30),
+        "Gateway 重启",
+    )
     _clear_status_cache()
     status = get_openclaw_status(force_refresh=True)
     if not status["mcp"]["configured"]:

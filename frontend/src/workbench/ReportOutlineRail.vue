@@ -46,7 +46,10 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { canShowReportOutline } from './reportOutlineLayout.js'
+import {
+  canShowReportOutline,
+  reportOutlineHeight,
+} from './reportOutlineLayout.js'
 
 const props = defineProps({
   scrollRoot: { type: Object, default: null },
@@ -156,10 +159,16 @@ function measure() {
   }
 
   const scrollBox = scrollRoot.getBoundingClientRect()
+  const contentBox = contentRoot ? entryRect(contentRoot) : null
+  const leftGutter = isRemoteOutline.value || props.scrollRoot instanceof HTMLIFrameElement
+    ? 70
+    : Math.max(0, Number(contentBox?.left) - scrollBox.left)
   const canFitRail = canShowReportOutline({
     width: scrollBox.width,
     height: scrollBox.height,
     entryCount: entries.value.length,
+    leftGutter,
+    remote: isRemoteOutline.value,
   })
   visible.value = canFitRail
   if (!canFitRail) {
@@ -175,9 +184,12 @@ function measure() {
   // only then does the rail become internally scrollable.
   const markerPitch = 16
   const naturalHeight = entries.value.length * markerPitch
-  const maximumHeight = Math.min(availableHeight, scrollBox.height * 0.75)
-  const height = Math.min(naturalHeight, maximumHeight)
-  if (height < 64) {
+  const height = reportOutlineHeight({
+    availableHeight,
+    readerHeight: scrollBox.height,
+    entryCount: entries.value.length,
+  })
+  if (!height) {
     visible.value = false
     isOverflowing.value = false
     return

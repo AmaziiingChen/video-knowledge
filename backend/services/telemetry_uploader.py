@@ -21,6 +21,7 @@ OFFICIAL_COLLECTOR_HOSTS: frozenset[str] = frozenset(
     {"knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev"}
 )
 INITIAL_DELAY_SECONDS = 60.0
+DRAIN_INTERVAL_SECONDS = 60.0
 REGULAR_INTERVAL_SECONDS = 12 * 60 * 60.0
 MIN_RETRY_SECONDS = 5 * 60.0
 MAX_RETRY_SECONDS = REGULAR_INTERVAL_SECONDS
@@ -148,6 +149,11 @@ def next_upload_delay(result: str, consecutive_failures: int) -> tuple[float, in
     if result == "failed":
         failures = max(1, consecutive_failures + 1)
         return min(MAX_RETRY_SECONDS, MIN_RETRY_SECONDS * (2 ** (failures - 1))), failures
+    if result == "succeeded":
+        # A successful request acknowledges at most one 100-event batch. Check
+        # again soon so an existing backlog drains instead of sleeping for the
+        # regular low-frequency interval after only the first batch.
+        return DRAIN_INTERVAL_SECONDS, 0
     return REGULAR_INTERVAL_SECONDS, 0
 
 

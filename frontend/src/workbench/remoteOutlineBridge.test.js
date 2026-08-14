@@ -28,5 +28,8 @@ test('the guest bridge exposes heading navigation without transmitting the full 
   const script = remoteOutlineBridgeScript()
   assert.match(script, /__knowledgeHubRemoteOutlineScrollTo/u)
   assert.match(script, /h1, h2, h3, h4/u)
+  assert.match(script, /role="heading"/u)
+  assert.match(script, /strong, b/u)
+  assert.match(script, /MutationObserver/u)
   assert.doesNotMatch(script, /bodyText/u)
 })

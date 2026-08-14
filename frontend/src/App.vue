@@ -639,6 +639,7 @@
         :telemetry-upload-retrying="telemetryUploadRetrying"
         @save-obsidian="saveObsidianSettingsFromForm"
         @choose-obsidian-folder="chooseObsidianFolder"
+        @recover-existing-library="recoverExistingLibrary"
         @choose-export-folder="chooseMarkdownExportFolder"
         @toggle-clipboard="toggleClipboardWatching"
         @choose-folder-import="chooseFolderImportDirectory"
@@ -1991,7 +1992,11 @@ async function chooseObsidianFolder() {
   const folder = await window.knowledgeHubDesktop?.chooseDirectory?.()
   if (!folder) return
   obsidianVaultPath.value = folder
-  await saveObsidianSettingsFromForm()
+  await saveObsidianSettingsFromForm({ recoverExisting: true })
+}
+
+async function recoverExistingLibrary() {
+  await saveObsidianSettingsFromForm({ recoverExisting: true })
 }
 
 async function chooseMarkdownExportFolder() {

@@ -286,6 +286,7 @@
               <div class="settings-row-control settings-input-control">
                 <el-input v-model="obsidianVaultPath" name="obsidian-vault-path" autocomplete="off" aria-label="自动写入目录" placeholder="选择本机文件夹…" @change="emit('save-obsidian')" />
                 <el-button round @click="emit('choose-obsidian-folder')">选择文件夹</el-button>
+                <el-button round :disabled="!obsidianAutoWrite || !obsidianVaultPath.trim()" @click="emit('recover-existing-library')">识别已有资料</el-button>
               </div>
             </div>
             <div class="settings-row settings-row-multiline">
@@ -740,6 +741,7 @@ const emit = defineEmits([
   'processing-started',
   'save-obsidian',
   'choose-obsidian-folder',
+  'recover-existing-library',
   'choose-export-folder',
   'toggle-clipboard',
   'choose-folder-import',

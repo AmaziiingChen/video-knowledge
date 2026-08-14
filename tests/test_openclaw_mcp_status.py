@@ -152,19 +152,25 @@ def test_mcp_status_rejects_unmanaged_child_environment_overrides(tmp_path, monk
 def test_repair_mcp_replaces_only_the_knowledgehub_cli_entry_and_rechecks_it(tmp_path, monkeypatch):
     command, arguments = _source_mcp_command()
     _write_ready_config(tmp_path, monkeypatch, command=command, arguments=arguments)
-    calls: list[tuple[str, ...]] = []
+    cli_calls: list[tuple[str, ...]] = []
+    gateway_calls: list[tuple[str, ...]] = []
 
     def run_cli(*args, **_kwargs):
-        calls.append(args)
+        cli_calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def run_gateway(*args, **_kwargs):
+        gateway_calls.append(args)
         return subprocess.CompletedProcess(args, 0, "", "")
 
     ready = {"mcp": {"configured": True, "detail": "KnowledgeHub MCP 已就绪"}}
     monkeypatch.setattr(openclaw_gateway, "_run_openclaw_cli", run_cli)
+    monkeypatch.setattr(openclaw_gateway, "_run_openclaw", run_gateway)
     monkeypatch.setattr(openclaw_gateway, "get_openclaw_status", lambda **_kwargs: ready)
 
     assert openclaw_gateway.repair_openclaw_mcp() == ready
-    assert calls[0][:3] == ("mcp", "set", "knowledgehub")
-    descriptor = json.loads(calls[0][3])
+    assert cli_calls[0][:3] == ("mcp", "set", "knowledgehub")
+    descriptor = json.loads(cli_calls[0][3])
     assert descriptor == {
         "command": str(Path(sys.executable).resolve()),
         "args": arguments,
@@ -173,7 +179,8 @@ def test_repair_mcp_replaces_only_the_knowledgehub_cli_entry_and_rechecks_it(tmp
             "KNOWLEDGEHUB_API_BASE": "http://127.0.0.1:8000/api",
         },
     }
-    assert calls[1] == ("mcp", "reload")
+    assert len(cli_calls) == 1
+    assert gateway_calls == [("restart", "--json")]
 
 
 def test_repair_mcp_refuses_to_write_when_the_desktop_bridge_is_not_ready(tmp_path, monkeypatch):

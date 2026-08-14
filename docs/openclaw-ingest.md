@@ -129,8 +129,9 @@ KnowledgeHub never modifies `~/.openclaw/openclaw.json` automatically at
 startup. In the desktop app, open “设置 → 微信链接自动处理” and choose “修复 MCP”
 when the KnowledgeHub row is missing or invalid. That explicit, local action
 uses the OpenClaw CLI to replace **only** `mcp.servers.knowledgehub`, reloads
-OpenClaw, and proves the entry with a stdio tools-list handshake; it never edits
-other MCP servers. The configuration contains a capability **file path**, never
+the managed OpenClaw Gateway so cached conversation runtimes are retired, and
+proves the entry with a stdio tools-list handshake; it never edits other MCP
+servers. The configuration contains a capability **file path**, never
 the capability value; the file is created with mode `0600`, rotates on every
 KnowledgeHub launch and is invalidated by a short parent-process lease.
 

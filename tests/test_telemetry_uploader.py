@@ -346,6 +346,32 @@ def test_failed_uploads_back_off_without_exceeding_the_regular_interval():
         delay, failures = telemetry_uploader.next_upload_delay("failed", failures)
     assert delay == telemetry_uploader.MAX_RETRY_SECONDS
     assert telemetry_uploader.next_upload_delay("succeeded", failures) == (
+        telemetry_uploader.DRAIN_INTERVAL_SECONDS,
+        0,
+    )
+    assert telemetry_uploader.next_upload_delay("empty", failures) == (
         telemetry_uploader.REGULAR_INTERVAL_SECONDS,
         0,
     )
+
+
+def test_background_uploader_drains_successful_batches_before_returning_to_low_frequency(monkeypatch):
+    delays: list[float] = []
+    results = iter(["succeeded", "succeeded", "empty"])
+    monkeypatch.setattr(telemetry_uploader, "upload_once", lambda: next(results))
+    uploader = telemetry_uploader.TelemetryUploader()
+
+    class SequencedStopEvent:
+        def wait(self, delay: float) -> bool:
+            delays.append(delay)
+            return len(delays) == 4
+
+    uploader._stop_event = SequencedStopEvent()
+    uploader._run()
+
+    assert delays == [
+        telemetry_uploader.INITIAL_DELAY_SECONDS,
+        telemetry_uploader.DRAIN_INTERVAL_SECONDS,
+        telemetry_uploader.DRAIN_INTERVAL_SECONDS,
+        telemetry_uploader.REGULAR_INTERVAL_SECONDS,
+    ]
