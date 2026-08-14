@@ -7,6 +7,13 @@ function backendSpawnOptions(platform = process.platform) {
   return { detached: platform !== 'win32' }
 }
 
+function backendStartupAction({ health, hasManagedProcess, hasBridgeSession }) {
+  if (health?.ready) {
+    return hasManagedProcess && hasBridgeSession ? 'reuse' : 'replace-stale'
+  }
+  return health?.reachable ? 'reject-occupied' : 'start'
+}
+
 function backendLeasePath(runDir) {
   return path.join(runDir, 'backend-process.json')
 }
@@ -87,6 +94,7 @@ function terminateBackendProcess(child, {
 }
 
 module.exports = {
+  backendStartupAction,
   backendSpawnOptions,
   backendLeasePath,
   clearBackendLease,

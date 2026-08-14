@@ -2,6 +2,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 
 const {
+  backendStartupAction,
   backendSpawnOptions,
   clearBackendLease,
   readBackendLease,
@@ -9,6 +10,37 @@ const {
   terminateLeasedBackend,
   writeBackendLease,
 } = require('./backend-process.cjs')
+
+test('reuses a healthy backend only when this desktop owns its bridge session', () => {
+  assert.equal(backendStartupAction({
+    health: { ready: true, reachable: true },
+    hasManagedProcess: true,
+    hasBridgeSession: true,
+  }), 'reuse')
+  assert.equal(backendStartupAction({
+    health: { ready: true, reachable: true },
+    hasManagedProcess: false,
+    hasBridgeSession: false,
+  }), 'replace-stale')
+  assert.equal(backendStartupAction({
+    health: { ready: true, reachable: true },
+    hasManagedProcess: true,
+    hasBridgeSession: false,
+  }), 'replace-stale')
+})
+
+test('distinguishes an occupied port from a backend that can be started', () => {
+  assert.equal(backendStartupAction({
+    health: { ready: false, reachable: true },
+    hasManagedProcess: false,
+    hasBridgeSession: false,
+  }), 'reject-occupied')
+  assert.equal(backendStartupAction({
+    health: { ready: false, reachable: false },
+    hasManagedProcess: false,
+    hasBridgeSession: false,
+  }), 'start')
+})
 
 test('places Unix backend launches in an isolated process group', () => {
   assert.deepEqual(backendSpawnOptions('darwin'), { detached: true })

@@ -13,6 +13,7 @@ const { checkDesktopReleaseUpdate } = require('./release-update.cjs')
 const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
 const {
+  backendStartupAction,
   backendSpawnOptions,
   clearBackendLease,
   terminateBackendProcess,
@@ -587,11 +588,19 @@ function startMcpBridgeSession(runDir) {
 async function ensureBackend() {
   const runtime = backendRuntime()
   const existingHealth = await inspectBackendHealth(HEALTH_URL)
-  if (existingHealth.ready) return
-  if (existingHealth.reachable) {
+  const startupAction = backendStartupAction({
+    health: existingHealth,
+    hasManagedProcess: Boolean(backendProcess),
+    hasBridgeSession: Boolean(mcpBridgeSession),
+  })
+  if (startupAction === 'reuse') return
+  if (startupAction === 'reject-occupied') {
     throw new Error('本机端口 8000 已被另一个后端或其他服务占用，请先关闭该进程后重试')
   }
   const terminatedLease = terminateLeasedBackend(runtime.runDir, { isExpectedBackendProcess })
+  if (startupAction === 'replace-stale' && !terminatedLease) {
+    throw new Error('检测到未由当前应用管理的 KnowledgeHub 后端，请先完全退出旧版 KnowledgeHub 后重试')
+  }
   if (terminatedLease && !(await waitForPortRelease())) {
     throw new Error('上一轮 KnowledgeHub 后端未能停止，请完全退出旧版 KnowledgeHub 后重试')
   }

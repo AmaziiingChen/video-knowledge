@@ -71,6 +71,15 @@ def _write_secure(path: Path, content: str) -> None:
     path.chmod(0o600)
 
 
+def test_missing_bridge_context_tells_the_user_to_wait_for_local_startup(monkeypatch):
+    monkeypatch.delenv("KNOWLEDGEHUB_MCP_BRIDGE_TOKEN_FILE", raising=False)
+
+    with pytest.raises(McpBridgeUnavailable, match="等待本机服务连接完成"):
+        read_mcp_bridge_token()
+    with pytest.raises(McpBridgeUnavailable, match="等待本机服务连接完成"):
+        read_mcp_bridge_api_base()
+
+
 def test_bridge_token_reader_rejects_symlinks_and_wide_permissions(tmp_path):
     token_file = tmp_path / "run" / "token"
     _write_secure(token_file, "a" * 43)
