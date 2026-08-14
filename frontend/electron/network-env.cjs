@@ -41,8 +41,20 @@ function telemetryProxyFromEnvironment(environment = {}) {
   return ''
 }
 
-function directChildEnvironment(environment = {}) {
-  const telemetryProxyUrl = telemetryProxyFromEnvironment(environment)
+function telemetryProxyFromElectronRules(value) {
+  for (const rule of String(value || '').split(';')) {
+    const match = rule.trim().match(/^(PROXY|HTTPS)\s+([^\s]+)$/i)
+    if (!match) continue
+    const protocol = match[1].toUpperCase() === 'HTTPS' ? 'https' : 'http'
+    const proxyUrl = validatedTelemetryProxyUrl(`${protocol}://${match[2]}`)
+    if (proxyUrl) return proxyUrl
+  }
+  return ''
+}
+
+function directChildEnvironment(environment = {}, resolvedTelemetryProxyUrl = '') {
+  const telemetryProxyUrl = validatedTelemetryProxyUrl(resolvedTelemetryProxyUrl)
+    || telemetryProxyFromEnvironment(environment)
   const result = { ...environment }
   for (const name of PROXY_ENVIRONMENT_NAMES) delete result[name]
   delete result[TELEMETRY_PROXY_ENVIRONMENT_NAME]
@@ -53,6 +65,7 @@ function directChildEnvironment(environment = {}) {
 module.exports = {
   TELEMETRY_PROXY_ENVIRONMENT_NAME,
   directChildEnvironment,
+  telemetryProxyFromElectronRules,
   telemetryProxyFromEnvironment,
   validatedTelemetryProxyUrl,
 }

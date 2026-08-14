@@ -8,7 +8,7 @@ const path = require('path')
 const { pathToFileURL } = require('url')
 const { createCampusWebVpnController } = require('./campus-webvpn.cjs')
 const { createPlatformAuthController } = require('./platform-auth.cjs')
-const { directChildEnvironment } = require('./network-env.cjs')
+const { directChildEnvironment, telemetryProxyFromElectronRules } = require('./network-env.cjs')
 const { checkDesktopReleaseUpdate } = require('./release-update.cjs')
 const { exportMarkdownDocument } = require('./markdown-export.cjs')
 const { isExpectedBackendHealth } = require('./backend-health.cjs')
@@ -32,6 +32,8 @@ const {
 const ROOT_DIR = path.resolve(__dirname, '..', '..')
 const BACKEND_URL = 'http://127.0.0.1:8000'
 const HEALTH_URL = `${BACKEND_URL}/api/health`
+const TELEMETRY_COLLECTOR_URL = 'https://knowledgehub-telemetry-collector.knowledgehub4chen.workers.dev/v1/events'
+const PROXY_RESOLUTION_TIMEOUT_MS = 2000
 const WECHAT_PREVIEW_PARTITION = 'persist:knowledgehub-wechat-preview'
 const LOCAL_HTML_PREVIEW_PARTITION = 'persist:knowledgehub-local-html-preview'
 const APP_PROTOCOL = 'knowledgehub'
@@ -41,12 +43,13 @@ const BACKEND_INSTANCE_TOKEN = randomUUID()
 // Release checks use this explicit, process-local override so an isolated DMG
 // run never opens the user's real Electron profile. Normal launches retain
 // Electron's platform-default userData path.
-applyUserDataDirectoryOverride(app)
+const USER_DATA_DIRECTORY_OVERRIDE = applyUserDataDirectoryOverride(app)
 
 // Public HTTPS requests such as release checks follow the user's macOS network
 // settings. Renderer and login-window navigation remain restricted to their
-// reviewed host allowlists, while the local backend still receives a proxy-free
-// child environment for credentialed collection and download tasks.
+// reviewed host allowlists. The local backend still receives a proxy-free child
+// environment for credentialed collection and download tasks, plus one
+// sanitized proxy URL that only the fixed telemetry uploader may consume.
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -519,7 +522,9 @@ function pickPython() {
 
 function backendRuntime() {
   if (!app.isPackaged) {
-    const dataDir = path.join(ROOT_DIR, 'data')
+    const dataDir = USER_DATA_DIRECTORY_OVERRIDE
+      ? path.join(USER_DATA_DIRECTORY_OVERRIDE, 'data')
+      : path.join(ROOT_DIR, 'data')
     const args = ['-m', 'uvicorn', 'main:app', '--host', '127.0.0.1', '--port', '8000']
     // The Finder launcher is used as a local, long-running application. A
     // uvicorn reloader tears down its HTTP worker on every saved backend file,
@@ -551,6 +556,23 @@ function backendRuntime() {
     envFile: path.join(app.getPath('userData'), 'settings.env'),
     logDir: path.join(dataDir, 'logs'),
     runDir: path.join(app.getPath('userData'), 'run'),
+  }
+}
+
+async function resolveTelemetryProxyUrl() {
+  let timeout = null
+  try {
+    const proxyRules = await Promise.race([
+      session.defaultSession.resolveProxy(TELEMETRY_COLLECTOR_URL),
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve('DIRECT'), PROXY_RESOLUTION_TIMEOUT_MS)
+      }),
+    ])
+    return telemetryProxyFromElectronRules(proxyRules)
+  } catch {
+    return ''
+  } finally {
+    if (timeout) clearTimeout(timeout)
   }
 }
 
@@ -612,8 +634,9 @@ async function ensureBackend() {
   const pathEntries = process.platform === 'darwin'
     ? ['/opt/miniconda3/bin', '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '']
     : [process.env.PATH || '']
+  const telemetryProxyUrl = await resolveTelemetryProxyUrl()
   const env = {
-    ...directChildEnvironment(process.env),
+    ...directChildEnvironment(process.env, telemetryProxyUrl),
     PATH: pathEntries.filter(Boolean).join(path.delimiter),
     NO_PROXY: '127.0.0.1,localhost',
     no_proxy: '127.0.0.1,localhost',

@@ -7,6 +7,11 @@ that tag was continuous and was not distributed as versioned releases.
 
 - Architecture hardening under a product feature freeze.
 
+## v0.1.11
+
+- Discover the diagnostics-only proxy from Electron's macOS networking session
+  when Finder launches the app without shell proxy environment variables.
+
 ## v0.1.10
 
 - Route only the fixed Cloudflare diagnostics uploader through a sanitized,

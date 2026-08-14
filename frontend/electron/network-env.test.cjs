@@ -6,6 +6,7 @@ const path = require('node:path')
 const {
   TELEMETRY_PROXY_ENVIRONMENT_NAME,
   directChildEnvironment,
+  telemetryProxyFromElectronRules,
   telemetryProxyFromEnvironment,
   validatedTelemetryProxyUrl,
 } = require('./network-env.cjs')
@@ -44,6 +45,22 @@ test('invalid higher-priority proxy values cannot hide a valid HTTP proxy', () =
     HTTPS_PROXY: 'socks5://127.0.0.1:7897',
     HTTP_PROXY: 'http://localhost:7897',
   }), 'http://localhost:7897')
+})
+
+test('Electron system proxy rules take priority when Finder has no proxy environment', () => {
+  assert.equal(
+    telemetryProxyFromElectronRules('PROXY 127.0.0.1:7897; DIRECT'),
+    'http://127.0.0.1:7897',
+  )
+  assert.equal(
+    telemetryProxyFromElectronRules('HTTPS proxy.example.test:8443; DIRECT'),
+    'https://proxy.example.test:8443',
+  )
+  assert.equal(telemetryProxyFromElectronRules('SOCKS5 127.0.0.1:7897; DIRECT'), '')
+  assert.deepEqual(directChildEnvironment({ PATH: '/usr/bin' }, 'http://127.0.0.1:7897'), {
+    PATH: '/usr/bin',
+    [TELEMETRY_PROXY_ENVIRONMENT_NAME]: 'http://127.0.0.1:7897',
+  })
 })
 
 test('an injected telemetry-only proxy is discarded unless standard proxy settings validate it', () => {
