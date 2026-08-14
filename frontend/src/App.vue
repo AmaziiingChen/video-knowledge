@@ -1994,10 +1994,7 @@ async function chooseObsidianFolder() {
   obsidianVaultPath.value = folder
   await saveObsidianSettingsFromForm({ recoverExisting: true })
 }
-
-async function recoverExistingLibrary() {
-  await saveObsidianSettingsFromForm({ recoverExisting: true })
-}
+async function recoverExistingLibrary() { await saveObsidianSettingsFromForm({ recoverExisting: true }) }
 
 async function chooseMarkdownExportFolder() {
   const folder = await window.knowledgeHubDesktop?.chooseDirectory?.()

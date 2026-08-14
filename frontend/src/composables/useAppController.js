@@ -674,10 +674,7 @@ export function useAppController() {
     obsidianAutoWrite,
     loadObsidianSettings,
     saveObsidianSettingsFromForm,
-  } = useMarkdownOutputSettingsController({
-    notify: ElMessage,
-    refreshLibrary: () => loadContentItems(),
-  })
+  } = useMarkdownOutputSettingsController({ notify: ElMessage, refreshLibrary: () => loadContentItems() })
   const showSettings = ref(false)
   const {
     cookieInput,

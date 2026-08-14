@@ -739,9 +739,7 @@ const aiModelOptions = computed(() => (
 const emit = defineEmits([
   'library-changed',
   'processing-started',
-  'save-obsidian',
-  'choose-obsidian-folder',
-  'recover-existing-library',
+  'save-obsidian', 'choose-obsidian-folder', 'recover-existing-library',
   'choose-export-folder',
   'toggle-clipboard',
   'choose-folder-import',
