@@ -24,6 +24,10 @@ class ClipboardWatcherRequest(BaseModel):
     capture_mode: str = Field(default="task", pattern="^(inbox|task)$")
 
 
+class ClipboardScanRequest(BaseModel):
+    text: str = Field(max_length=50_000)
+
+
 class CapturedClipboardLink(BaseModel):
     link: str
     item_id: str | None = None
@@ -60,6 +64,16 @@ def _status_response() -> ClipboardWatcherResponse:
 
 @router.get("/clipboard-watcher", response_model=ClipboardWatcherResponse)
 async def get_clipboard_watcher_status():
+    return _status_response()
+
+
+@router.post("/clipboard-watcher/scan", response_model=ClipboardWatcherResponse)
+async def scan_native_clipboard(req: ClipboardScanRequest):
+    # Electron owns the reliable native pasteboard API in packaged builds.
+    # Keep the existing backend poller for source mode and Windows, while this
+    # authenticated loopback bridge supplies macOS changes only when enabled.
+    if clipboard_watcher.status()["running"]:
+        clipboard_watcher.scan_text(req.text)
     return _status_response()
 
 

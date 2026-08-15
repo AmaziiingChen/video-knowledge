@@ -168,7 +168,6 @@ function measure() {
     height: scrollBox.height,
     entryCount: entries.value.length,
     leftGutter,
-    remote: isRemoteOutline.value,
   })
   visible.value = canFitRail
   if (!canFitRail) {

@@ -873,10 +873,30 @@ def _load_cookies_for_playwright() -> list:
 
     return cookies
 
-def get_video_info(url: str, platform: str = "") -> dict:
+def get_video_info(url: str, platform: str = "", cancel_check: CancelCheck | None = None) -> dict:
     if platform == "bilibili":
         cmd = [resolve_tool("yt-dlp") or "yt-dlp", "--dump-json", "--no-playlist", url]
         try:
+            if cancel_check is not None:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=direct_network_environment(),
+                )
+                deadline = time.monotonic() + 60
+                while True:
+                    if cancel_check():
+                        _terminate_info_process(process)
+                        return {}
+                    try:
+                        stdout, _stderr = process.communicate(timeout=0.25)
+                        return json.loads(stdout) if process.returncode == 0 else {}
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline:
+                            _terminate_info_process(process)
+                            return {}
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -889,3 +909,16 @@ def get_video_info(url: str, platform: str = "") -> dict:
         except Exception:
             pass
     return {}
+
+
+def _terminate_info_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2)
+    except OSError:
+        return

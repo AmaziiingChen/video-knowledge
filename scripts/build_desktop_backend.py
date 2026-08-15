@@ -98,6 +98,8 @@ def build_backend(target: str) -> None:
             "--hidden-import",
             "mlx.core",
             "--hidden-import",
+            "mlx._reprlib_fix",
+            "--hidden-import",
             "mlx.nn",
             "--hidden-import",
             "mlx_whisper",

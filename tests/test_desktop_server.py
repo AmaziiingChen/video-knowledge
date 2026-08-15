@@ -22,3 +22,13 @@ def test_desktop_entrypoint_runs_only_the_stdio_bridge_in_mcp_mode(monkeypatch):
     desktop_server.main(["--mcp-stdio"])
 
     assert calls == ["freeze", "mcp"]
+
+
+def test_desktop_entrypoint_runs_only_the_mlx_import_smoke(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(desktop_server.mp, "freeze_support", lambda: calls.append("freeze"))
+    monkeypatch.setattr(desktop_server, "run_mlx_import_smoke", lambda: calls.append("mlx"))
+
+    desktop_server.main(["--smoke-mlx-import"])
+
+    assert calls == ["freeze", "mlx"]

@@ -2,11 +2,13 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 
 const {
+  backendProcessIsRunning,
   backendStartupAction,
   backendSpawnOptions,
   clearBackendLease,
   readBackendLease,
   terminateBackendProcess,
+  terminateBackendProcessGracefully,
   terminateLeasedBackend,
   writeBackendLease,
 } = require('./backend-process.cjs')
@@ -69,6 +71,48 @@ test('uses the direct child process on Windows and tolerates an exited process',
   assert.equal(terminateBackendProcess({ pid: 98 }, {
     kill: () => { const error = new Error('gone'); error.code = 'ESRCH'; throw error },
   }), true)
+})
+
+test('waits for the backend process group to exit after graceful termination', async () => {
+  let running = true
+  const calls = []
+  const stopped = await terminateBackendProcessGracefully({ pid: 4321 }, {
+    platform: 'darwin',
+    kill: (pid, signal) => {
+      calls.push([pid, signal])
+      if (signal === 'SIGTERM') running = false
+      if (signal === 0 && !running) {
+        const error = new Error('gone')
+        error.code = 'ESRCH'
+        throw error
+      }
+    },
+    wait: async () => {},
+  })
+
+  assert.equal(stopped, true)
+  assert.deepEqual(calls, [[-4321, 'SIGTERM'], [-4321, 0]])
+  assert.equal(backendProcessIsRunning(4321, {
+    platform: 'darwin',
+    kill: () => { const error = new Error('gone'); error.code = 'ESRCH'; throw error },
+  }), false)
+})
+
+test('force-stops a backend process group that ignores the shutdown deadline', async () => {
+  let currentTime = 0
+  const calls = []
+  const stopped = await terminateBackendProcessGracefully({ pid: 9876 }, {
+    platform: 'darwin',
+    kill: (...args) => calls.push(args),
+    graceMs: 250,
+    pollMs: 100,
+    now: () => currentTime,
+    wait: async (delayMs) => { currentTime += delayMs },
+  })
+
+  assert.equal(stopped, true)
+  assert.deepEqual(calls.at(-1), [-9876, 'SIGKILL'])
+  assert.ok(calls.some((call) => call[1] === 0))
 })
 
 test('only terminates a stale backend when it is both leased and recognizably ours', () => {

@@ -19,6 +19,7 @@ from services.runtime_components import (
     faster_whisper_cache_dir,
     is_model_available,
     mlx_whisper_model_dir,
+    model_storage_path,
     preferred_asr_backend,
 )
 from services.text_normalizer import normalize_transcript_segments, normalize_transcript_text
@@ -67,8 +68,13 @@ def get_model(model_name: str | None = None):
         # desktop server is merely starting or listing the library.
         from faster_whisper import WhisperModel
 
+        direct_model = model_storage_path(selected_model, "faster_whisper")
+        model_path_or_name = str(direct_model) if (
+            (direct_model / "config.json").is_file()
+            and (direct_model / "model.bin").is_file()
+        ) else selected_model
         _models[selected_model] = WhisperModel(
-            selected_model,
+            model_path_or_name,
             device=settings.whisper_device,
             compute_type="int8",
             download_root=str(faster_whisper_cache_dir()),

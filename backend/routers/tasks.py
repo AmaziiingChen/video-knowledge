@@ -284,7 +284,7 @@ async def fetch_bilibili_external_subtitle(item_id: str):
 
 @router.post("/content/{item_id}/redownload-video", response_model=TaskResponse)
 async def redownload_expired_video(item_id: str):
-    """Restore a preview; Bilibili keeps its subtitle-first analysis path."""
+    """Restore only the local video preview and preserve existing analysis."""
     initialize_database()
     with connect() as connection:
         repository = ContentRepository(connection)
@@ -313,7 +313,6 @@ async def redownload_expired_video(item_id: str):
         raise HTTPException(status_code=409, detail="本地视频仍可用，无需重新下载")
     previous_request = _previous_pipeline_request(latest_task["request_json"] if latest_task else None)
     request_payload = previous_request.model_dump() if previous_request else {}
-    is_bilibili = item.source_provider == "bilibili"
     request_payload.update({
         "content_item_id": item.id,
         "share_text": item.source_url,
@@ -322,11 +321,8 @@ async def redownload_expired_video(item_id: str):
         "local_video_path": None,
         "local_subtitle_path": None,
         "use_cache": True,
-        # For Bilibili, a manually requested preview must not bypass player
-        # subtitles and the short AI-summary path.  Other sources retain the
-        # established preview-only recovery behavior.
-        "processing_mode": "full" if is_bilibili else "download_only",
-        "download_video_preview": is_bilibili,
+        "processing_mode": "download_only",
+        "download_video_preview": False,
         "subtitle_only": False,
         "priority": 100,
         "execution_mode": "foreground",

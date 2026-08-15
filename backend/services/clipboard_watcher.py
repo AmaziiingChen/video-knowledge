@@ -224,6 +224,7 @@ class ClipboardWatcher:
 
         links = extract_supported_links(text)
         created: list[ClipboardEvent] = []
+        errors: list[str] = []
         for link in links:
             with self._lock:
                 whisper_model = self._whisper_model
@@ -232,53 +233,61 @@ class ClipboardWatcher:
                 ai_model = self._ai_model
                 capture_mode = self._capture_mode
 
-            if capture_mode == "task":
-                record = self._task_creator(
-                    PipelineRequest(
-                        share_text=link,
-                        whisper_model=whisper_model,
-                        **asr_options,
-                        ai_model=ai_model,
-                        use_cache=use_cache,
-                        processing_mode="full" if manual_collection_settings()["auto_summarize"] else "transcript",
-                        manual_collection=True,
-                        execution_mode="background",
+            try:
+                if capture_mode == "task":
+                    record = self._task_creator(
+                        PipelineRequest(
+                            share_text=link,
+                            whisper_model=whisper_model,
+                            **asr_options,
+                            ai_model=ai_model,
+                            use_cache=use_cache,
+                            processing_mode="full" if manual_collection_settings()["auto_summarize"] else "transcript",
+                            manual_collection=True,
+                            execution_mode="background",
+                        )
                     )
-                )
-                event = ClipboardEvent(
-                    link=link,
-                    item_id=None,
-                    task_id=record.task_id,
-                    created_at=_now_iso(),
-                    capture_mode="task",
-                )
-            else:
-                result = capture_link_to_inbox(link)
-                if result.error or result.item is None:
-                    with self._lock:
-                        self._last_error = result.error or "收件箱捕获失败"
-                    continue
-                event = ClipboardEvent(
-                    link=link,
-                    item_id=result.item.id,
-                    task_id=None,
-                    created_at=_now_iso(),
-                    duplicate=result.duplicate,
-                    capture_mode="inbox",
-                )
+                    event = ClipboardEvent(
+                        link=link,
+                        item_id=None,
+                        task_id=record.task_id,
+                        created_at=_now_iso(),
+                        capture_mode="task",
+                    )
+                else:
+                    result = capture_link_to_inbox(link)
+                    if result.error or result.item is None:
+                        errors.append(result.error or "收件箱捕获失败")
+                        continue
+                    event = ClipboardEvent(
+                        link=link,
+                        item_id=result.item.id,
+                        task_id=None,
+                        created_at=_now_iso(),
+                        duplicate=result.duplicate,
+                        capture_mode="inbox",
+                    )
+            except Exception as exc:
+                errors.append(str(exc) or "剪贴板链接任务创建失败")
+                continue
             created.append(event)
             with self._lock:
                 self._events.insert(0, event)
                 self._events = self._events[:100]
 
         with self._lock:
-            self._last_error = None
+            self._last_error = errors[-1] if errors else None
             self._last_checked_at = _now_iso()
         return created
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
-            self.scan_once()
+            try:
+                self.scan_once()
+            except Exception as exc:
+                with self._lock:
+                    self._last_error = str(exc) or "剪贴板监听异常"
+                    self._last_checked_at = _now_iso()
             with self._lock:
                 interval = self._poll_interval
             self._stop_event.wait(interval)

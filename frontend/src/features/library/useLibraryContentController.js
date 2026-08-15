@@ -133,7 +133,7 @@ export function useLibraryContentController({
     if (startup) startupPhase.value = 'library'
     const loadVersion = ++contentPageLoadVersion
     Object.assign(contentPageLoadStatus, {
-      state: 'idle',
+      state: 'loading',
       loaded: allContentItems.value.length,
       total: allContentItems.value.length,
     })

@@ -11,9 +11,10 @@ class ParsedURL(BaseModel):
 
 # Creator collections return canonical work URLs instead of share short links.
 # Both forms must enter the same download/transcription pipeline.
-DOUYIN_PATTERN = re.compile(r'https?://(?:v\.|www\.)?douyin\.com/(?:[A-Za-z0-9_/-]+|video/\d+)')
-BILIBILI_PATTERN = re.compile(r'https?://(?:www\.)?bilibili\.com/video/[A-Za-z0-9]+(?:\?p=\d+)?')
-BILIBILI_SHORT_PATTERN = re.compile(r'https?://b23\.tv/[A-Za-z0-9]+')
+_SHARE_URL_END = r'[^\s，。；、,!！）)\]}>]+'
+DOUYIN_PATTERN = re.compile(rf'https?://(?:(?:v|www)\.)?douyin\.com/{_SHARE_URL_END}', re.IGNORECASE)
+BILIBILI_PATTERN = re.compile(rf'https?://(?:(?:www|m)\.)?bilibili\.com/video/BV{_SHARE_URL_END}', re.IGNORECASE)
+BILIBILI_SHORT_PATTERN = re.compile(rf'https?://b23\.tv/{_SHARE_URL_END}', re.IGNORECASE)
 WECHAT_PATTERN = re.compile(r'https?://mp\.weixin\.qq\.com/[^\s]+')
 XIAOHONGSHU_PATTERN = re.compile(
     r'https?://(?:www\.)?xiaohongshu\.com/(?:explore|discovery/item|search_result)/[^\s]+',
@@ -28,13 +29,13 @@ def parse_share_text(text: str) -> Optional[ParsedURL]:
     text = text.strip()
     
     if match := DOUYIN_PATTERN.search(text):
-        return ParsedURL(url=match.group(), platform="douyin", original_text=text)
+        return ParsedURL(url=_clean_share_url(match.group()), platform="douyin", original_text=text)
     
     if match := BILIBILI_PATTERN.search(text):
-        return ParsedURL(url=match.group(), platform="bilibili", original_text=text)
+        return ParsedURL(url=_clean_share_url(match.group()), platform="bilibili", original_text=text)
     
     if match := BILIBILI_SHORT_PATTERN.search(text):
-        return ParsedURL(url=match.group(), platform="bilibili", original_text=text)
+        return ParsedURL(url=_clean_share_url(match.group()), platform="bilibili", original_text=text)
 
     if match := WECHAT_PATTERN.search(text):
         return ParsedURL(url=match.group().rstrip('，,。)'), platform="wechat", original_text=text)
@@ -46,6 +47,10 @@ def parse_share_text(text: str) -> Optional[ParsedURL]:
         return ParsedURL(url=match.group().rstrip('，,。)'), platform="xiaohongshu", original_text=text)
     
     return None
+
+
+def _clean_share_url(value: str) -> str:
+    return str(value or "").rstrip('，,。；;、!！?？)）]】>')
 
 
 def redact_sensitive_url(url: str) -> str:

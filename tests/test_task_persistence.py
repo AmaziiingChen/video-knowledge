@@ -190,6 +190,31 @@ def test_task_cancel_persists_after_releasing_manager_lock():
         manager._executor.shutdown(wait=True, cancel_futures=True)
 
 
+def test_running_task_becomes_cancelled_before_provider_call_unwinds():
+    manager = TaskManager()
+    try:
+        record = manager._record_from_request(
+            "cancel-running-now",
+            PipelineRequest(share_text="https://example.com/video"),
+        )
+        record.status = "running"
+        with manager._lock:
+            manager._tasks[record.task_id] = record
+
+        with (
+            patch.object(manager, "_persist_state", return_value=True),
+            patch.object(manager, "_persist_content_status"),
+            patch.object(manager, "_schedule_next"),
+        ):
+            cancelled = manager.cancel(record.task_id)
+
+        assert cancelled.status == "cancelled"
+        assert cancelled.cancel_requested is True
+        assert cancelled.result.step == "cancelled"
+    finally:
+        manager._executor.shutdown(wait=True, cancel_futures=True)
+
+
 def test_task_telemetry_reports_reached_buckets_and_proven_failures_without_inventing_stage_results():
     manager = TaskManager()
     events = []

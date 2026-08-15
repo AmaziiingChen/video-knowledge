@@ -45,6 +45,7 @@ def test_validate_app_accepts_the_expected_unsigned_arm64_layout(tmp_path, monke
         "smoke_test_mcp_entry",
         lambda _path: {"status": "ok", "transport": "stdio"},
     )
+    monkeypatch.setattr(release, "smoke_test_mlx_import", lambda _path: {"status": "ok"})
 
     report = release.validate_app(tmp_path, "0.1.0")
 
@@ -58,6 +59,7 @@ def test_validate_app_accepts_the_expected_unsigned_arm64_layout(tmp_path, monke
         "backend_mib": 0.0,
         "backend_smoke": {"status": "ok"},
         "mcp_entry_smoke": {"status": "ok", "transport": "stdio"},
+        "mlx_import_smoke": {"status": "ok"},
     }
     assert app.is_dir()
 

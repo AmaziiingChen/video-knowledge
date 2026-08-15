@@ -93,13 +93,63 @@ function terminateBackendProcess(child, {
   }
 }
 
+function backendProcessIsRunning(pid, {
+  platform = process.platform,
+  kill = process.kill,
+} = {}) {
+  const numericPid = Number(pid)
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return false
+
+  try {
+    kill(platform === 'win32' ? numericPid : -numericPid, 0)
+    return true
+  } catch (error) {
+    return error?.code !== 'ESRCH'
+  }
+}
+
+async function terminateBackendProcessGracefully(child, {
+  platform = process.platform,
+  kill = process.kill,
+  graceMs = 3000,
+  pollMs = 100,
+  now = Date.now,
+  wait = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+} = {}) {
+  const pid = Number(child?.pid)
+  if (!Number.isInteger(pid) || pid <= 0) return true
+
+  const target = platform === 'win32' ? pid : -pid
+  try {
+    kill(target, 'SIGTERM')
+  } catch (error) {
+    return error?.code === 'ESRCH'
+  }
+
+  const deadline = now() + Math.max(0, graceMs)
+  while (backendProcessIsRunning(pid, { platform, kill })) {
+    if (now() >= deadline) {
+      try {
+        kill(target, 'SIGKILL')
+        return true
+      } catch (error) {
+        return error?.code === 'ESRCH'
+      }
+    }
+    await wait(Math.max(1, pollMs))
+  }
+  return true
+}
+
 module.exports = {
+  backendProcessIsRunning,
   backendStartupAction,
   backendSpawnOptions,
   backendLeasePath,
   clearBackendLease,
   readBackendLease,
   terminateBackendProcess,
+  terminateBackendProcessGracefully,
   terminateLeasedBackend,
   writeBackendLease,
 }

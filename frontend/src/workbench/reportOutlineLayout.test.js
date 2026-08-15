@@ -14,8 +14,9 @@ test('shows a local outline only after the reader has enough width and safe gutt
   assert.equal(canShowReportOutline({ width: 900, height: 640, entryCount: 1, leftGutter: 120 }), false)
 })
 
-test('keeps an internal-browser outline independent from the local reader width', () => {
-  assert.equal(canShowReportOutline({ width: 360, height: 640, entryCount: 2, remote: true }), true)
+test('keeps an internal-browser outline behind the same reader width threshold', () => {
+  assert.equal(canShowReportOutline({ width: 360, height: 640, entryCount: 2, leftGutter: 70, remote: true }), false)
+  assert.equal(canShowReportOutline({ width: 760, height: 640, entryCount: 2, leftGutter: 70, remote: true }), true)
   assert.equal(canShowReportOutline({ width: 360, height: 299, entryCount: 2, remote: true }), false)
   assert.equal(canShowReportOutline({ width: 360, height: 640, entryCount: 1, remote: true }), false)
 })

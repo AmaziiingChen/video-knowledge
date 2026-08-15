@@ -35,9 +35,9 @@ afterEach(() => {
 })
 
 describe('ReportOutlineRail', () => {
-  it('shows two internal-browser entries at the minimum rail height on a narrow reader', async () => {
+  it('shows two internal-browser entries after the reader reaches the width threshold', async () => {
     const scrollRoot = document.createElement('div')
-    scrollRoot.getBoundingClientRect = () => rectangle()
+    scrollRoot.getBoundingClientRect = () => rectangle({ width: 760 })
     document.body.appendChild(scrollRoot)
     roots.push(scrollRoot)
 

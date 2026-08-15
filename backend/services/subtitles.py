@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from services.bilibili_auth import bilibili_playwright_cookies
@@ -36,7 +36,11 @@ class SubtitleFetchResult:
     error: str = ""
 
 
-def fetch_bilibili_subtitle(url: str, output_dir: Path) -> SubtitleFetchResult:
+def fetch_bilibili_subtitle(
+    url: str,
+    output_dir: Path,
+    cancel_check: Callable[[], bool] | None = None,
+) -> SubtitleFetchResult:
     """Read a subtitle only when Bilibili's current player binds it.
 
     The standalone player endpoint can intermittently return a caption for a
@@ -45,10 +49,15 @@ def fetch_bilibili_subtitle(url: str, output_dir: Path) -> SubtitleFetchResult:
     accepting a potentially crossed subtitle.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    return _fetch_bilibili_player_subtitle(url, output_dir)
+    return _fetch_bilibili_player_subtitle(url, output_dir, cancel_check=cancel_check)
 
 
-def _fetch_bilibili_player_subtitle(url: str, output_dir: Path) -> SubtitleFetchResult:
+def _fetch_bilibili_player_subtitle(
+    url: str,
+    output_dir: Path,
+    *,
+    cancel_check: Callable[[], bool] | None = None,
+) -> SubtitleFetchResult:
     """Capture a subtitle from the actual Bilibili player for this page."""
     bvid = _extract_bvid(url)
     if not bvid or not _is_bilibili_video_page_url(url):
@@ -64,6 +73,8 @@ def _fetch_bilibili_player_subtitle(url: str, output_dir: Path) -> SubtitleFetch
 
     player_responses: list[tuple[str, dict[str, Any]]] = []
     try:
+        if cancel_check and cancel_check():
+            return SubtitleFetchResult(success=False, error="字幕检查已取消")
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(
                 headless=True,
@@ -89,11 +100,15 @@ def _fetch_bilibili_player_subtitle(url: str, output_dir: Path) -> SubtitleFetch
                         player_responses.append((response.url, payload))
 
                 page.on("response", capture_player_response)
-                page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                page.goto(url, wait_until="domcontentloaded", timeout=15_000)
+                if cancel_check and cancel_check():
+                    return SubtitleFetchResult(success=False, error="字幕检查已取消")
                 page_metadata = _read_bilibili_browser_page_metadata(page, url)
                 if page_metadata is None or page_metadata["bvid"].lower() != bvid.lower():
                     return SubtitleFetchResult(success=False, error="B站页面视频身份校验失败，未采用字幕")
                 for _ in range(20):
+                    if cancel_check and cancel_check():
+                        return SubtitleFetchResult(success=False, error="字幕检查已取消")
                     if _browser_bound_bilibili_tracks(player_responses, page_metadata):
                         break
                     page.wait_for_timeout(250)

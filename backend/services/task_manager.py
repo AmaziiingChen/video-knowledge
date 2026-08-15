@@ -435,16 +435,18 @@ class TaskManager:
                 record.updated_at = _now_iso()
                 if record.status in {"queued", "paused"} and record.future:
                     record.future.cancel()
-                if record.status in {"queued", "paused"}:
-                    record.status = "cancelled"
-                    should_schedule = True
-                    record.result = PipelineResponse(
-                        success=False,
-                        task_id=task_id,
-                        error="任务已取消",
-                        error_info=classify_pipeline_error("cancelled", "任务已取消"),
-                        step="cancelled",
-                    )
+                # Cancellation is a user-facing terminal decision.  Blocking
+                # provider calls may need a moment to unwind, but the queue and
+                # UI must not remain stuck in "正在取消" until their timeout.
+                record.status = "cancelled"
+                should_schedule = True
+                record.result = PipelineResponse(
+                    success=False,
+                    task_id=task_id,
+                    error="任务已取消",
+                    error_info=classify_pipeline_error("cancelled", "任务已取消"),
+                    step="cancelled",
+                )
                 should_persist = True
             snapshot = self._copy_record(record)
         if should_persist:
@@ -579,7 +581,7 @@ class TaskManager:
                 snapshot = None
                 with self._lock:
                     current = self._tasks.get(task_id)
-                    if not current:
+                    if not current or current.status == "cancelled":
                         return
                     current.result = result
                     # A WeChat article gets its library item while the body snapshot is

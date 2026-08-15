@@ -7,6 +7,24 @@ that tag was continuous and was not distributed as versioned releases.
 
 - Architecture hardening under a product feature freeze.
 
+## v0.1.13
+
+- Prefer a direct ModelScope download path for Apple Silicon speech models,
+  with resumable transfers and visible byte progress before retaining the
+  existing Hugging Face fallbacks.
+- Repair the frozen MLX Whisper runtime and make the release validator import
+  the packaged native extension before publishing an artifact.
+- Relay macOS clipboard changes through Electron's native pasteboard API so
+  Bilibili and Douyin mobile share text reliably enters the existing task
+  queue.
+- Restore Xiaohongshu login completion and WeChat article-or-album import,
+  while keeping original-page outlines behind the reviewed reader-width rule.
+- Separate video re-download from summarization, make running task cancellation
+  terminal immediately, and prevent stale backend process groups from blocking
+  the next desktop launch.
+- Remove the persistent partial-library banner after the initial bounded page
+  has loaded.
+
 ## v0.1.11
 
 - Discover the diagnostics-only proxy from Electron's macOS networking session

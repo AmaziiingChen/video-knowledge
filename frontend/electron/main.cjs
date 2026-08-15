@@ -8,6 +8,7 @@ const path = require('path')
 const { pathToFileURL } = require('url')
 const { createCampusWebVpnController } = require('./campus-webvpn.cjs')
 const { createPlatformAuthController } = require('./platform-auth.cjs')
+const { createClipboardRelay } = require('./clipboard-relay.cjs')
 const { directChildEnvironment, telemetryProxyFromElectronRules } = require('./network-env.cjs')
 const { checkDesktopReleaseUpdate } = require('./release-update.cjs')
 const { exportMarkdownDocument } = require('./markdown-export.cjs')
@@ -17,6 +18,7 @@ const {
   backendSpawnOptions,
   clearBackendLease,
   terminateBackendProcess,
+  terminateBackendProcessGracefully,
   terminateLeasedBackend,
   writeBackendLease,
 } = require('./backend-process.cjs')
@@ -70,11 +72,14 @@ let mainWindow = null
 let campusWebVpn = null
 let platformAuth = null
 let isQuitting = false
+let backendShutdownComplete = false
+let backendShutdownPromise = null
 let backendReady = false
 let backendReadyWaiters = []
 let notificationTray = null
 let pendingNotifications = []
 let unreadDockBadgeCount = 0
+let nativeClipboardRelay = null
 
 function trayIcon() {
   const image = nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png'))
@@ -208,8 +213,36 @@ function setUnreadDockBadgeCount(value) {
 
 function markBackendReady() {
   backendReady = true
+  startNativeClipboardRelay()
   for (const resolve of backendReadyWaiters) resolve(true)
   backendReadyWaiters = []
+}
+
+async function relayNativeClipboardText(text) {
+  const response = await net.fetch(`${BACKEND_URL}/api/clipboard-watcher/scan`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-KnowledgeHub-Token': BACKEND_INSTANCE_TOKEN,
+    },
+    body: JSON.stringify({ text }),
+  })
+  if (!response.ok) throw new Error(`本机剪贴板桥接失败 (${response.status})`)
+}
+
+function startNativeClipboardRelay() {
+  if (nativeClipboardRelay) return
+  nativeClipboardRelay = createClipboardRelay({
+    readText: () => clipboard.readText('clipboard'),
+    sendText: relayNativeClipboardText,
+    onError: (error) => logRendererDiagnostic('clipboard-relay', error?.message || String(error)),
+  })
+  nativeClipboardRelay.start()
+}
+
+function stopNativeClipboardRelay() {
+  nativeClipboardRelay?.stop()
+  nativeClipboardRelay = null
 }
 
 function logRendererDiagnostic(kind, detail) {
@@ -878,12 +911,24 @@ app.on('activate', () => {
   }
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   isQuitting = true
   setUnreadDockBadgeCount(0)
+  if (backendShutdownComplete) return
+
+  event.preventDefault()
+  if (backendShutdownPromise) return
+
+  stopNativeClipboardRelay()
   stopMcpBridgeSession({ ignoreErrors: true })
-  terminateBackendProcess(backendProcess)
-  clearBackendLease(backendRuntime().runDir, backendProcess?.pid)
+  const stoppingBackend = backendProcess
+  backendProcess = null
+  backendShutdownPromise = terminateBackendProcessGracefully(stoppingBackend)
+    .finally(() => {
+      clearBackendLease(backendRuntime().runDir, stoppingBackend?.pid)
+      backendShutdownComplete = true
+      app.quit()
+    })
 })
 
 app.on('window-all-closed', () => {

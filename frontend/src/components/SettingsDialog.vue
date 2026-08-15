@@ -44,10 +44,11 @@
           <div class="settings-group">
             <div class="settings-group-head">已选语音模型</div>
             <p class="settings-group-note">本机只使用 {{ runtimeBackendName }}。默认固定使用一个模型，避免短视频策略额外保留另一套权重。</p>
-            <div v-for="model in selectedRuntimeModels" :key="`${model.backend}:${model.model}`" class="settings-row">
+            <div v-for="model in selectedRuntimeModels" :key="`${model.backend}:${model.model}`" class="settings-row settings-runtime-model-row">
               <div class="settings-row-copy">
                 <h3>{{ model.model }}</h3>
                 <p>{{ model.backend === 'mlx' ? 'Apple Silicon 优化模型' : 'Faster-Whisper 模型' }} · {{ model.available ? `已占用 ${formatBytes(model.installed_bytes)}` : model.bundled ? `随应用附带，安装约 ${formatBytes(model.estimated_bytes)}` : `下载约 ${formatBytes(model.estimated_bytes)}` }}</p>
+                <ModelDownloadProgress v-if="model.state === 'downloading'" :model="model" :status-text="componentStatusText(model, '已准备', '未下载')" />
                 <details v-if="modelFailureDetail(model)" class="settings-inline-details">
                   <summary>查看下载失败详情</summary>
                   <p>{{ modelFailureDetail(model) }}</p>
@@ -522,6 +523,7 @@ import { telemetryStatusPresentation } from '../features/telemetry/telemetryStat
 import { enqueueSourceSyncTask, observeSourceSyncTask } from '../utils/sourceSyncTask'
 import { API_BASE as API } from '../utils/localApiAuth.js'
 import SvgMaskIcon from './SvgMaskIcon.vue'
+import ModelDownloadProgress from './ModelDownloadProgress.vue'
 const appleIntelligenceIcon = 'apple.intelligence'
 const keyIcon = 'key'
 const keyCircleIcon = 'key.circle'
@@ -939,15 +941,13 @@ function componentStatusText(component, readyText, missingText) {
     const percent = Math.min(99, Math.floor(downloaded / total * 100))
     return `下载中 ${percent}% · ${formatBytes(downloaded)} / ${formatBytes(total)}`
   }
-  return component?.model ? '正在准备下载…' : '下载中'
+  return component?.model ? (component?.detail || '正在准备下载…') : '下载中'
 }
-
 function modelFailureDetail(model) {
   if (model?.state !== 'failed') return ''
   const detail = String(model?.detail || '').trim()
   return detail && detail !== '模型下载失败' ? detail : ''
 }
-
 function credentialPlaceholder(configured, credentialName) {
   return configured ? '••••••••••••' : `输入 ${credentialName}`
 }
@@ -1092,7 +1092,7 @@ async function connectXiaohongshuAuth() {
   xiaohongshuAuthConnecting.value = true
   try {
     const status = await connect('xiaohongshu')
-    await loadXiaohongshuCookieStatus(true)
+    await loadXiaohongshuCookieStatus(false)
     if (status?.state === 'valid' || xiaohongshuCookieState.value === 'valid') {
       ElMessage.success('小红书登录态已连接并验证可用')
     } else if (status?.state === 'invalid' || xiaohongshuCookieState.value === 'invalid') {

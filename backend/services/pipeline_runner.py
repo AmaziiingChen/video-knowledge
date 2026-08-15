@@ -538,7 +538,7 @@ def run_pipeline_sync(
                     )
                 elif parsed.platform != "douyin":
                     add_log("info", "获取视频信息...")
-                    video_info = get_video_info(parsed.url, parsed.platform)
+                    video_info = get_video_info(parsed.url, parsed.platform, cancel_check=cancel_check)
                     if video_info and use_cache:
                         write_cache_meta(cache_dir, {"video_info": video_info})
                 else:
@@ -603,7 +603,7 @@ def run_pipeline_sync(
                 subtitle_start = time.perf_counter()
                 add_log("transcribe", "检查 B站播放器外挂字幕...")
                 set_progress("transcribe", 15)
-                subtitle_result = fetch_bilibili_subtitle(parsed.url, output_dir)
+                subtitle_result = fetch_bilibili_subtitle(parsed.url, output_dir, cancel_check=cancel_check)
                 if subtitle_result.success:
                     transcript = subtitle_result.transcript
                     transcript_segments = subtitle_result.segments

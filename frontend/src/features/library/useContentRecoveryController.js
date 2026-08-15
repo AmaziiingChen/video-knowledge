@@ -143,12 +143,9 @@ export function useContentRecoveryController({
   }
 
   function redownloadContentVideo(item) {
-    const success = item?.source_provider === 'bilibili'
-      ? '已开始优先获取外挂字幕并生成总结，视频预览将同步下载'
-      : '已开始重新下载本地预览视频'
     return submitTask(item, 'redownload-video', {
       before: '正在创建视频下载任务…',
-      success,
+      success: '已开始重新下载本地预览视频；原有正文和总结保持不变',
       failure: '重新下载视频失败',
       hydrate: true,
     })

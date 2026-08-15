@@ -9,13 +9,10 @@ export function canShowReportOutline({
   height,
   entryCount,
   leftGutter = 0,
-  remote = false,
 }) {
   if (Number(height) < MIN_READER_HEIGHT || Number(entryCount) < 2) return false
-  // An embedded original page owns the full reader canvas, so its outline is
-  // always available. Local snapshots and reports wait until the reader has a
-  // real 70px gutter; otherwise the fixed rail would sit on top of the text.
-  if (remote) return true
+  // Embedded originals and local readers both need enough horizontal room;
+  // otherwise the fixed rail sits on top of the article text.
   return Number(width) >= MIN_READER_WIDTH && Number(leftGutter) >= MIN_LEFT_GUTTER
 }
 

@@ -172,6 +172,14 @@ def smoke_test_mcp_entry(executable: Path) -> dict[str, object]:
     return run_smoke(command=str(executable), prefix_args=[], cwd=executable.parent)
 
 
+def smoke_test_mlx_import(executable: Path) -> dict[str, object]:
+    result = run(str(executable), "--smoke-mlx-import", capture=True)
+    output = result.stdout.decode("utf-8", errors="replace").strip()
+    if output != "mlx-whisper-import-ok":
+        raise RuntimeError(f"unexpected MLX import smoke output: {output[-500:]}")
+    return {"status": "ok"}
+
+
 def validate_app(volume: Path, expected_version: str) -> dict[str, object]:
     app = volume / "KnowledgeHub.app"
     if not app.is_dir():
@@ -249,6 +257,7 @@ def validate_app(volume: Path, expected_version: str) -> dict[str, object]:
         "backend_mib": round(backend_bytes / 1024 / 1024, 1),
         "backend_smoke": smoke_test_backend(backend_executable),
         "mcp_entry_smoke": smoke_test_mcp_entry(backend_executable),
+        "mlx_import_smoke": smoke_test_mlx_import(backend_executable),
     }
 
 

@@ -12,9 +12,9 @@
         </div>
       </div>
       <div v-if="!batchMode" class="wechat-manager-head-actions">
-        <el-button type="primary" disabled title="受上游接口限制，公众号导入暂不可用；已有公众号合集仍可使用。">
+        <el-button type="primary" title="导入公众号文章或公开合集，不依赖公众号后台授权" @click="publicDiscoveryOpen = true">
           <el-icon><Plus /></el-icon>
-          公开导入
+          导入文章或合集
         </el-button>
         <el-button
           :disabled="!subscriptions.length || bulkSyncActive || !collectableAccounts.length"
@@ -184,7 +184,7 @@
       <CollectionState
         v-else-if="!filteredSubscriptions.length"
         :title="subscriptions.length ? '没有符合条件的公众号' : '还没有公众号订阅'"
-        :description="subscriptions.length ? '调整搜索或筛选条件后再试。' : '新增公众号订阅暂不可用；已有公众号合集、分组和 RSS 仍可继续使用。'"
+        :description="subscriptions.length ? '调整搜索或筛选条件后再试。' : '可使用上方“导入文章或合集”采集公开合集；新增授权订阅暂不可用。'"
       />
 
       <div v-else class="wechat-manager-list-main">

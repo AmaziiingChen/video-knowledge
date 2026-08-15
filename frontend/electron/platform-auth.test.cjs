@@ -28,6 +28,59 @@ test('平台登录窗口只在后台确认会话有效后才视为完成', () =>
   assert.equal(isVerifiedPlatformSession({ configured: true, state: 'valid' }), true)
 })
 
+test('小红书 Cookie 已保存但在线探测待确认时关闭登录窗口', async () => {
+  const cookies = new EventEmitter()
+  cookies.get = async () => [
+    { domain: '.xiaohongshu.com', name: 'web_session', value: 'signed-in' },
+  ]
+  const platformSession = {
+    cookies,
+    setPermissionRequestHandler() {},
+    async clearStorageData() {},
+  }
+  const session = { fromPartition: () => platformSession }
+
+  class FakeBrowserWindow extends EventEmitter {
+    static instances = []
+    constructor() {
+      super()
+      this.destroyed = false
+      this.webContents = new EventEmitter()
+      this.webContents.setWindowOpenHandler = () => {}
+      FakeBrowserWindow.instances.push(this)
+    }
+    isDestroyed() { return this.destroyed }
+    loadURL() { return Promise.resolve() }
+    show() {}
+    focus() {}
+    close() {
+      this.destroyed = true
+      this.emit('closed')
+    }
+  }
+
+  const request = async (_baseUrl, _path, options = {}) => (
+    options.method === 'POST'
+      ? { success: true }
+      : { configured: true, state: 'unknown', detail: '平台验证超时' }
+  )
+  const controller = createPlatformAuthController({
+    BrowserWindow: FakeBrowserWindow,
+    session,
+    backendUrl: 'http://127.0.0.1:8000',
+    request,
+    scheduleClose: (callback) => callback(),
+  })
+
+  const connection = controller.connect('xiaohongshu')
+  FakeBrowserWindow.instances[0].webContents.emit('did-finish-load')
+  const result = await connection
+
+  assert.equal(FakeBrowserWindow.instances[0].isDestroyed(), true)
+  assert.equal(result.configured, true)
+  assert.equal(result.state, 'unknown')
+})
+
 test('平台登录后端的 GET、POST 和 DELETE 请求都携带桌面实例令牌', async () => {
   const requests = []
   const requestImpl = (target, options, onResponse) => {

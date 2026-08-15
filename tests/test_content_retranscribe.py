@@ -140,7 +140,7 @@ def test_redownload_expired_video_keeps_existing_text_pipeline(monkeypatch, tmp_
     assert request.source_url == source_url
 
 
-def test_redownload_bilibili_video_uses_subtitle_first_pipeline(monkeypatch, tmp_path):
+def test_redownload_bilibili_video_does_not_rerun_transcript_or_summary(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
     source_url = "https://www.bilibili.com/video/BV1subtitlefirst"
     initialize_database()
@@ -168,8 +168,8 @@ def test_redownload_bilibili_video_uses_subtitle_first_pipeline(monkeypatch, tmp
     assert response.status_code == 200
     assert len(captured) == 1
     request = captured[0]
-    assert request.processing_mode == "full"
-    assert request.download_video_preview is True
+    assert request.processing_mode == "download_only"
+    assert request.download_video_preview is False
     assert request.subtitle_only is False
     assert request.source_url == source_url
 

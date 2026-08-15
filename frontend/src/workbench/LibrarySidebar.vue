@@ -199,18 +199,12 @@
             :style="selectionBoxStyle"
           ></div>
           <div
-            v-if="['loading', 'partial'].includes(libraryContentLoadStatus.state) && !searchActive"
+            v-if="libraryContentLoadStatus.state === 'loading' && !searchActive"
             class="sidebar-library-loading"
-            :class="{ 'is-partial': libraryContentLoadStatus.state === 'partial' }"
             role="status"
             aria-live="polite"
           >
             <span>{{ libraryContentLoadLabel }}</span>
-            <button
-              v-if="libraryContentLoadStatus.state === 'partial'"
-              type="button"
-              @click="$emit('retry-content-pages')"
-            >重试</button>
           </div>
         </div>
 
@@ -379,11 +373,6 @@ const libraryContentLoadLabel = computed(() => {
   const total = Math.max(loaded, Number(props.libraryContentLoadStatus?.total || 0))
   const loadedLabel = loaded.toLocaleString('zh-CN')
   const totalLabel = total.toLocaleString('zh-CN')
-  if (props.libraryContentLoadStatus?.state === 'partial') {
-    return total > loaded
-      ? `已载入 ${loadedLabel} / ${totalLabel} · 其余暂未载入`
-      : '部分资料暂未载入'
-  }
   return total > loaded
     ? `正在整理资料 · 已载入 ${loadedLabel} / ${totalLabel}`
     : `正在整理资料 · 已载入 ${loadedLabel}`
@@ -959,25 +948,6 @@ function handleContextMenuSelect({ id, payload } = {}) {
   display: flex;
   align-items: center;
   gap: var(--vk-space-control);
-}
-
-.sidebar-library-loading.is-partial {
-  color: var(--vk-warning);
-  pointer-events: auto;
-}
-
-.sidebar-library-loading button {
-  appearance: none;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--vk-accent);
-  font: inherit;
-  cursor: pointer;
-}
-
-.sidebar-library-loading button:hover {
-  text-decoration: underline;
 }
 
 .sidebar-tree-shell {

@@ -35,6 +35,13 @@ def run_mcp_stdio() -> None:
     run_stdio()
 
 
+def run_mlx_import_smoke() -> None:
+    """Import the exact native ASR entry used by frozen transcription workers."""
+    import mlx_whisper  # noqa: F401
+
+    print("mlx-whisper-import-ok", flush=True)
+
+
 def main(arguments: list[str] | None = None) -> None:
     # PyInstaller re-executes this executable for ``spawn`` workers.  Without
     # this call an MLX transcription worker starts Uvicorn again, collides with
@@ -44,6 +51,9 @@ def main(arguments: list[str] | None = None) -> None:
     selected = list(sys.argv[1:] if arguments is None else arguments)
     if selected == ["--mcp-stdio"]:
         run_mcp_stdio()
+        return
+    if selected == ["--smoke-mlx-import"]:
+        run_mlx_import_smoke()
         return
     if selected:
         raise SystemExit(f"KnowledgeHub 桌面后端不支持参数：{' '.join(selected)}")

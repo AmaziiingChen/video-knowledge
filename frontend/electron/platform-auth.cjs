@@ -28,6 +28,7 @@ const PLATFORM_CONFIG = {
     apiPath: '/api/xiaohongshu-cookie',
     statusPath: '/api/xiaohongshu-cookie',
     requestTimeoutMs: 35000,
+    completeAfterPersist: true,
     allowedHost: (host) => host === 'xiaohongshu.com' || host.endsWith('.xiaohongshu.com') || host === 'xhslink.com' || host.endsWith('.xhslink.com') || host === 'xhslink.cn' || host.endsWith('.xhslink.cn'),
     // `web_session` is required before the clean-room browser probe runs;
     // anonymous device cookies alone are insufficient.
@@ -125,7 +126,11 @@ function createPlatformAuthController({
         timeoutMs: config.requestTimeoutMs,
       })
     }
-    return { fingerprint, status: await status(platform, { refresh: true }) }
+    return {
+      fingerprint,
+      persisted: true,
+      status: await status(platform, { refresh: true }),
+    }
   }
 
   function openLoginWindow(platform, parentWindow) {
@@ -167,10 +172,17 @@ function createPlatformAuthController({
       persistAttempt = (async () => {
         const saved = await persistSession(platform, lastPersistedFingerprint).catch(() => null)
         if (saved?.fingerprint) lastPersistedFingerprint = saved.fingerprint
-        // Xiaohongshu can issue a `web_session` cookie to an anonymous visitor.
-        // Keep the login window open until the backend has verified the actual
-        // session rather than treating the cookie name alone as completion.
-        if (!isVerifiedPlatformSession(saved?.status)) return false
+        // Xiaohongshu's clean-room verification can time out even after the
+        // authenticated cookie was durably stored.  Do not keep a successful
+        // QR-login window open forever in that case.  A definite invalid state
+        // still blocks completion; B站 and抖音 continue to require verification.
+        const persistedXiaohongshuSession = Boolean(
+          config.completeAfterPersist
+          && saved?.persisted
+          && saved?.status?.configured
+          && saved?.status?.state !== 'invalid'
+        )
+        if (!isVerifiedPlatformSession(saved?.status) && !persistedXiaohongshuSession) return false
         completing = true
         scheduleClose(() => {
           if (!loginWindow.isDestroyed()) loginWindow.close()
@@ -211,7 +223,10 @@ function createPlatformAuthController({
   async function connect(platform, parentWindow) {
     const window = openLoginWindow(platform, parentWindow)
     return new Promise((resolve) => {
-      window.once('closed', async () => resolve(await status(platform, { refresh: true })))
+      // The cookie-change path already persisted and (when possible) probed
+      // the session.  Closing the window must not start another 35-second XHS
+      // probe before the renderer can update its credential state.
+      window.once('closed', async () => resolve(await status(platform)))
     })
   }
 

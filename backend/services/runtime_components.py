@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 import os
 import platform
 import shutil
@@ -13,7 +14,7 @@ import time
 from typing import Any
 
 from config import settings
-from services.network_policy import direct_network_environment
+from services.network_policy import direct_network_environment, direct_requests_session
 
 # Hugging Face Xet transfers can remain stuck behind local HTTP proxies after
 # reporting nearly all bytes as received.  The model files are small enough for
@@ -39,6 +40,8 @@ HUGGING_FACE_HUB_ENDPOINT = str(
     getattr(settings, "hugging_face_hub_endpoint", "https://hf-mirror.com")
 ).rstrip("/")
 HUGGING_FACE_HUB_FALLBACK_ENDPOINT = "https://huggingface.co"
+MODELSCOPE_ENDPOINT = "https://modelscope.cn"
+MODELSCOPE_REVISION = "master"
 FASTER_WHISPER_REPOS = {
     model_name: f"Systran/faster-whisper-{model_name}"
     for model_name in MODEL_ESTIMATED_BYTES
@@ -245,6 +248,12 @@ def _model_repo(model_name: str, backend: str) -> str:
 
 
 def _faster_model_available(model_name: str) -> bool:
+    direct_directory = model_storage_path(model_name, "faster_whisper")
+    if (
+        (direct_directory / "config.json").is_file()
+        and (direct_directory / "model.bin").is_file()
+    ):
+        return True
     try:
         from huggingface_hub import snapshot_download
         snapshot_download(
@@ -307,6 +316,7 @@ def model_status(model_name: str, backend: str) -> dict[str, Any]:
         "installed_bytes": _directory_size(model_storage_path(model_name, backend)),
         "bundled": bundled,
         "preferred": backend == preferred_asr_backend(),
+        "download_source": job.get("source", ""),
         "job": job,
     }
 
@@ -401,6 +411,136 @@ def _hub_endpoints() -> tuple[str, ...]:
     return tuple(dict.fromkeys(endpoint.rstrip("/") for endpoint in endpoints if endpoint))
 
 
+def _safe_modelscope_files(payload: object) -> list[dict[str, Any]]:
+    """Validate the fixed ModelScope repository manifest before writing files."""
+
+    data = payload.get("Data") if isinstance(payload, dict) else None
+    files = data.get("Files") if isinstance(data, dict) else None
+    if not isinstance(files, list):
+        raise RuntimeError("ModelScope 未返回可识别的模型文件清单")
+    result: list[dict[str, Any]] = []
+    for item in files:
+        if not isinstance(item, dict) or item.get("Type") != "blob":
+            continue
+        raw_path = str(item.get("Path") or "").strip().replace("\\", "/")
+        relative = Path(raw_path)
+        if not raw_path or relative.is_absolute() or ".." in relative.parts:
+            raise RuntimeError("ModelScope 返回了不安全的模型文件路径")
+        try:
+            size = max(0, int(item.get("Size") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        result.append({"path": raw_path, "size": size})
+    if not result:
+        raise RuntimeError("ModelScope 模型仓库为空")
+    return result
+
+
+def _download_model_from_modelscope(
+    repository: str,
+    model_name: str,
+    backend: str,
+    job_key: str,
+) -> None:
+    """Download one public model directly from ModelScope with safe resumption.
+
+    This transport explicitly ignores shell and system proxy settings.  It is
+    the mainland-China primary path and writes to the same deterministic local
+    model directory used by inference.
+    """
+
+    target_root = model_storage_path(model_name, backend)
+    target_root.mkdir(parents=True, exist_ok=True)
+    encoded_repository = "/".join(quote(part, safe="") for part in repository.split("/"))
+    manifest_url = f"{MODELSCOPE_ENDPOINT}/api/v1/models/{encoded_repository}/repo/files"
+    session = direct_requests_session()
+    try:
+        _set_job(
+            job_key,
+            detail="正在连接 ModelScope 国内源…",
+            source="modelscope",
+            downloaded_bytes=_directory_size(target_root),
+            total_bytes=0,
+            updated_at=time.time(),
+        )
+        manifest_response = session.get(
+            manifest_url,
+            params={"Revision": MODELSCOPE_REVISION, "Recursive": "true"},
+            timeout=(10, 30),
+        )
+        manifest_response.raise_for_status()
+        files = _safe_modelscope_files(manifest_response.json())
+        total_bytes = sum(int(item["size"]) for item in files)
+        completed_bytes = sum(
+            min(int(item["size"]), (target_root / item["path"]).stat().st_size)
+            for item in files
+            if (target_root / item["path"]).is_file()
+        )
+        _set_job(
+            job_key,
+            detail="正在从 ModelScope 国内源下载…",
+            downloaded_bytes=completed_bytes,
+            total_bytes=total_bytes,
+            updated_at=time.time(),
+        )
+        for item in files:
+            relative_path = str(item["path"])
+            expected_size = int(item["size"])
+            destination = target_root / relative_path
+            if destination.is_file() and expected_size and destination.stat().st_size == expected_size:
+                continue
+            partial = destination.with_name(f"{destination.name}.part")
+            partial.parent.mkdir(parents=True, exist_ok=True)
+            existing = partial.stat().st_size if partial.is_file() else 0
+            if expected_size and existing == expected_size:
+                partial.replace(destination)
+                completed_bytes += expected_size
+                _set_job(
+                    job_key,
+                    downloaded_bytes=min(total_bytes, completed_bytes),
+                    total_bytes=total_bytes,
+                    updated_at=time.time(),
+                )
+                continue
+            headers = {"Range": f"bytes={existing}-"} if existing else {}
+            download_url = f"{MODELSCOPE_ENDPOINT}/api/v1/models/{encoded_repository}/repo"
+            with session.get(
+                download_url,
+                params={"Revision": MODELSCOPE_REVISION, "FilePath": relative_path},
+                headers=headers,
+                stream=True,
+                timeout=(10, 30),
+            ) as response:
+                response.raise_for_status()
+                append = response.status_code == 206 and existing > 0
+                mode = "ab" if append else "wb"
+                written = existing if append else 0
+                with partial.open(mode) as output:
+                    for chunk in response.iter_content(chunk_size=1024 * 512):
+                        if not chunk:
+                            continue
+                        output.write(chunk)
+                        written += len(chunk)
+                        _set_job(
+                            job_key,
+                            downloaded_bytes=min(total_bytes, completed_bytes + written),
+                            total_bytes=total_bytes,
+                            updated_at=time.time(),
+                        )
+            if expected_size and partial.stat().st_size != expected_size:
+                raise RuntimeError(f"{relative_path} 下载不完整")
+            partial.replace(destination)
+            completed_bytes += destination.stat().st_size
+            _set_job(
+                job_key,
+                downloaded_bytes=min(total_bytes, completed_bytes),
+                total_bytes=total_bytes,
+                updated_at=time.time(),
+            )
+    finally:
+        session.close()
+
+
 def _install_bundled_mlx_model(model_name: str, job_key: str) -> bool:
     """Copy a bundled model into the user-owned runtime cache, resumably."""
 
@@ -426,14 +566,33 @@ def _install_bundled_mlx_model(model_name: str, job_key: str) -> bool:
     return _mlx_model_available(model_name)
 
 
-def _download_model_from_hub(repository: str, model_name: str, backend: str, progress_class: type[_DownloadProgress]) -> None:
-    """Fetch a model with a mirror fallback without changing other network paths."""
+def _download_model_from_hub(
+    repository: str,
+    model_name: str,
+    backend: str,
+    progress_class: type[_DownloadProgress],
+    job_key: str,
+) -> None:
+    """Fetch a model from China first, then retain compatible public fallbacks."""
 
     from huggingface_hub import snapshot_download
 
     failures: list[str] = []
+    try:
+        _download_model_from_modelscope(repository, model_name, backend, job_key)
+        return
+    except Exception as exc:
+        failures.append(f"{MODELSCOPE_ENDPOINT}: {exc}")
     for endpoint in _hub_endpoints():
         try:
+            _set_job(
+                job_key,
+                detail=f"ModelScope 不可用，正在尝试 {endpoint.replace('https://', '')}…",
+                source="huggingface",
+                downloaded_bytes=0,
+                total_bytes=0,
+                updated_at=time.time(),
+            )
             if backend == "mlx":
                 snapshot_download(
                     repository,
@@ -477,7 +636,7 @@ def download_model(model_name: str, backend: str) -> dict[str, Any]:
             if backend == "mlx" and _install_bundled_mlx_model(model_name, key):
                 _set_job(key, state="ready", detail="已安装应用附带的语音模型", updated_at=time.time())
                 return
-            _download_model_from_hub(repository, model_name, backend, progress_class)
+            _download_model_from_hub(repository, model_name, backend, progress_class, key)
             _set_job(key, state="ready", detail="模型已准备完成", updated_at=time.time())
         except Exception as exc:
             _set_job(key, state="failed", detail=f"模型下载失败：{exc}", updated_at=time.time())

@@ -395,6 +395,20 @@ class ClipboardWatcherTests(unittest.TestCase):
             ],
         )
 
+    def test_clipboard_keeps_mobile_video_queries_and_share_codes(self):
+        links = extract_supported_links(
+            "B站 https://m.bilibili.com/video/BV1xx411c7mD?share_source=copy_web&vd_source=abc，"
+            "抖音 https://v.douyin.com/iR4_ab-c/?region=CN。"
+        )
+
+        self.assertEqual(
+            links,
+            [
+                "https://m.bilibili.com/video/BV1xx411c7mD?share_source=copy_web&vd_source=abc",
+                "https://v.douyin.com/iR4_ab-c/?region=CN",
+            ],
+        )
+
     def test_clipboard_watcher_scan_text_creates_tasks_once(self):
         created_requests = []
 
@@ -417,6 +431,24 @@ class ClipboardWatcherTests(unittest.TestCase):
         self.assertEqual(created_requests[0].whisper_model, "base")
         self.assertFalse(created_requests[0].use_cache)
         self.assertEqual(created_requests[1].share_text, "https://b23.tv/abc123")
+
+    def test_clipboard_task_creation_failure_does_not_break_later_links(self):
+        attempts = []
+
+        def create_task(request):
+            attempts.append(request.share_text)
+            if len(attempts) == 1:
+                raise RuntimeError("queue temporarily unavailable")
+            return SimpleNamespace(task_id="task-recovered")
+
+        watcher = ClipboardWatcher(task_creator=create_task, clipboard_reader=lambda: "")
+
+        self.assertEqual(watcher.scan_text("https://b23.tv/first"), [])
+        recovered = watcher.scan_text("https://v.douyin.com/second/")
+
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0].task_id, "task-recovered")
+        self.assertIsNone(watcher.status()["last_error"])
 
     def test_clipboard_watcher_defaults_to_manual_processing(self):
         created_requests = []
@@ -575,6 +607,22 @@ class ClipboardWatcherApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("不支持", response.json()["detail"])
+
+    def test_native_clipboard_scan_uses_the_running_watcher(self):
+        client = TestClient(app)
+        with patch("routers.clipboard.clipboard_watcher.status", return_value={"running": True}), patch(
+            "routers.clipboard.clipboard_watcher.scan_text"
+        ) as scan_text, patch(
+            "routers.clipboard._status_response",
+            return_value={"running": True},
+        ):
+            response = client.post(
+                "/api/clipboard-watcher/scan",
+                json={"text": "抖音 https://v.douyin.com/TezMfui44Lo/"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        scan_text.assert_called_once_with("抖音 https://v.douyin.com/TezMfui44Lo/")
 
 
 class OpenClawGatewayApiTests(unittest.TestCase):
