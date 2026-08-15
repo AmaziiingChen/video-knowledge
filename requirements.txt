@@ -3,7 +3,7 @@ uvicorn==0.51.0
 pydantic-settings==2.14.2
 httpx==0.28.1
 requests==2.33.1
-curl-cffi>=0.7.0
+curl-cffi>=0.16.0
 faster-whisper==1.2.1
 # MLX only runs on Apple Silicon; it is the preferred local runtime there.
 mlx-whisper==0.4.3; sys_platform == "darwin" and platform_machine == "arm64"
