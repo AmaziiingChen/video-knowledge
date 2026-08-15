@@ -7,6 +7,12 @@ that tag was continuous and was not distributed as versioned releases.
 
 - Architecture hardening under a product feature freeze.
 
+## v0.1.14
+
+- Make the local folder watcher wait for its configured polling interval before
+  the first background scan, avoiding a startup race with explicit scans and
+  preventing a final scan after the watcher has been stopped.
+
 ## v0.1.13
 
 - Prefer a direct ModelScope download path for Apple Silicon speech models,

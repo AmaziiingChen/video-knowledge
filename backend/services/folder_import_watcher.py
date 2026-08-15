@@ -144,10 +144,11 @@ class FolderImportWatcher:
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
-            self.scan_once()
             with self._lock:
                 interval = self._poll_interval
-            self._stop_event.wait(interval)
+            if self._stop_event.wait(interval):
+                break
+            self.scan_once()
 
 
 folder_import_watcher = FolderImportWatcher()

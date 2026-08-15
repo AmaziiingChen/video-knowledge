@@ -544,6 +544,14 @@ class WatcherPersistenceTests(unittest.TestCase):
             self.assertEqual(events[0].content_item_id, "item-1")
             self.assertFalse(events[0].error)
 
+    def test_folder_import_watcher_waits_before_first_background_scan(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            watcher = FolderImportWatcher()
+            with patch.object(watcher, "scan_once") as scan_once:
+                watcher.start(folder_path=temp_dir, poll_interval=10, skip_existing=True)
+                watcher.stop()
+            scan_once.assert_not_called()
+
     def test_telegram_watcher_restores_cursor_and_persists_completed_updates(self):
         old_data_dir = settings.data_dir
         try:
